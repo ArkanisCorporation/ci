@@ -1,0 +1,39 @@
+name: dotnet-setversion local smoke fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  stamp:
+    name: Stamp sample project
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Create sample project
+        run: |
+          mkdir -p artifacts/action-smoke
+          cat > artifacts/action-smoke/Sample.csproj <<'XML'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0</TargetFramework>
+            </PropertyGroup>
+          </Project>
+          XML
+        shell: bash
+
+      - name: Stamp sample project
+        uses: ./.github/actions/dotnet-setversion
+        with:
+          version: 1.2.3
+          working-directory: artifacts/action-smoke
+          recursive: true
+
+      - name: Verify sample project stamp
+        run: grep -q '<Version>1.2.3</Version>' artifacts/action-smoke/Sample.csproj
+        shell: bash

@@ -12,7 +12,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
 | `wf-release-semantic.yml` | Run semantic-release without `@semantic-release/exec` verification or publishing scripts. |
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |
-| `wf-build-container.yml` | Build and optionally push OCI images through Docker Buildx. |
+| `wf-publish-container.yml` | Publish OCI images through Docker Buildx with optional .NET version stamping. |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |
 | `wf-platform-selftest.yml` | Validate this platform repository. |
 
@@ -84,6 +84,8 @@ jobs:
 Verification runs before release as separate workflow jobs.
 `wf-release-semantic.yml` only decides and publishes release metadata.
 Package publishing, image publishing, and deployment consume release outputs in separate jobs.
+Container publishing passes the bare semantic-release version as `version` and the tagged release ref as `version-tag`.
+For .NET images, set `dotnet-setversion: true` so assemblies are stamped before Docker Buildx runs.
 
 ## Local Validation
 

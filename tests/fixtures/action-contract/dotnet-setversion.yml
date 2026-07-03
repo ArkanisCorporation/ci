@@ -1,0 +1,23 @@
+name: dotnet-setversion action fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  stamp:
+    name: Stamp .NET version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Stamp .NET project version
+        uses: ArkanisCorporation/ci/.github/actions/dotnet-setversion@v1
+        with:
+          version: 1.2.3
+          working-directory: .
+          recursive: true

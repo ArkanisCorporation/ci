@@ -1,0 +1,29 @@
+name: Container publish consumer fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Container publish
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container.yml@v1
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      image: ghcr.io/arkaniscorporation/example-web
+      context: .
+      dockerfile: Dockerfile
+      version: 1.2.3
+      version-tag: v1.2.3
+      version-channel: latest
+      dotnet-setversion: true
+      push: false
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

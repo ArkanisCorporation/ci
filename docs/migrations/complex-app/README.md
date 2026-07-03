@@ -13,6 +13,8 @@ The target is a lane-based pipeline.
 Each language or product lane verifies independently.
 Release metadata only decides version and tag.
 Publish lanes consume release outputs.
+Container publish lanes pass `new-version` as the bare `version` and `new-tag` as `version-tag`.
+For .NET images, container publish lanes set `dotnet-setversion: true` before Docker Buildx.
 Deploy lanes consume package, image, or manifest outputs.
 Signing and scan lanes remain explicit side-effect jobs.
 

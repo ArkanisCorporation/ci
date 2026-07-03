@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-build-container/v1/schema.json",
-  "title": "wf-build-container inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-publish-container/v1/schema.json",
+  "title": "wf-publish-container inputs",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -31,6 +31,11 @@
       "type": "string",
       "default": "linux/amd64"
     },
+    "version": {
+      "type": "string",
+      "default": "",
+      "description": "Bare semantic version without leading v."
+    },
     "version-tag": {
       "type": "string",
       "default": ""
@@ -54,6 +59,38 @@
     "buildkit-endpoint": {
       "type": "string",
       "default": ""
+    },
+    "build-args": {
+      "type": "string",
+      "default": ""
+    },
+    "dotnet-setversion": {
+      "type": "boolean",
+      "default": false
+    },
+    "dotnet-version": {
+      "type": "string",
+      "default": "10.0.x"
+    },
+    "dotnet-global-json-file": {
+      "type": "string",
+      "default": ""
+    },
+    "dotnet-setversion-working-directory": {
+      "type": "string",
+      "default": "."
+    },
+    "dotnet-setversion-recursive": {
+      "type": "boolean",
+      "default": true
+    },
+    "dotnet-setversion-project": {
+      "type": "string",
+      "default": ""
+    },
+    "dotnet-setversion-tool-version": {
+      "type": "string",
+      "default": "4.0.0"
     },
     "cache-from": {
       "type": "string",

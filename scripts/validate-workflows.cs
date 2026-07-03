@@ -27,6 +27,7 @@ var failures = new List<string>();
 ValidateWorkflowInputSchemas();
 ValidateWorkflows();
 ValidateCompositeActions();
+ValidateContainerPublishContract();
 await RunActionlintWhenAvailableAsync();
 
 if (failures.Count > 0)
@@ -168,6 +169,69 @@ void ValidateCompositeActions()
 
         ValidateUsesReferences(file, lines);
         ValidateCacheOptOutContract(file, text, lines, isWorkflow: false);
+    }
+}
+
+void ValidateContainerPublishContract()
+{
+    var oldWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-build-container.yml");
+    if (File.Exists(oldWorkflowPath))
+    {
+        AddFailure($"{oldWorkflowPath}: container workflow has been renamed to wf-publish-container.yml.");
+    }
+
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-container.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-publish-container.schema.json");
+    var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-setversion", "action.yml");
+
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: publish container workflow is required.");
+    }
+    else
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        var workflowLines = File.ReadAllLines(workflowPath);
+        if (GetYamlBlock(workflowLines, "dotnet-setversion") is null)
+        {
+            AddFailure($"{workflowPath}: publish container workflow must expose dotnet-setversion input.");
+        }
+
+        if (GetYamlBlock(workflowLines, "version") is null)
+        {
+            AddFailure($"{workflowPath}: publish container workflow must expose bare version input.");
+        }
+
+        if (GetYamlBlock(workflowLines, "build-args") is null)
+        {
+            AddFailure($"{workflowPath}: publish container workflow must expose Docker build-args input.");
+        }
+
+        if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: publish container workflow must use the dotnet-setversion action when enabled.");
+        }
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: publish container workflow schema is required.");
+    }
+
+    if (!File.Exists(actionPath))
+    {
+        AddFailure($"{actionPath}: dotnet-setversion composite action is required.");
+    }
+    else
+    {
+        var actionLines = File.ReadAllLines(actionPath);
+        foreach (var requiredInput in new[] { "version", "working-directory", "recursive", "tool-version" })
+        {
+            if (GetYamlBlock(actionLines, requiredInput) is null)
+            {
+                AddFailure($"{actionPath}: dotnet-setversion action must expose {requiredInput} input.");
+            }
+        }
     }
 }
 

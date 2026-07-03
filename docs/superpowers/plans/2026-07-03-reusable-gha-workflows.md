@@ -43,13 +43,13 @@ Consumer repositories keep small wrapper workflows that call the platform workfl
 - Create: `.github/workflows/wf-setup-dotnet.yml`
 - Create: `.github/workflows/wf-release-semantic.yml`
 - Create: `.github/workflows/wf-publish-nuget.yml`
-- Create: `.github/workflows/wf-build-container.yml`
+- Create: `.github/workflows/wf-publish-container.yml`
 - Create: `.github/workflows/wf-deploy-k8s-aspire.yml`
 
 - [ ] Implement .NET restore/build/test/coverage workflow under the requested `wf-setup-*` naming.
 - [ ] Implement semantic-release workflow without the `@semantic-release/exec` plugin and with a guard that fails when exec plugin usage is detected unless explicitly allowed.
 - [ ] Implement NuGet publish as a step-driven package push workflow with Trusted Publishing support and API-key fallback.
-- [ ] Implement Docker Buildx build/push workflow with digest and metadata outputs.
+- [ ] Implement Docker Buildx publish workflow with digest and metadata outputs.
 - [ ] Implement Aspire Kubernetes deploy workflow with namespace validation and explicit runner/tool preconditions.
 
 ### Task 4: Docs, Schemas, AGENTS Compression

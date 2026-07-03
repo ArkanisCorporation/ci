@@ -20,7 +20,9 @@ Extract common verification, release metadata, package publishing, image publish
 
 - Use `wf-setup-dotnet.yml` and `wf-setup-node.yml` for verification lanes.
 - Use `wf-release-semantic.yml` only for release metadata.
-- Use `wf-publish-nuget.yml` and `wf-build-container.yml` for publish lanes.
+- Use `wf-publish-nuget.yml` and `wf-publish-container.yml` for publish lanes.
+- Use bare `new-version` for package and assembly stamping.
+- Use tagged `new-tag` only for image or deployment tags.
 - Use `wf-deploy-k8s-aspire.yml` for Aspire Kubernetes deploys where applicable.
 - Keep signing, VirusTotal, Coolify, compose, and custom app deployment as separate jobs with explicit environments.
 

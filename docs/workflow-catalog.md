@@ -10,7 +10,7 @@ Audience: consumers and platform maintainers.
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | install/lint/test/build logs, metadata, manifest |
 | `wf-release-semantic.yml` | Run semantic-release metadata without `@semantic-release/exec`. | publish | `contents: write`, `issues: write`, `pull-requests: write` | release diagnostics |
 | `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish | `contents: read`, `id-token: write` | `.nupkg`, `.snupkg`, manifest |
-| `wf-build-container.yml` | Build and optionally push one OCI image. | trusted-build or publish | `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | digest, Buildx metadata, manifest |
+| `wf-publish-container.yml` | Publish one OCI image with optional .NET version stamping. | trusted-build or publish | `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | digest, Buildx metadata, manifest |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy | `contents: read`, `packages: read` | deploy output, manifest |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build | `contents: read` | validation logs |
 
@@ -101,21 +101,58 @@ Side effects:
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Publishes packages unless `dry-run` is true.
 
-## Container Build Workflow
+## Container Publish Workflow
 
-`wf-build-container.yml` uses Docker Buildx.
+`wf-publish-container.yml` uses Docker Buildx.
 It supports GitHub-hosted Docker, self-hosted Docker, and remote BuildKit endpoints.
+It can run the `dotnet-setversion` composite action before Docker Buildx for .NET container images.
+It appends a non-secret `VERSION=<version>` Docker build argument when `version` is set and `build-args` does not already define `VERSION`.
+`version` is always the bare semantic version, such as `1.2.3`.
+`version-tag` is only for image tags and may use the release tag form, such as `v1.2.3`.
 
 Preconditions:
 
 - The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
 - Registry credentials are available when `push` is true.
+- `version` is a bare SemVer value without a leading `v` when set.
+- `dotnet-setversion` requires .NET project files under `dotnet-setversion-working-directory`.
+- `dotnet-setversion` requires Bash, network access to restore actions/tool packages, and `github.workflow_ref` / `github.workflow_sha` support from reusable workflows.
 
 Side effects:
 
-- Builds container layers.
+- Builds container layers before pushing them when `push` is true.
 - Pushes registry tags when `push` is true.
+- Checks out this CI platform repository under `.ci/arkanis-ci` when `dotnet-setversion` is true, then removes that checkout before Docker Buildx runs.
+- Modifies matched `.csproj` files before Docker Buildx when `dotnet-setversion` is true.
+- Passes Docker build args to BuildKit; never put secrets in `build-args`.
 - Emits a digest output for downstream deploys.
+
+Example:
+
+```yaml
+jobs:
+  publish_web:
+    name: Publish web image
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container.yml@v1
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      image: ghcr.io/arkaniscorporation/example-web
+      context: .
+      dockerfile: src/Web/Dockerfile
+      version: ${{ needs.release.outputs.new-version }}
+      version-tag: ${{ needs.release.outputs.new-tag }}
+      version-channel: ${{ needs.release.outputs.new-channel }}
+      dotnet-setversion: true
+      push: true
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
 
 ## Aspire Kubernetes Deploy Workflow
 

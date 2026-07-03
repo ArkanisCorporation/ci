@@ -1,0 +1,168 @@
+# Summary:
+#   Installs dotnet-setversion and stamps .NET project version metadata.
+# Remarks:
+#   This action expects Bash and a writable RUNNER_TEMP directory.
+#   It installs dotnet-setversion into RUNNER_TEMP with dotnet tool install --tool-path.
+#   It modifies csproj files under working-directory or the explicit project path.
+#   The version input must be a bare semantic version without a leading v.
+#   Do not pass secrets as version values.
+
+name: Set .NET version
+description: Installs dotnet-setversion and applies a bare semantic version to .NET project files.
+
+inputs:
+  version:
+    description: Bare semantic version to apply. Use 1.2.3, not v1.2.3.
+    required: true
+  working-directory:
+    description: Directory where setversion runs. Relative paths resolve from GITHUB_WORKSPACE.
+    required: false
+    default: .
+  dotnet-version:
+    description: .NET SDK version used to install and run dotnet-setversion.
+    required: false
+    default: 10.0.x
+  global-json-file:
+    description: Optional global.json path passed to actions/setup-dotnet.
+    required: false
+    default: ""
+  recursive:
+    description: Recursively stamps csproj files under working-directory when true.
+    required: false
+    default: "true"
+  project:
+    description: Optional project path passed to setversion when recursive is false.
+    required: false
+    default: ""
+  tool-version:
+    description: dotnet-setversion package version installed from NuGet.
+    required: false
+    default: 4.0.0
+
+outputs:
+  version:
+    description: Version applied to project files.
+    value: ${{ steps.apply.outputs.version }}
+  working-directory:
+    description: Absolute directory where setversion ran.
+    value: ${{ steps.apply.outputs.working-directory }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate dotnet-setversion inputs
+      run: |
+        if [[ -z "$VERSION" ]]; then
+          echo "version is required." >&2
+          exit 2
+        fi
+
+        if [[ "$VERSION" =~ ^[vV] ]]; then
+          echo "version must be a bare semantic version without leading v." >&2
+          exit 2
+        fi
+
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+          echo "version must be SemVer 2.0.0 compatible, for example 1.2.3 or 1.2.3-beta.1." >&2
+          exit 2
+        fi
+
+        case "$RECURSIVE" in
+          true|false)
+            ;;
+          *)
+            echo "recursive must be true or false." >&2
+            exit 2
+            ;;
+        esac
+
+        if [[ "$RECURSIVE" == "true" && -n "$PROJECT" ]]; then
+          echo "project can only be set when recursive is false." >&2
+          exit 2
+        fi
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        RECURSIVE: ${{ inputs.recursive }}
+        PROJECT: ${{ inputs.project }}
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        global-json-file: ${{ inputs.global-json-file }}
+
+    - name: Install dotnet-setversion
+      id: install
+      run: |
+        tool_path="${RUNNER_TEMP}/arkanis-dotnet-setversion"
+        rm -rf "$tool_path"
+        mkdir -p "$tool_path"
+
+        dotnet tool install dotnet-setversion \
+          --tool-path "$tool_path" \
+          --version "$TOOL_VERSION" \
+          --allow-roll-forward
+
+        tool_executable="${tool_path}/setversion"
+        if [[ ! -x "$tool_executable" && -x "${tool_executable}.exe" ]]; then
+          tool_executable="${tool_executable}.exe"
+        fi
+
+        if [[ ! -x "$tool_executable" ]]; then
+          echo "dotnet-setversion installed but setversion executable was not found in $tool_path." >&2
+          exit 1
+        fi
+
+        echo "tool-path=$tool_path" >> "$GITHUB_OUTPUT"
+        echo "tool-executable=$tool_executable" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        TOOL_VERSION: ${{ inputs.tool-version }}
+
+    - name: Apply .NET version
+      id: apply
+      run: |
+        if [[ "$WORKING_DIRECTORY" = /* || "$WORKING_DIRECTORY" =~ ^[A-Za-z]:[\\/] ]]; then
+          workdir="$WORKING_DIRECTORY"
+        else
+          workdir="${GITHUB_WORKSPACE}/${WORKING_DIRECTORY}"
+        fi
+
+        if [[ ! -d "$workdir" ]]; then
+          echo "working-directory does not exist: $workdir" >&2
+          exit 1
+        fi
+
+        cd "$workdir"
+
+        if [[ "$RECURSIVE" == "true" ]]; then
+          "$SETVERSION" --recursive "$VERSION"
+        elif [[ -n "$PROJECT" ]]; then
+          "$SETVERSION" "$VERSION" "$PROJECT"
+        else
+          "$SETVERSION" "$VERSION"
+        fi
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "working-directory=$workdir" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        SETVERSION: ${{ steps.install.outputs.tool-executable }}
+        VERSION: ${{ inputs.version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        RECURSIVE: ${{ inputs.recursive }}
+        PROJECT: ${{ inputs.project }}
+
+    - name: Report .NET version stamp
+      run: |
+        {
+          echo "Stamped .NET project version: $VERSION"
+          echo "Working directory: $WORKING_DIRECTORY"
+          echo "Recursive: $RECURSIVE"
+        } >> "$GITHUB_STEP_SUMMARY"
+      shell: bash
+      env:
+        VERSION: ${{ steps.apply.outputs.version }}
+        WORKING_DIRECTORY: ${{ steps.apply.outputs.working-directory }}
+        RECURSIVE: ${{ inputs.recursive }}

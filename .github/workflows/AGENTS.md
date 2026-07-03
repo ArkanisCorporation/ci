@@ -48,7 +48,7 @@ Recommended order:
 - `wf-setup-node.yml` verifies Node.js install, lint, tests, build, cache, and diagnostics.
 - `wf-release-semantic.yml` runs semantic-release metadata without `@semantic-release/exec`.
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
-- `wf-build-container.yml` builds and optionally pushes OCI images through Docker Buildx.
+- `wf-publish-container.yml` publishes OCI images through Docker Buildx and can stamp .NET versions before building.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.
 

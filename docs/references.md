@@ -10,9 +10,13 @@ Last verified: 2026-07-03.
 - GitHub contexts reference: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax
+- GitHub composite action tutorial: https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action
 - GitHub secure use reference: https://docs.github.com/en/actions/reference/security/secure-use
 - GitHub artifacts: https://docs.github.com/en/actions/tutorials/store-and-share-data
 - actions/setup-node: https://github.com/actions/setup-node
+- Docker build-push action: https://github.com/docker/build-push-action
+- dotnet tool install: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install
+- dotnet-setversion NuGet package: https://www.nuget.org/packages/dotnet-setversion
 - Node.js Corepack: https://nodejs.org/api/corepack.html
 - GitHub local reusable workflow reference changelog: https://github.blog/changelog/2022-01-25-github-actions-reusable-workflows-can-be-referenced-locally/
 - NuGet Trusted Publishing: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing

@@ -30,7 +30,7 @@ gha-platform/
       wf-setup-monorepo.yml
       wf-pack-dotnet-nuget.yml
       wf-publish-nuget.yml
-      wf-build-container.yml
+      wf-publish-container.yml
       wf-release.yml
       wf-deploy-k8s.yml
       wf-security-scan.yml
@@ -105,7 +105,7 @@ gha-platform/
   schemas/
     workflow-inputs/
       wf-setup-dotnet.schema.json
-      wf-build-container.schema.json
+      wf-publish-container.schema.json
       wf-deploy-k8s-aspire.schema.json
     artifact-manifest.schema.json
     run-metadata.schema.json
@@ -134,7 +134,7 @@ Naming: `wf-*` for public reusable workflows; `.github/actions/*` for private sh
 | `wf-setup-monorepo.yml`       | changed-project matrix             | `paths-config`, `force-all`, `max-parallel`                                                             | `changed-projects.json`, matrix artifact                          | avoid required-check deadlocks from event-level path filters; prefer always-run aggregator. ([Stack Overflow][13])       |
 | `wf-pack-dotnet-nuget.yml` | pack `.nupkg`/`.snupkg`            | `project`, `version`, `configuration`, `include-symbols`                                                | packages, package validation report, attestation                  | deterministic build, SourceLink, no publish.                                                                             |
 | `wf-publish-nuget.yml`     | publish packages                   | `source`, `trusted-publishing`, `skip-duplicate`                                                        | package IDs/versions, NuGet URLs                                  | OIDC Trusted Publishing first; API-key fallback. ([Microsoft for Developers][9])                                         |
-| `wf-build-container.yml`   | OCI image build/push               | `context`, `dockerfile`, `image`, `platforms`, `push`, `cache-mode`, `sbom`, `provenance`               | digest, metadata JSON, SBOM, provenance, build summary            | Docker Buildx, multi-platform, registry/GHA cache, secret mounts. ([GitHub][14])                                         |
+| `wf-publish-container.yml`   | OCI image publish                  | `context`, `dockerfile`, `image`, `platforms`, `version`, `version-tag`, `dotnet-setversion`, `push`, `cache-mode`, `sbom`, `provenance` | digest, metadata JSON, SBOM, provenance, publish summary          | Docker Buildx, multi-platform, optional .NET version stamping, registry/GHA cache, secret mounts. ([GitHub][14])         |
 | `wf-release.yml`           | version/changelog/GitHub Release   | `release-tool`, `package-kind`, `dry-run`                                                               | release notes, tag, release URL                                   | release-please for release PRs; semantic-release for full automation. ([GitHub][15])                                     |
 | `wf-deploy-k8s.yml`        | deploy chart/manifests             | `environment`, `namespace`, `image-digest`, `chart`, `values`, `timeout`                                | rollout report, rendered manifests, deploy URL                    | environment protection, OIDC cloud auth, `helm upgrade --install`, rollout status. ([GitHub Docs][16])                   |
 | `wf-security-scan.yml`     | code/deps/actions/container checks | `scan-codeql`, `scan-deps`, `scan-container`, `licenses`                                                | SARIF, dep review, vuln report                                    | CodeQL + Dependency Review baseline. ([GitHub][17])                                                                      |
@@ -433,8 +433,8 @@ permissions: {}
 
 jobs:
   image:
-    name: Container build
-    uses: org/gha-platform/.github/workflows/wf-build-container.yml@v1
+    name: Container publish
+    uses: org/gha-platform/.github/workflows/wf-publish-container.yml@v1
     permissions:
       contents: read
       packages: write
@@ -445,6 +445,9 @@ jobs:
       context: "."
       dockerfile: "Dockerfile"
       platforms: "linux/amd64,linux/arm64"
+      version: ${{ needs.release.outputs.new-version }}
+      version-tag: ${{ needs.release.outputs.new-tag }}
+      dotnet-setversion: true
       push: true
       sbom: true
       provenance: "mode=max"

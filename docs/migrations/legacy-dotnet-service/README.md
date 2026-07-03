@@ -18,7 +18,10 @@ Deployment consumes an image tag or digest.
 ## Checklist
 
 - Replace old checkout/setup-dotnet majors with `wf-setup-dotnet.yml`.
-- Replace Docker setup, login, and build-push steps with `wf-build-container.yml`.
+- Replace Docker setup, login, and build-push steps with `wf-publish-container.yml`.
+- Pass semantic-release `new-version` to `version`.
+- Pass semantic-release `new-tag` to `version-tag`.
+- Set `dotnet-setversion: true` for .NET container images.
 - Replace semantic-release job with `wf-release-semantic.yml`.
 - Remove `@semantic-release/exec` from release configuration.
 - Move release backpropagation into a separate job.
