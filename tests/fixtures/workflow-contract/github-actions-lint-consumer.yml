@@ -1,0 +1,17 @@
+name: GitHub Actions lint consumer fixture
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  lint:
+    name: GitHub Actions lint
+    uses: ArkanisCorporation/ci/.github/workflows/wf-lint-github-actions.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      enable-cache: true

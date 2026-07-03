@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-lint-github-actions/v1/schema.json",
+  "title": "wf-lint-github-actions inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs-on-json": {
+      "type": "string",
+      "default": "[\"ubuntu-latest\"]"
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 10,
+      "minimum": 1
+    }
+  }
+}
