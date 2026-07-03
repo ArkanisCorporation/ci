@@ -35,8 +35,7 @@ on:
       apphost-project:
         description: Aspire AppHost project path.
         type: string
-        required: false
-        default: src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj
+        required: true
       output-path:
         description: Aspire deploy output path.
         type: string

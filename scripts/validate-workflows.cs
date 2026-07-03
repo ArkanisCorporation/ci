@@ -5,6 +5,7 @@
 #:property RestorePackagesWithLockFile=false
 #:package CliWrap@3.9.0
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
@@ -43,6 +44,7 @@ ValidateReleaseBackpropagationContract();
 ValidateDotNetJetBrainsContract();
 ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
+ValidateAspireAppHostInputContract();
 ValidateRepositoryPipelineContract();
 await ValidateDotNetActionFileScriptsAnalyzerCleanAsync();
 await ValidateGeneratedWorkflowDocsAsync();
@@ -1210,6 +1212,71 @@ void ValidateReleaseBackpropagationContract()
             {
                 AddFailure($"{scriptPath}: release-backpropagation script must contain {requiredToken}.");
             }
+        }
+    }
+}
+
+void ValidateAspireAppHostInputContract()
+{
+    var aspireWorkflows = new[]
+    {
+        "wf-deploy-k8s-aspire.yml",
+        "wf-verify-deploy-k8s-aspire.yml",
+    };
+
+    foreach (var workflowName in aspireWorkflows)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (File.Exists(workflowPath))
+        {
+            var workflowBlock = GetYamlBlock(File.ReadAllLines(workflowPath), "apphost-project");
+            if (workflowBlock is null)
+            {
+                AddFailure($"{workflowPath}: Aspire deployment workflows must expose apphost-project input.");
+            }
+            else
+            {
+                if (!Regex.IsMatch(workflowBlock, @"(?m)^\s*required:\s*true\s*$"))
+                {
+                    AddFailure($"{workflowPath}: apphost-project must be required because there is no usable generic AppHost project default.");
+                }
+
+                if (Regex.IsMatch(workflowBlock, @"(?m)^\s*default:\s*"))
+                {
+                    AddFailure($"{workflowPath}: apphost-project must not define a repository-specific default.");
+                }
+            }
+        }
+
+        var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", Path.ChangeExtension(workflowName, ".schema.json"));
+        if (!File.Exists(schemaPath))
+        {
+            continue;
+        }
+
+        using var schema = JsonDocument.Parse(File.ReadAllText(schemaPath), new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow
+        });
+
+        var root = schema.RootElement;
+        var hasRequiredAppHost = root.TryGetProperty("required", out var requiredElement)
+            && requiredElement.ValueKind == JsonValueKind.Array
+            && requiredElement.EnumerateArray().Any(item =>
+                item.ValueKind == JsonValueKind.String
+                && string.Equals(item.GetString(), "apphost-project", StringComparison.Ordinal));
+
+        if (!hasRequiredAppHost)
+        {
+            AddFailure($"{schemaPath}: apphost-project must be listed as a required workflow input.");
+        }
+
+        if (root.TryGetProperty("properties", out var properties)
+            && properties.TryGetProperty("apphost-project", out var appHostProject)
+            && appHostProject.TryGetProperty("default", out _))
+        {
+            AddFailure($"{schemaPath}: apphost-project must not define a repository-specific default.");
         }
     }
 }

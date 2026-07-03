@@ -90,7 +90,7 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `environment-name` | string | yes | none | n/a |
 | `aspire-environment` | string | yes | none | n/a |
 | `kubernetes-namespace` | string | yes | none | n/a |
-| `apphost-project` | string | no | `"src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj"` | n/a |
+| `apphost-project` | string | yes | none | n/a |
 | `output-path` | string | no | `"artifacts/k8s"` | n/a |
 | `image-tag` | string | no | `""` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
@@ -368,7 +368,7 @@ Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `aspire-environment` | string | yes | none | n/a |
 | `kubernetes-namespace` | string | yes | none | n/a |
-| `apphost-project` | string | no | `"src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj"` | n/a |
+| `apphost-project` | string | yes | none | n/a |
 | `output-path` | string | no | `"artifacts/k8s"` | n/a |
 | `image-tag` | string | no | `""` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
