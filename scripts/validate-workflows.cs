@@ -36,6 +36,7 @@ ValidateStepDisplayNameContract();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
+ValidateNuGetPackSymbolContract();
 ValidateCoverageReportContract();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
@@ -716,6 +717,29 @@ void ValidateNuGetPublishContract()
     if (!File.Exists(schemaPath))
     {
         AddFailure($"{schemaPath}: NuGet publish workflow schema is required.");
+    }
+}
+
+void ValidateNuGetPackSymbolContract()
+{
+    foreach (var workflowName in new[] { "wf-verify-publish-nuget.yml", "wf-publish-nuget.yml" })
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            continue;
+        }
+
+        var workflowText = File.ReadAllText(workflowPath);
+        if (workflowText.Contains("--symbol-package-format", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: dotnet pack must set SymbolPackageFormat with -p:SymbolPackageFormat=snupkg, not unsupported CLI switch --symbol-package-format.");
+        }
+
+        if (!workflowText.Contains("-p:SymbolPackageFormat=snupkg", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: NuGet symbol packages must pass -p:SymbolPackageFormat=snupkg to dotnet pack.");
+        }
     }
 }
 
