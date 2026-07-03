@@ -27,6 +27,14 @@
     "version": {
       "type": "string"
     },
+    "dotnet-version": {
+      "type": "string",
+      "default": "10.0.x"
+    },
+    "global-json-file": {
+      "type": "string",
+      "default": ""
+    },
     "configuration": {
       "type": "string",
       "default": "Release"
@@ -54,6 +62,30 @@
     "include-symbols": {
       "type": "boolean",
       "default": true
+    },
+    "include-source": {
+      "type": "boolean",
+      "default": true
+    },
+    "dotnet-setversion": {
+      "type": "boolean",
+      "default": true
+    },
+    "dotnet-setversion-working-directory": {
+      "type": "string",
+      "default": "."
+    },
+    "dotnet-setversion-recursive": {
+      "type": "boolean",
+      "default": true
+    },
+    "dotnet-setversion-project": {
+      "type": "string",
+      "default": ""
+    },
+    "dotnet-setversion-tool-version": {
+      "type": "string",
+      "default": "4.0.0"
     },
     "dry-run": {
       "type": "boolean",
