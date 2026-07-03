@@ -46,8 +46,8 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Purpose | Permissions |
 |---|---|---|
-| `verify-release.yml` | Run platform selftests and read-only semantic-release verification. | `contents: read` |
-| `release.yml` | Run platform selftests and environment-gated release publication, including mutable major tag updates. | Selftest uses `contents: read`.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
+| `verify-release.yml` | Run platform selftests, fixture dogfood jobs, and read-only semantic-release verification. | `contents: read` |
+| `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: read`.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
 ## Common Inputs
 

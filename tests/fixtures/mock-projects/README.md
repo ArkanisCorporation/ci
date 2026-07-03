@@ -11,6 +11,7 @@ They live under `tests/fixtures` so they can exercise the shared workflows witho
 
 Local workflow callers live in `tests/fixtures/workflow-contract/*-local.yml`.
 They call `./.github/workflows/...` so changes in this repository can be tested before a stable `vN` release.
+The repository `verify-release.yml` and `release.yml` workflows also call these fixtures before semantic-release verification or publication.
 
 Python is intentionally deferred.
 Add a Python fixture after the platform has a public Python reusable workflow contract.

@@ -1037,6 +1037,11 @@ void ValidateJobDisplayNameContract()
         foreach (var expectedNameLine in new[]
                  {
                      "    name: platform @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: typescript-pnpm @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: dotnet-nuget-library @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: repo @ verify",
                      "    name: repo @ publish",
                  })
         {
@@ -1057,6 +1062,10 @@ void ValidateJobDisplayNameContract()
         foreach (var expectedNameLine in new[]
                  {
                      "    name: platform @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: typescript-pnpm @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: dotnet-nuget-library @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
                      "    name: repo @ verify",
                  })
         {
@@ -1289,6 +1298,21 @@ void ValidateRepositoryPipelineContract()
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
     var verifyReleaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "verify-release.yml");
     var releaseConfigPath = Path.Combine(repoRoot, "release.config.cjs");
+    var releasePrerequisiteNeedsBlock =
+        "needs:\n"
+        + "      - selftest\n"
+        + "      - typescript-pnpm\n"
+        + "      - dotnet-library\n"
+        + "      - dotnet-nuget\n"
+        + "      - dotnet-container\n";
+    var repositoryPrerequisiteWorkflowUses = new[]
+    {
+        ("platform selftest", "uses: ./.github/workflows/wf-platform-selftest.yml"),
+        ("TypeScript pnpm fixture", "uses: ./.github/workflows/wf-setup-node.yml"),
+        (".NET library fixture", "uses: ./.github/workflows/wf-setup-dotnet.yml"),
+        ("NuGet publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-nuget.yml"),
+        ("container image publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml"),
+    };
 
     if (File.Exists(buildWorkflowPath))
     {
@@ -1301,23 +1325,35 @@ void ValidateRepositoryPipelineContract()
     }
     else
     {
-        var releaseText = File.ReadAllText(releaseWorkflowPath);
+        var releaseText = NormalizeLineEndings(File.ReadAllText(releaseWorkflowPath));
         if (!Regex.IsMatch(releaseText, @"(?m)^\s*push:\s*$")
             || !releaseText.Contains("branches: [main]", StringComparison.Ordinal))
         {
             AddFailure($"{releaseWorkflowPath}: release workflow must run on push to main.");
         }
 
-        if (Regex.IsMatch(releaseText, @"(?m)^\s*pull_request:\s*$")
-            || GetYamlBlock(File.ReadAllLines(releaseWorkflowPath), "dry-run") is not null
-            || releaseText.Contains("wf-verify-release-semantic.yml", StringComparison.Ordinal))
+        if (!Regex.IsMatch(releaseText, @"(?m)^\s*pull_request:\s*$")
+            || !Regex.IsMatch(releaseText, @"(?m)^\s*workflow_dispatch:\s*$"))
         {
-            AddFailure($"{releaseWorkflowPath}: release workflow must not include verification or dry-run paths; use verify-release.yml.");
+            AddFailure($"{releaseWorkflowPath}: release workflow must run on pull_request and manual dispatch.");
         }
 
-        if (!releaseText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
+        if (GetYamlBlock(File.ReadAllLines(releaseWorkflowPath), "dry-run") is not null)
         {
-            AddFailure($"{releaseWorkflowPath}: release workflow must run platform selftest before release.");
+            AddFailure($"{releaseWorkflowPath}: release workflow must keep PR behavior event-gated instead of adding a dry-run input.");
+        }
+
+        foreach (var (name, requiredUse) in repositoryPrerequisiteWorkflowUses)
+        {
+            if (!releaseText.Contains(requiredUse, StringComparison.Ordinal))
+            {
+                AddFailure($"{releaseWorkflowPath}: release workflow must call the {name} reusable workflow before semantic-release.");
+            }
+        }
+
+        if (!releaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: release workflow must call wf-verify-release-semantic.yml for pull requests.");
         }
 
         if (!releaseText.Contains("uses: ./.github/workflows/wf-release-semantic.yml", StringComparison.Ordinal))
@@ -1325,9 +1361,19 @@ void ValidateRepositoryPipelineContract()
             AddFailure($"{releaseWorkflowPath}: release workflow must call wf-release-semantic.yml.");
         }
 
-        if (!Regex.IsMatch(releaseText, @"(?m)^\s*needs:\s*selftest\s*$"))
+        if (Regex.Matches(releaseText, Regex.Escape(releasePrerequisiteNeedsBlock)).Count < 2)
         {
-            AddFailure($"{releaseWorkflowPath}: semantic release job must depend on selftest.");
+            AddFailure($"{releaseWorkflowPath}: semantic-release verification and publication jobs must depend on all fixture dogfood jobs.");
+        }
+
+        if (!releaseText.Contains("if: github.event_name == 'pull_request'", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: semantic-release verification job must be limited to pull_request events.");
+        }
+
+        if (!releaseText.Contains("if: github.event_name != 'pull_request'", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: semantic-release publication job must not run on pull_request events.");
         }
 
         if (!releaseText.Contains(pinnedMajorTagPlugin, StringComparison.Ordinal))
@@ -1342,7 +1388,7 @@ void ValidateRepositoryPipelineContract()
     }
     else
     {
-        var verifyReleaseText = File.ReadAllText(verifyReleaseWorkflowPath);
+        var verifyReleaseText = NormalizeLineEndings(File.ReadAllText(verifyReleaseWorkflowPath));
         if (!Regex.IsMatch(verifyReleaseText, @"(?m)^\s*pull_request:\s*$")
             || !Regex.IsMatch(verifyReleaseText, @"(?m)^\s*workflow_dispatch:\s*$"))
         {
@@ -1356,14 +1402,17 @@ void ValidateRepositoryPipelineContract()
             AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must use the verification reusable workflow without environments or production release jobs.");
         }
 
-        if (!verifyReleaseText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
+        foreach (var (name, requiredUse) in repositoryPrerequisiteWorkflowUses)
         {
-            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must run platform selftest before semantic-release verification.");
+            if (!verifyReleaseText.Contains(requiredUse, StringComparison.Ordinal))
+            {
+                AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must call the {name} reusable workflow before semantic-release verification.");
+            }
         }
 
-        if (!Regex.IsMatch(verifyReleaseText, @"(?m)^\s*needs:\s*selftest\s*$"))
+        if (!verifyReleaseText.Contains(releasePrerequisiteNeedsBlock, StringComparison.Ordinal))
         {
-            AddFailure($"{verifyReleaseWorkflowPath}: semantic release verification job must depend on selftest.");
+            AddFailure($"{verifyReleaseWorkflowPath}: semantic-release verification job must depend on all fixture dogfood jobs.");
         }
 
         if (!verifyReleaseText.Contains(pinnedMajorTagPlugin, StringComparison.Ordinal))
@@ -1499,6 +1548,9 @@ static string? GetYamlBlock(string[] lines, string key)
 
     return null;
 }
+
+static string NormalizeLineEndings(string text) =>
+    text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal);
 
 void ValidateUsesReferences(string file, string[] lines)
 {

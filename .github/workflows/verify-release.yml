@@ -1,5 +1,5 @@
 # Summary:
-#   Runs this repository's platform selftest and semantic-release verification.
+#   Runs this repository's platform selftest, fixture dogfood checks, and semantic-release verification.
 # Remarks:
 #   This workflow does not publish tags or GitHub releases.
 #   It does not bind GitHub environments or request write permissions.
@@ -23,9 +23,78 @@ jobs:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
 
+  typescript-pnpm:
+    name: typescript-pnpm @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-setup-node.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: tests/fixtures/mock-projects/typescript-pnpm
+      enable-cache: false
+
+  dotnet-library:
+    name: dotnet-nuget-library @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-setup-dotnet.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
+      restore-locked-mode: true
+      enable-cache: false
+      coverage: true
+      coverage-report: true
+      coverage-pr-comment: false
+
+  dotnet-nuget:
+    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-verify-publish-nuget.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      project: tests/fixtures/mock-projects/dotnet-nuget-library/src/Mock.NuGet.Library/Mock.NuGet.Library.csproj
+      version: 1.2.3-ci.1
+      dotnet-version: 10.0.x
+      enable-cache: false
+      dotnet-setversion-working-directory: tests/fixtures/mock-projects/dotnet-nuget-library
+
+  dotnet-container:
+    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      image: local/mock-container-app
+      context: tests/fixtures/mock-projects/dotnet-container-app
+      dockerfile: tests/fixtures/mock-projects/dotnet-container-app/src/Mock.Container.App/Dockerfile
+      version: 1.2.3-ci.1
+      version-tag: v1.2.3-ci.1
+      sdk-version: 10.0.x
+      version-working-directory: tests/fixtures/mock-projects/dotnet-container-app
+      cache-from: ""
+      cache-to: ""
+      labels: |
+        org.opencontainers.image.source=https://github.com/ArkanisCorporation/ci
+
   verify-release:
     name: repo @ verify
-    needs: selftest
+    needs:
+      - selftest
+      - typescript-pnpm
+      - dotnet-library
+      - dotnet-nuget
+      - dotnet-container
     uses: ./.github/workflows/wf-verify-release-semantic.yml
     permissions:
       contents: read
