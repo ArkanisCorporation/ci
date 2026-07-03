@@ -24,6 +24,7 @@ The action installs `dotnet-reportgenerator-globaltool`, generates reports, appe
 Preconditions:
 
 - The runner has Bash and .NET 10 SDK.
+- ReportGenerator is installed without .NET tool roll-forward, so the action tooling runtime must support the selected ReportGenerator tool version.
 - Coverage files exist at the `reports` glob unless `fail-if-no-reports` is false.
 
 Requirements:

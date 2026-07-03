@@ -851,6 +851,11 @@ void ValidateCoverageReportContract()
                 AddFailure($"{scriptPath}: dotnet-coverage-report script must contain {requiredToken}.");
             }
         }
+
+        if (scriptText.Contains("--allow-roll-forward", StringComparison.Ordinal))
+        {
+            AddFailure($"{scriptPath}: dotnet-coverage-report must not install ReportGenerator with --allow-roll-forward because ReportGenerator runtimeconfig already uses legacy roll-forward settings.");
+        }
     }
 }
 

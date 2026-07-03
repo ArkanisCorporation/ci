@@ -124,7 +124,7 @@ static async Task<string?> InstallReportGeneratorAsync(string toolVersion)
 
     var result = await RunCommandAsync(
         "dotnet",
-        ["tool", "install", "dotnet-reportgenerator-globaltool", "--tool-path", toolPath, "--version", toolVersion, "--allow-roll-forward"],
+        ["tool", "install", "dotnet-reportgenerator-globaltool", "--tool-path", toolPath, "--version", toolVersion],
         Directory.GetCurrentDirectory(),
         allowFailure: true);
 
