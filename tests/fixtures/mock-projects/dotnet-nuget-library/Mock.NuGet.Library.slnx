@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Mock.NuGet.Library/Mock.NuGet.Library.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Mock.NuGet.Library.Tests/Mock.NuGet.Library.Tests.csproj" />
+  </Folder>
+</Solution>

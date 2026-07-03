@@ -1082,7 +1082,8 @@ Side effects:
 It publishes packages from environment-gated jobs with NuGet Trusted Publishing by default.
 It can use `NUGET_API_KEY` when `trusted-publishing` is false.
 It runs `dotnet-setversion` before packing by default so package assemblies and package metadata use the same release version.
-It exposes `include-symbols` and `include-source` as independent `dotnet pack` flags.
+It exposes `include-symbols` and `include-source` as independent package options.
+When `include-symbols` is true, workflows pass `--include-symbols` and `-p:SymbolPackageFormat=snupkg` to `dotnet pack`.
 
 Flow:
 

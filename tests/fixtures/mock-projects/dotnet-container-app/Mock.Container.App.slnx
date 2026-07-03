@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Mock.Container.App/Mock.Container.App.csproj" />
+  </Folder>
+</Solution>

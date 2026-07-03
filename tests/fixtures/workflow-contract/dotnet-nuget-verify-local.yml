@@ -1,0 +1,22 @@
+name: .NET NuGet verify local fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  nuget:
+    # Expected: success.
+    name: dotnet-nuget-verify @ local
+    uses: ./.github/workflows/wf-verify-publish-nuget.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      project: tests/fixtures/mock-projects/dotnet-nuget-library/src/Mock.NuGet.Library/Mock.NuGet.Library.csproj
+      version: 1.2.3-ci.1
+      dotnet-version: 10.0.x
+      enable-cache: false
+      dotnet-setversion-working-directory: tests/fixtures/mock-projects/dotnet-nuget-library

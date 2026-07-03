@@ -10,6 +10,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 |---|---|
 | [Platform docs](docs/README.md) | You need workflow contracts, runner rules, artifacts, caching, or security notes. |
 | [Migration guides](docs/migrations/README.md) | You are moving an existing repository onto the shared workflow platform. |
+| [Mock project fixtures](tests/fixtures/mock-projects/README.md) | You need runnable TypeScript or .NET test data for local workflow smoke tests. |
 | [.NET library example](examples/dotnet-library/README.md) | You need a package-style .NET consumer workflow. |
 | [.NET container example](examples/dotnet-webapi-container/README.md) | You need a .NET web API container publish workflow. |
 | [Node pnpm example](examples/node-pnpm/README.md) | You need a Node.js pnpm verification workflow. |
@@ -131,9 +132,11 @@ dotnet run --file scripts/generate-docs.cs -- --check
 dotnet run --file scripts/validate-workflows.cs
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 act workflow_dispatch -W .github/workflows/wf-platform-selftest.yml -j validate -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
+act workflow_dispatch -W tests/fixtures/workflow-contract/typescript-pnpm-local.yml -j node -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
 ```
 
 The validation script requires version tags for external actions.
 It also checks that generated workflow input tables in `docs/workflow-catalog.md` are current.
 The platform selftest pins actionlint 1.7.12 through `raven-actions/actionlint@v2` before running the validator.
 The `act` command runs the platform self-test locally.
+The TypeScript fixture `act` command runs one bounded mock-project smoke test.

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>Arkanis.CI.Mock.NuGet.Library</PackageId>
+    <Title>Arkanis CI Mock NuGet Library</Title>
+    <Description>Small packable fixture used to verify Arkanis CI NuGet workflows.</Description>
+    <Authors>Arkanis</Authors>
+    <RepositoryUrl>https://github.com/ArkanisCorporation/ci</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

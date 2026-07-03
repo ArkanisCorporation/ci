@@ -82,7 +82,7 @@ on:
         required: false
         default: true
       include-symbols:
-        description: Creates a .snupkg with dotnet pack --include-symbols --symbol-package-format snupkg.
+        description: Creates a .snupkg with dotnet pack --include-symbols and SymbolPackageFormat=snupkg.
         type: boolean
         required: false
         default: true
@@ -280,7 +280,7 @@ jobs:
           )
 
           if [[ "$INCLUDE_SYMBOLS" == "true" ]]; then
-            pack_args+=(--include-symbols --symbol-package-format snupkg)
+            pack_args+=(--include-symbols -p:SymbolPackageFormat=snupkg)
           fi
 
           if [[ "$INCLUDE_SOURCE" == "true" ]]; then

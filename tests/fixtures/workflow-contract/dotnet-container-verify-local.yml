@@ -1,0 +1,28 @@
+name: .NET container verify local fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  container:
+    # Expected: success.
+    name: dotnet-container-verify @ local
+    uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      image: local/mock-container-app
+      context: tests/fixtures/mock-projects/dotnet-container-app
+      dockerfile: tests/fixtures/mock-projects/dotnet-container-app/src/Mock.Container.App/Dockerfile
+      version: 1.2.3-ci.1
+      version-tag: v1.2.3-ci.1
+      sdk-version: 10.0.x
+      version-working-directory: tests/fixtures/mock-projects/dotnet-container-app
+      cache-from: ""
+      cache-to: ""
+      labels: |
+        org.opencontainers.image.source=https://github.com/ArkanisCorporation/ci
