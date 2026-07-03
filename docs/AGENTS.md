@@ -10,14 +10,14 @@ Applies documentation under `docs/**`.
 - No marketing copy.
 - Prefer tables/checklists/code snippets.
 - Each doc names owner audience: consumer, platform maintainer, security reviewer, release manager.
-- Every workflow doc includes: purpose, inputs, secrets, outputs, permissions, artifacts, runner reqs, examples, failure modes.
+- Every workflow doc includes: purpose, inputs, secrets, outputs, permissions, artifacts, runner reqs, examples, failure modes, and a Mermaid flow diagram.
 - Every policy doc includes: rationale, rule, exception path, validation.
 
 ## Source discipline
 
 - Verify current GitHub/Microsoft/Docker/Kubernetes docs before changing platform semantics.
 - Link primary sources in `docs/references.md`.
-- Date-sensitive guidance needs “last verified” line.
+- Date-sensitive guidance needs a "last verified" line.
 - Discussions/issues can explain edge cases; docs/specs decide contracts.
 
 ## Schema/docs sync

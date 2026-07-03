@@ -46,3 +46,17 @@ jobs:
 
       - name: Validate workflow contracts
         run: dotnet run --file scripts/validate-workflows.cs
+
+      - name: Publish summary
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || '["ubuntu-latest"]' }}
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted || false }}
+        run: |
+          {
+            echo "## Platform selftest"
+            echo ""
+            echo "- Validator: \`scripts/validate-workflows.cs\`"
+            echo "- Runner labels: \`$RUNS_ON_JSON\`"
+            echo "- Self-hosted: \`$RUNS_ON_SELF_HOSTED\`"
+          } >> "$GITHUB_STEP_SUMMARY"

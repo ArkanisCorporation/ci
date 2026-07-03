@@ -862,7 +862,7 @@ static string FindRepositoryRoot()
     var current = new DirectoryInfo(AppContext.BaseDirectory);
     while (current is not null)
     {
-        if (Directory.Exists(Path.Combine(current.FullName, ".git")))
+        if (IsRepositoryRoot(current))
         {
             return current.FullName;
         }
@@ -873,7 +873,7 @@ static string FindRepositoryRoot()
     current = new DirectoryInfo(Directory.GetCurrentDirectory());
     while (current is not null)
     {
-        if (Directory.Exists(Path.Combine(current.FullName, ".git")))
+        if (IsRepositoryRoot(current))
         {
             return current.FullName;
         }
@@ -882,6 +882,12 @@ static string FindRepositoryRoot()
     }
 
     throw new InvalidOperationException("Could not locate repository root.");
+}
+
+static bool IsRepositoryRoot(DirectoryInfo directory)
+{
+    var gitPath = Path.Combine(directory.FullName, ".git");
+    return Directory.Exists(gitPath) || File.Exists(gitPath);
 }
 
 static string? FindExecutableOnPath(string executableName)

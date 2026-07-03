@@ -8,11 +8,16 @@ Last verified: 2026-07-03.
 - GitHub reusable workflow configuration comparison: https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations
 - GitHub workflow syntax: https://docs.github.com/actions/using-workflows/workflow-syntax-for-github-actions
 - GitHub contexts reference: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+- GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax
 - GitHub composite action tutorial: https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action
 - GitHub secure use reference: https://docs.github.com/en/actions/reference/security/secure-use
 - GitHub artifacts: https://docs.github.com/en/actions/tutorials/store-and-share-data
+- GitHub artifact retention and removal: https://docs.github.com/actions/managing-workflow-runs/removing-workflow-artifacts
+- GitHub dependency caching: https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
+- GitHub-hosted runners: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+- GitHub self-hosted runners: https://docs.github.com/en/actions/reference/runners/self-hosted-runners
 - actions/setup-node: https://github.com/actions/setup-node
 - Docker build-push action: https://github.com/docker/build-push-action
 - dotnet tool install: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install
@@ -21,7 +26,6 @@ Last verified: 2026-07-03.
 - JetBrains CleanupCode: https://www.jetbrains.com/help/resharper/CleanupCode.html
 - JetBrains InspectCode: https://www.jetbrains.com/help/resharper/InspectCode.html
 - ReportGenerator: https://github.com/danielpalme/ReportGenerator
-- actionlint: https://github.com/rhysd/actionlint
 - GitHub CLI pull request commands: https://cli.github.com/manual/gh_pr
 - semantic-release configuration: https://semantic-release.gitbook.io/semantic-release/usage/configuration
 - semantic-release GitHub plugin: https://github.com/semantic-release/github

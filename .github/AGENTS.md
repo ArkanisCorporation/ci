@@ -24,6 +24,7 @@ Maintain single catalog in docs:
 - Artifact contract.
 - Runner labels.
 - Trust zone.
+- Mermaid flow diagram.
 - Breaking-change notes.
 
 ## Release refs
@@ -39,6 +40,7 @@ Every PR touching `.github/**` must validate:
 
 - YAML parses.
 - `workflow_call` input schema matches docs.
+- Catalog diagram still matches the job graph, artifacts, and outputs.
 - External `uses:` entries pinned or explicitly test-only.
 - `permissions` present and minimal.
 - No disallowed trigger/secrets pattern.
