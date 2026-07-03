@@ -1,0 +1,73 @@
+# Summary:
+#   Runs generated-code commands and fails when generated paths change.
+# Remarks:
+#   This action expects Bash, Git, .NET 10 SDK, and a checked-out caller repository.
+#   It runs commands from the caller workspace through Bash using a .NET file script with CliWrap.
+#   It writes command logs and Git diff diagnostics under artifacts-path.
+#   It can run commands in parallel, which is useful for host-specific Wolverine codegen.
+#   Commands can mutate workspace files before the Git diff gate reports stale generated output.
+
+name: .NET Generated Code Diff
+description: Runs generated-code commands and verifies that generated paths remain unchanged.
+
+inputs:
+  commands:
+    description: Newline-delimited commands that regenerate source.
+    required: true
+  generated-paths:
+    description: Newline-delimited generated paths checked for tracked diffs and untracked files.
+    required: true
+  working-directory:
+    description: Directory where commands and Git diff checks run.
+    required: false
+    default: .
+  run-commands-in-parallel:
+    description: Runs commands in parallel when true.
+    required: false
+    default: "true"
+  fail-on-diff:
+    description: Fails the action when generated paths change.
+    required: false
+    default: "true"
+  remediation-message:
+    description: Message written to the step summary when generated paths changed.
+    required: false
+    default: "Regenerate the listed source files locally and commit the resulting changes."
+  artifacts-path:
+    description: Directory where command logs and diff diagnostics are written.
+    required: false
+    default: artifacts/generated-code
+  diff-preview-lines:
+    description: Number of Git diff lines written to diagnostics.
+    required: false
+    default: "300"
+
+outputs:
+  diff-found:
+    description: Whether generated paths changed.
+    value: ${{ steps.generated.outputs.diff-found }}
+  changed-files:
+    description: Path to the changed-file diagnostic list.
+    value: ${{ steps.generated.outputs.changed-files }}
+  artifacts-path:
+    description: Directory containing generated-code diagnostics.
+    value: ${{ steps.generated.outputs.artifacts-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify generated code
+      id: generated
+      run: |
+        cd "$RUNNER_TEMP"
+        dotnet run --file "$GITHUB_ACTION_PATH/run-generated-code-diff.cs"
+      shell: bash
+      env:
+        ACTION_INPUT_COMMANDS: ${{ inputs.commands }}
+        ACTION_INPUT_GENERATED_PATHS: ${{ inputs.generated-paths }}
+        ACTION_INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        ACTION_INPUT_RUN_COMMANDS_IN_PARALLEL: ${{ inputs.run-commands-in-parallel }}
+        ACTION_INPUT_FAIL_ON_DIFF: ${{ inputs.fail-on-diff }}
+        ACTION_INPUT_REMEDIATION_MESSAGE: ${{ inputs.remediation-message }}
+        ACTION_INPUT_ARTIFACTS_PATH: ${{ inputs.artifacts-path }}
+        ACTION_INPUT_DIFF_PREVIEW_LINES: ${{ inputs.diff-preview-lines }}

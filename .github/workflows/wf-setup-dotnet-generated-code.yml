@@ -1,0 +1,289 @@
+# Summary:
+#   Reusable .NET generated-code verification workflow.
+# Remarks:
+#   This workflow runs in the caller repository context.
+#   It restores .NET dependencies, optionally builds the solution, runs generated-code commands, and fails when generated paths change.
+#   Defaults target Wolverine-style generated handler checks where multiple host commands can run in parallel.
+#   It writes command logs and Git diff diagnostics under `artifacts/generated-code`.
+#   It calls runs-on/cache only when enable-cache is true.
+
+name: wf-setup-dotnet-generated-code
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      dotnet-version:
+        description: .NET SDK version range used when global-json-file is empty.
+        type: string
+        required: false
+        default: 10.0.x
+      global-json-file:
+        description: Optional global.json path used by actions/setup-dotnet.
+        type: string
+        required: false
+        default: ""
+      solution:
+        description: Solution or project path restored and optionally built before generated-code commands run.
+        type: string
+        required: true
+      configuration:
+        description: Build configuration.
+        type: string
+        required: false
+        default: Release
+      restore-locked-mode:
+        description: Runs dotnet restore with --locked-mode.
+        type: boolean
+        required: false
+        default: true
+      enable-cache:
+        description: Restores and saves NuGet dependency cache with runs-on/cache when true.
+        type: boolean
+        required: false
+        default: true
+      build-before-commands:
+        description: Runs dotnet build before generated-code commands.
+        type: boolean
+        required: false
+        default: true
+      commands:
+        description: Newline-delimited generated-code commands.
+        type: string
+        required: true
+      generated-paths:
+        description: Newline-delimited generated paths to diff.
+        type: string
+        required: true
+      run-commands-in-parallel:
+        description: Runs generated-code commands in parallel.
+        type: boolean
+        required: false
+        default: true
+      fail-on-diff:
+        description: Fails when generated paths change.
+        type: boolean
+        required: false
+        default: true
+      remediation-message:
+        description: Message written to the step summary when generated paths changed.
+        type: string
+        required: false
+        default: "Regenerate generated source locally and commit the resulting changes."
+      timeout-minutes:
+        description: Generated-code verification job timeout.
+        type: number
+        required: false
+        default: 20
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.verify.outputs.artifact-manifest }}
+
+permissions: {}
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  verify:
+    name: .NET generated code
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET action tooling
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup .NET from global.json
+        if: inputs.global-json-file != ''
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: ${{ inputs.global-json-file }}
+
+      - name: Setup .NET from version
+        if: inputs.global-json-file == ''
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Cache NuGet packages
+        if: inputs.enable-cache
+        uses: runs-on/cache@v5.0.7
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+        run: |
+          mkdir -p artifacts/meta artifacts/generated-code
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "NuGet cache enabled: ${ENABLE_CACHE}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            dotnet --info
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            command -v bash
+            command -v dotnet
+            command -v git
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Restore local .NET tools
+        run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+
+      - name: Restore dependencies with lock file
+        if: inputs.restore-locked-mode
+        env:
+          SOLUTION: ${{ inputs.solution }}
+        run: dotnet restore "$SOLUTION" --locked-mode
+
+      - name: Restore dependencies
+        if: ${{ !inputs.restore-locked-mode }}
+        env:
+          SOLUTION: ${{ inputs.solution }}
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build
+        if: inputs.build-before-commands
+        env:
+          SOLUTION: ${{ inputs.solution }}
+          CONFIGURATION: ${{ inputs.configuration }}
+        run: dotnet build "$SOLUTION" --configuration "$CONFIGURATION" --no-restore
+
+      - name: Resolve platform action source
+        id: platform-source
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          if [[ -z "$repository" || "$repository" == "$WORKFLOW_REF" ]]; then
+            echo "Could not resolve reusable workflow repository from github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 2
+          fi
+
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout platform action source
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.platform-source.outputs.repository }}
+          ref: ${{ steps.platform-source.outputs.ref }}
+          path: .ci/arkanis-ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/dotnet-generated-code-diff
+          sparse-checkout-cone-mode: false
+
+      - name: Verify generated code
+        uses: ./.ci/arkanis-ci/.github/actions/dotnet-generated-code-diff
+        with:
+          commands: ${{ inputs.commands }}
+          generated-paths: ${{ inputs.generated-paths }}
+          run-commands-in-parallel: ${{ inputs.run-commands-in-parallel }}
+          fail-on-diff: ${{ inputs.fail-on-diff }}
+          remediation-message: ${{ inputs.remediation-message }}
+          artifacts-path: ${{ github.workspace }}/artifacts/generated-code
+
+      - name: Remove platform action source
+        if: always()
+        run: rm -rf .ci/arkanis-ci
+
+      - name: Write artifact manifest
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-setup-dotnet-generated-code",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "verify"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-generated-code-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "# .NET generated code"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Solution | \`${{ inputs.solution }}\` |"
+            echo "| Parallel commands | \`${{ inputs.run-commands-in-parallel }}\` |"
+            echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-generated-code-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}
