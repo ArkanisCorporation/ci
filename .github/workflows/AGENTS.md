@@ -16,6 +16,9 @@ Applies to public reusable workflows in `.github/workflows/*.yml`.
 - Avoid nested reusable workflows unless the benefit is clear.
 - Avoid `pull_request_target`.
 - Treat caller inputs and GitHub event text as untrusted.
+- When a reusable workflow checks out this platform repository for a local composite action, resolve the called workflow source from `fromJSON(toJSON(job)).workflow_repository` and `fromJSON(toJSON(job)).workflow_sha`.
+- `fromJSON(toJSON(job))` is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
+- Do not use `github.workflow_ref` or `github.workflow_sha` for platform action source checkout because the `github` context is caller-scoped in reusable workflows.
 
 ## Runner Model
 

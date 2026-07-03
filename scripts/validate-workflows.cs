@@ -39,6 +39,7 @@ ValidateWorkflowLintContract();
 ValidatePlatformSelftestContract();
 ValidateReleaseBackpropagationContract();
 ValidateDotNetJetBrainsContract();
+ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
 ValidateRepositoryPipelineContract();
 await ValidateGeneratedWorkflowDocsAsync();
@@ -473,6 +474,52 @@ void ValidateDotNetJetBrainsContract()
             {
                 AddFailure($"{actionScriptPath}: dotnet-jetbrains-cleanupcode script must contain {requiredToken}.");
             }
+        }
+    }
+}
+
+void ValidatePlatformActionSourceContext()
+{
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    if (!Directory.Exists(workflowRoot))
+    {
+        return;
+    }
+
+    foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        if (!workflowText.Contains(".ci/arkanis-ci/.github/actions/", StringComparison.Ordinal))
+        {
+            continue;
+        }
+
+        if (workflowText.Contains("${{ github.workflow_ref", StringComparison.Ordinal)
+            || workflowText.Contains("${{ github.workflow_sha", StringComparison.Ordinal)
+            || workflowText.Contains("${{ job.workflow_ref", StringComparison.Ordinal)
+            || workflowText.Contains("${{ job.workflow_sha", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: platform action source checkout must use the actionlint-compatible fromJSON(toJSON(job)) form, not direct workflow metadata properties.");
+        }
+
+        if (!workflowText.Contains("fromJSON(toJSON(job)).workflow_repository", StringComparison.Ordinal)
+            || !workflowText.Contains("fromJSON(toJSON(job)).workflow_sha", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: platform action source checkout must resolve repository/ref from job workflow_repository and workflow_sha metadata.");
+        }
+
+        const string ActionlintReason = "fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.";
+        if (!workflowText.Contains(ActionlintReason, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: platform action source checkout must document why fromJSON(toJSON(job)) is used.");
+        }
+
+        var reasonCount = Regex.Matches(workflowText, Regex.Escape(ActionlintReason)).Count;
+        var repositoryCount = Regex.Matches(workflowText, Regex.Escape("fromJSON(toJSON(job)).workflow_repository")).Count;
+        var shaCount = Regex.Matches(workflowText, Regex.Escape("fromJSON(toJSON(job)).workflow_sha")).Count;
+        if (reasonCount != repositoryCount || reasonCount != shaCount)
+        {
+            AddFailure($"{workflowPath}: each platform action source checkout must document the actionlint fromJSON(toJSON(job)) rationale at the checkout site.");
         }
     }
 }

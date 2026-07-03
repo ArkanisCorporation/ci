@@ -247,26 +247,12 @@ jobs:
             docker version
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Resolve platform action source
-        id: platform-source
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
-        run: |
-          repository="${WORKFLOW_REF%%/.github/workflows/*}"
-          if [[ -z "$repository" || "$repository" == "$WORKFLOW_REF" ]]; then
-            echo "Could not resolve reusable workflow repository from github.workflow_ref: $WORKFLOW_REF" >&2
-            exit 2
-          fi
-
-          echo "repository=$repository" >> "$GITHUB_OUTPUT"
-          echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
-
       - name: Checkout platform action source
         uses: actions/checkout@v7
         with:
-          repository: ${{ steps.platform-source.outputs.repository }}
-          ref: ${{ steps.platform-source.outputs.ref }}
+          # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
+          repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
+          ref: ${{ fromJSON(toJSON(job)).workflow_sha }}
           path: .ci/arkanis-ci
           persist-credentials: false
           sparse-checkout: |

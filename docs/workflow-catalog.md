@@ -63,6 +63,13 @@ Use `runs-on-json` to override GitHub-hosted runner images or self-hosted runner
 Use `runs-on-self-hosted` to let workflows gate hosted-only and self-hosted-only assumptions.
 Set `enable-cache` to false for cold-restore validation, cache incident isolation, or runners without cache service access.
 
+## Platform Action Source
+
+Reusable workflows that need this platform repository's composite actions check out the called workflow source under `.ci/arkanis-ci`.
+Those checkouts read `workflow_repository` and `workflow_sha` from the `job` context through `fromJSON(toJSON(job))` so GitHub receives the called workflow metadata.
+`fromJSON(toJSON(job))` is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
+Do not use `github.workflow_ref` or `github.workflow_sha` for that source resolution because the `github` context is scoped to the caller repository in reusable workflows.
+
 ## Schema-Backed Workflow Inputs
 
 The following tables are generated from `schemas/workflow-inputs/*.schema.json`.
@@ -927,9 +934,8 @@ flowchart TD
   tooling --> validate[[Validate runner contract]]
   validate --> preflight{self-hosted?}
   preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| resolve[[Resolve platform action source]]
-  sh --> resolve
-  resolve --> platform[("CI platform checkout")]
+  preflight -->|no| platform[("CI platform checkout")]
+  sh --> platform
   platform --> backprop[[release-backpropagation action]]
   backprop --> approve{approve?}
   approve -->|yes| pat[("PR_AUTOMATION_PAT")]
@@ -1292,7 +1298,7 @@ Preconditions:
 - Production publication binds the publish job to `environment-name`.
 - `version` is a required bare SemVer value without a leading `v`.
 - `version-working-directory` contains .NET project files unless `version-recursive` is false and `version-project` is set.
-- Version stamping requires Bash, network access to restore actions/tool packages, and `github.workflow_ref` / `github.workflow_sha` support from reusable workflows.
+- Version stamping requires Bash, network access to restore actions/tool packages, and called-workflow `job` metadata support from reusable workflows.
 - `extra-tags` accepts newline-delimited bare tag names or full image references.
 
 Side effects:
