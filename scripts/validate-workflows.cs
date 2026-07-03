@@ -44,6 +44,7 @@ ValidateDotNetJetBrainsContract();
 ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
 ValidateRepositoryPipelineContract();
+await ValidateDotNetActionFileScriptsAnalyzerCleanAsync();
 await ValidateGeneratedWorkflowDocsAsync();
 await RunActionlintWhenAvailableAsync();
 
@@ -539,6 +540,83 @@ void ValidateDotNetJetBrainsContract()
             }
         }
     }
+}
+
+async Task ValidateDotNetActionFileScriptsAnalyzerCleanAsync()
+{
+    var dotnet = FindExecutableOnPath("dotnet");
+    if (dotnet is null)
+    {
+        AddFailure("dotnet executable is required to analyzer-check .NET action file scripts.");
+        return;
+    }
+
+    var actionsRoot = Path.Combine(repoRoot, ".github", "actions");
+    if (!Directory.Exists(actionsRoot))
+    {
+        return;
+    }
+
+    foreach (var scriptPath in Directory.EnumerateFiles(actionsRoot, "*.cs", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "arkanis-ci-file-script-analyzers", Guid.NewGuid().ToString("N"));
+        var relativeScriptPath = Path.GetRelativePath(actionsRoot, scriptPath);
+        var copiedScriptPath = Path.Combine(tempRoot, ".ci", "arkanis-ci", ".github", "actions", relativeScriptPath);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(copiedScriptPath)!);
+            File.Copy(scriptPath, copiedScriptPath);
+            File.WriteAllText(
+                Path.Combine(tempRoot, ".editorconfig"),
+                """
+                root = true
+
+                [*.cs]
+                dotnet_diagnostic.CA1305.severity = error
+                """);
+
+            var result = await Cli.Wrap(dotnet)
+                .WithArguments(["run", "--file", copiedScriptPath, "--no-launch-profile"])
+                .WithWorkingDirectory(tempRoot)
+                .WithEnvironmentVariables(new Dictionary<string, string?>
+                {
+                    ["GITHUB_WORKSPACE"] = string.Empty,
+                    ["RUNNER_TEMP"] = string.Empty,
+                    ["GITHUB_OUTPUT"] = string.Empty,
+                    ["GITHUB_STEP_SUMMARY"] = string.Empty
+                })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+
+            var output = result.StandardOutput + result.StandardError;
+            if (Regex.IsMatch(output, @"\berror\s+(CA|CS)\d{4}\b", RegexOptions.CultureInvariant)
+                || output.Contains("The build failed.", StringComparison.Ordinal))
+            {
+                AddFailure($"{scriptPath}: .NET action file scripts must compile when downstream repositories enable CA1305. {FirstCompilerDiagnostic(output)}");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+}
+
+static string FirstCompilerDiagnostic(string output)
+{
+    foreach (var line in output.ReplaceLineEndings("\n").Split('\n'))
+    {
+        if (Regex.IsMatch(line, @"\berror\s+(CA|CS)\d{4}\b", RegexOptions.CultureInvariant))
+        {
+            return line.Trim();
+        }
+    }
+
+    return output.ReplaceLineEndings(" ").Trim();
 }
 
 void ValidatePlatformActionSourceContext()

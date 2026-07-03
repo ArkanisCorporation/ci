@@ -5,6 +5,7 @@
 #:property RestorePackagesWithLockFile=false
 #:package CliWrap@3.9.0
 
+using System.Globalization;
 using System.Text;
 using CliWrap;
 using CliWrap.Buffered;
@@ -190,11 +191,11 @@ static async Task<CommandRunResult> RunCleanupCodeAsync(
     }
 
     var logBuilder = new StringBuilder();
-    logBuilder.AppendLine($"CleanupCode solution: {solution}");
-    logBuilder.AppendLine($"CleanupCode profile: {profile}");
-    logBuilder.AppendLine($"CleanupCode include: {NullWhenEmpty(include)}");
-    logBuilder.AppendLine($"CleanupCode exclude: {NullWhenEmpty(exclude)}");
-    logBuilder.AppendLine($"CleanupCode command: {RenderCommand(executable, arguments)}");
+    logBuilder.AppendLine(CultureInfo.InvariantCulture, $"CleanupCode solution: {solution}");
+    logBuilder.AppendLine(CultureInfo.InvariantCulture, $"CleanupCode profile: {profile}");
+    logBuilder.AppendLine(CultureInfo.InvariantCulture, $"CleanupCode include: {NullWhenEmpty(include)}");
+    logBuilder.AppendLine(CultureInfo.InvariantCulture, $"CleanupCode exclude: {NullWhenEmpty(exclude)}");
+    logBuilder.AppendLine(CultureInfo.InvariantCulture, $"CleanupCode command: {RenderCommand(executable, arguments)}");
 
     Console.Write(logBuilder.ToString());
     var result = await RunCommandAsync(executable, arguments, workingDirectory, allowFailure: true);

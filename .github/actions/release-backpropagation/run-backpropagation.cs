@@ -5,6 +5,7 @@
 #:property RestorePackagesWithLockFile=false
 #:package CliWrap@3.9.0
 
+using System.Globalization;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
@@ -80,7 +81,7 @@ static async Task<int> RunAsync()
     }
 
     WriteOutput("pr-url", pr.Url);
-    WriteOutput("pr-number", pr.Number.ToString());
+    WriteOutput("pr-number", pr.Number.ToString(CultureInfo.InvariantCulture));
 
     await AppendStepSummaryAsync($"""
         ## Release backpropagation
