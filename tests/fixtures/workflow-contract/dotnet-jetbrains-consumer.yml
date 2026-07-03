@@ -1,0 +1,21 @@
+name: Dotnet JetBrains consumer fixture
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  cleanup:
+    name: .NET JetBrains CleanupCode
+    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-jetbrains.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: CitizenId.slnx
+      profile: "Built-in: Reformat & Apply Syntax Style"
+      exclude: "**/*.razor;**/*.svg;**/*.md"
+      enable-cache: true

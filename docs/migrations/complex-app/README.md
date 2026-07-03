@@ -11,6 +11,7 @@ ArkanisOverlay still has release work that mixes signing, Docker, release metada
 
 The target is a lane-based pipeline.
 Each language or product lane verifies independently.
+JetBrains CleanupCode lanes use `wf-setup-dotnet-jetbrains.yml` when the source repository already gates Rider/ReSharper cleanup rules.
 Release metadata only decides version and tag.
 Publish lanes consume release outputs.
 Container publish lanes pass `new-version` as the bare `version` and `new-tag` as `version-tag`.

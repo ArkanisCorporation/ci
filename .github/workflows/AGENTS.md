@@ -45,6 +45,7 @@ Recommended order:
 ## Current Public Workflows
 
 - `wf-setup-dotnet.yml` verifies .NET restore, format, build, tests, coverage, and diagnostics.
+- `wf-setup-dotnet-jetbrains.yml` verifies JetBrains ReSharper CleanupCode and fails when cleanup creates a Git diff.
 - `wf-setup-node.yml` verifies Node.js install, lint, tests, build, cache, and diagnostics.
 - `wf-release-semantic.yml` runs semantic-release metadata without `@semantic-release/exec`.
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.

@@ -28,6 +28,7 @@ ValidateWorkflowInputSchemas();
 ValidateWorkflows();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
+ValidateDotNetJetBrainsContract();
 ValidateRepositoryPipelineContract();
 await RunActionlintWhenAvailableAsync();
 
@@ -231,6 +232,84 @@ void ValidateContainerPublishContract()
             if (GetYamlBlock(actionLines, requiredInput) is null)
             {
                 AddFailure($"{actionPath}: dotnet-setversion action must expose {requiredInput} input.");
+            }
+        }
+    }
+}
+
+void ValidateDotNetJetBrainsContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-setup-dotnet-jetbrains.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-setup-dotnet-jetbrains.schema.json");
+    var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-jetbrains-cleanupcode", "action.yml");
+    var actionScriptPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-jetbrains-cleanupcode", "run-cleanupcode.cs");
+
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: .NET JetBrains CleanupCode workflow is required.");
+    }
+    else
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        var workflowLines = File.ReadAllLines(workflowPath);
+        foreach (var requiredInput in new[] { "runs-on-json", "runs-on-self-hosted", "solution", "profile", "exclude", "fail-on-diff", "enable-cache" })
+        {
+            if (GetYamlBlock(workflowLines, requiredInput) is null)
+            {
+                AddFailure($"{workflowPath}: .NET JetBrains workflow must expose {requiredInput} input.");
+            }
+        }
+
+        if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-jetbrains-cleanupcode", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: .NET JetBrains workflow must use dotnet-jetbrains-cleanupcode action.");
+        }
+
+        if (!workflowText.Contains("dotnet restore", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: .NET JetBrains workflow must restore dependencies before cleanup verification.");
+        }
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: .NET JetBrains workflow schema is required.");
+    }
+
+    if (!File.Exists(actionPath))
+    {
+        AddFailure($"{actionPath}: dotnet-jetbrains-cleanupcode composite action is required.");
+    }
+    else
+    {
+        var actionText = File.ReadAllText(actionPath);
+        var actionLines = File.ReadAllLines(actionPath);
+        foreach (var requiredInput in new[] { "solution", "profile", "exclude", "fail-on-diff", "restore-tools" })
+        {
+            if (GetYamlBlock(actionLines, requiredInput) is null)
+            {
+                AddFailure($"{actionPath}: dotnet-jetbrains-cleanupcode action must expose {requiredInput} input.");
+            }
+        }
+
+        if (!actionText.Contains("dotnet run --file", StringComparison.Ordinal))
+        {
+            AddFailure($"{actionPath}: dotnet-jetbrains-cleanupcode action must delegate command logic to a .NET file script.");
+        }
+    }
+
+    if (!File.Exists(actionScriptPath))
+    {
+        AddFailure($"{actionScriptPath}: dotnet-jetbrains-cleanupcode .NET file script is required.");
+    }
+    else
+    {
+        var actionScriptText = File.ReadAllText(actionScriptPath);
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "cleanupcode", "git", "diff" })
+        {
+            if (!actionScriptText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{actionScriptPath}: dotnet-jetbrains-cleanupcode script must contain {requiredToken}.");
             }
         }
     }

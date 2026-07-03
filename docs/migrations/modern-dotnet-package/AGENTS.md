@@ -19,6 +19,7 @@ Keep repository-specific package metadata and release channels intact.
 ## Target Shape
 
 - Use `wf-setup-dotnet.yml` for verification.
+- Use `wf-setup-dotnet-jetbrains.yml` only when the repository already gates JetBrains CleanupCode.
 - Use `wf-release-semantic.yml` for semantic-release metadata.
 - Use `wf-publish-nuget.yml` for package publication.
 - Keep package backpropagation separate.

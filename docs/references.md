@@ -17,6 +17,9 @@ Last verified: 2026-07-03.
 - Docker build-push action: https://github.com/docker/build-push-action
 - dotnet tool install: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install
 - dotnet-setversion NuGet package: https://www.nuget.org/packages/dotnet-setversion
+- JetBrains ReSharper command line tools: https://www.jetbrains.com/help/resharper/ReSharper_Command_Line_Tools.html
+- JetBrains CleanupCode: https://www.jetbrains.com/help/resharper/CleanupCode.html
+- JetBrains InspectCode: https://www.jetbrains.com/help/resharper/InspectCode.html
 - semantic-release configuration: https://semantic-release.gitbook.io/semantic-release/usage/configuration
 - semantic-release GitHub plugin: https://github.com/semantic-release/github
 - Node.js Corepack: https://nodejs.org/api/corepack.html

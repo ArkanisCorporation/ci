@@ -1,0 +1,100 @@
+# Summary:
+#   Runs JetBrains ReSharper CleanupCode and fails when cleanup creates a Git diff.
+# Remarks:
+#   This action expects Bash, Git, .NET 10 SDK, and a checked-out caller repository.
+#   It restores local .NET tools by default, matching repositories that pin JetBrains.ReSharper.GlobalTools in .config/dotnet-tools.json.
+#   It can optionally install JetBrains.ReSharper.GlobalTools into RUNNER_TEMP when install-tool is true.
+#   It modifies workspace files while CleanupCode runs, then reports and optionally fails on the resulting Git diff.
+#   Relative artifacts-path values resolve from GITHUB_WORKSPACE.
+#   Do not pass secrets through command arguments because they can appear in logs or diagnostic artifacts.
+
+name: .NET JetBrains CleanupCode
+description: Runs JetBrains CleanupCode and verifies that it produces no Git diff.
+
+inputs:
+  solution:
+    description: Solution or project path passed to CleanupCode.
+    required: true
+  working-directory:
+    description: Directory where CleanupCode and Git diff checks run.
+    required: false
+    default: .
+  profile:
+    description: CleanupCode profile name.
+    required: false
+    default: "Built-in: Reformat & Apply Syntax Style"
+  include:
+    description: Optional semicolon-delimited CleanupCode include filter.
+    required: false
+    default: ""
+  exclude:
+    description: Optional semicolon-delimited CleanupCode exclude filter.
+    required: false
+    default: "**/*.razor;**/*.svg;**/*.md"
+  no-updates:
+    description: Passes --no-updates to CleanupCode when true.
+    required: false
+    default: "true"
+  restore-tools:
+    description: Runs dotnet tool restore before CleanupCode when true.
+    required: false
+    default: "true"
+  install-tool:
+    description: Installs JetBrains.ReSharper.GlobalTools into RUNNER_TEMP instead of using a local tool manifest.
+    required: false
+    default: "false"
+  tool-version:
+    description: Optional JetBrains.ReSharper.GlobalTools version used when install-tool is true.
+    required: false
+    default: ""
+  fail-on-diff:
+    description: Fails the action when CleanupCode changes tracked workspace files.
+    required: false
+    default: "true"
+  remediation-message:
+    description: Message written to the step summary when CleanupCode creates a diff.
+    required: false
+    default: "Run `dotnet husky run --name dotnet-cleanupcode` locally and commit the resulting changes."
+  artifacts-path:
+    description: Directory where CleanupCode logs and diff diagnostics are written.
+    required: false
+    default: artifacts/jetbrains-cleanupcode
+  diff-preview-lines:
+    description: Number of Git diff lines written to diagnostics and logs.
+    required: false
+    default: "300"
+
+outputs:
+  diff-found:
+    description: Whether CleanupCode produced a Git diff.
+    value: ${{ steps.cleanup.outputs.diff-found }}
+  changed-files:
+    description: Path to the changed-file diagnostic list.
+    value: ${{ steps.cleanup.outputs.changed-files }}
+  artifacts-path:
+    description: Directory containing CleanupCode logs and diff diagnostics.
+    value: ${{ steps.cleanup.outputs.artifacts-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run CleanupCode verification
+      id: cleanup
+      run: |
+        cd "$RUNNER_TEMP"
+        dotnet run --file "$GITHUB_ACTION_PATH/run-cleanupcode.cs"
+      shell: bash
+      env:
+        ACTION_INPUT_SOLUTION: ${{ inputs.solution }}
+        ACTION_INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        ACTION_INPUT_PROFILE: ${{ inputs.profile }}
+        ACTION_INPUT_INCLUDE: ${{ inputs.include }}
+        ACTION_INPUT_EXCLUDE: ${{ inputs.exclude }}
+        ACTION_INPUT_NO_UPDATES: ${{ inputs.no-updates }}
+        ACTION_INPUT_RESTORE_TOOLS: ${{ inputs.restore-tools }}
+        ACTION_INPUT_INSTALL_TOOL: ${{ inputs.install-tool }}
+        ACTION_INPUT_TOOL_VERSION: ${{ inputs.tool-version }}
+        ACTION_INPUT_FAIL_ON_DIFF: ${{ inputs.fail-on-diff }}
+        ACTION_INPUT_REMEDIATION_MESSAGE: ${{ inputs.remediation-message }}
+        ACTION_INPUT_ARTIFACTS_PATH: ${{ inputs.artifacts-path }}
+        ACTION_INPUT_DIFF_PREVIEW_LINES: ${{ inputs.diff-preview-lines }}

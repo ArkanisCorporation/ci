@@ -9,6 +9,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | Workflow | Purpose |
 |---|---|
 | `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics for .NET repositories. |
+| `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
 | `wf-release-semantic.yml` | Run semantic-release without `@semantic-release/exec` verification or publishing scripts. |
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |

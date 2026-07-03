@@ -7,6 +7,7 @@ Audience: consumers and platform maintainers.
 | File | Purpose | Trust zone | Required caller permissions | Main artifacts |
 |---|---|---|---|---|
 | `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | test results, coverage files, binlog, metadata, manifest |
+| `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. | untrusted or trusted-build | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | install/lint/test/build logs, metadata, manifest |
 | `wf-release-semantic.yml` | Run semantic-release metadata without `@semantic-release/exec`. | publish | `contents: write`, `issues: write`, `pull-requests: write` | release diagnostics |
 | `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish | `contents: read`, `id-token: write` | `.nupkg`, `.snupkg`, manifest |
@@ -52,6 +53,49 @@ Side effects:
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
+
+## .NET JetBrains CleanupCode Workflow
+
+`wf-setup-dotnet-jetbrains.yml` checks out the caller repository.
+It sets up .NET 10 action tooling, sets up the requested project SDK, restores NuGet dependencies, restores or installs JetBrains ReSharper command line tools, runs `jb cleanupcode`, writes diff diagnostics, writes a manifest, writes a summary, and uploads diagnostics.
+It is based on the CitizenId format job shape.
+The default CleanupCode profile is `Built-in: Reformat & Apply Syntax Style`.
+The default exclude filter is `**/*.razor;**/*.svg;**/*.md`.
+
+Preconditions:
+
+- `solution` points to a solution or project in the caller repository.
+- Lock files exist when `restore-locked-mode` is true.
+- The selected runner can install or run the requested .NET SDK.
+- The selected runner can install .NET 10 SDK for the action file script.
+- Local tool restore requires `JetBrains.ReSharper.GlobalTools` in `.config/dotnet-tools.json`.
+- `install-tool` requires network access to NuGet and should set `tool-version` for repeatability.
+
+Side effects:
+
+- Writes under `artifacts/jetbrains-cleanupcode`.
+- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Runs CleanupCode, which may modify workspace files before the Git diff gate.
+- Fails when CleanupCode creates a Git diff and `fail-on-diff` is true.
+
+Example:
+
+```yaml
+jobs:
+  cleanup:
+    name: .NET JetBrains CleanupCode
+    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-jetbrains.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: CitizenId.slnx
+      profile: "Built-in: Reformat & Apply Syntax Style"
+      exclude: "**/*.razor;**/*.svg;**/*.md"
+      enable-cache: true
+```
 
 ## Node Setup Workflow
 

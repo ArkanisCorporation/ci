@@ -14,3 +14,9 @@ It calls `wf-platform-selftest.yml` through a local reusable workflow reference.
 `release.yml` is this repository's release pipeline.
 It runs `wf-platform-selftest.yml` before `wf-release-semantic.yml`.
 It publishes GitHub release metadata only.
+
+## .NET JetBrains CleanupCode
+
+`wf-setup-dotnet-jetbrains.yml` is the reusable CleanupCode verification workflow.
+It keeps CitizenId-style JetBrains cleanup checks separate from ordinary `dotnet format`, build, and test verification.
+It installs .NET 10 action tooling so the composite action can run its `CliWrap` file script.
