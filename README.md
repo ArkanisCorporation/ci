@@ -9,9 +9,12 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | Workflow | Purpose |
 |---|---|
 | `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics for .NET repositories. |
+| `wf-setup-dotnet-generated-code.yml` | Verify generated .NET source stays committed after codegen commands. |
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
+| `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows with actionlint. |
 | `wf-release-semantic.yml` | Run semantic-release without `@semantic-release/exec` verification or publishing scripts. |
+| `wf-release-backpropagation.yml` | Create and optionally auto-merge release branch backpropagation PRs. |
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |
 | `wf-publish-container.yml` | Publish OCI images through Docker Buildx with optional .NET version stamping. |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |

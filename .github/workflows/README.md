@@ -20,3 +20,18 @@ It publishes GitHub release metadata only.
 `wf-setup-dotnet-jetbrains.yml` is the reusable CleanupCode verification workflow.
 It keeps CitizenId-style JetBrains cleanup checks separate from ordinary `dotnet format`, build, and test verification.
 It installs .NET 10 action tooling so the composite action can run its `CliWrap` file script.
+
+## .NET Generated Code
+
+`wf-setup-dotnet-generated-code.yml` is the reusable generated-source diff gate.
+It supports CitizenId-style Wolverine generated handler checks by building once, running host codegen commands, and failing when generated paths change.
+
+## GitHub Actions Lint
+
+`wf-lint-github-actions.yml` is the reusable caller workflow lint gate.
+It runs actionlint with read-only repository permissions.
+
+## Release Backpropagation
+
+`wf-release-backpropagation.yml` creates a release branch pull request back to the default branch.
+It can approve with `PR_AUTOMATION_PAT` and enable auto-merge with GitHub CLI.

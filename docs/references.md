@@ -20,6 +20,9 @@ Last verified: 2026-07-03.
 - JetBrains ReSharper command line tools: https://www.jetbrains.com/help/resharper/ReSharper_Command_Line_Tools.html
 - JetBrains CleanupCode: https://www.jetbrains.com/help/resharper/CleanupCode.html
 - JetBrains InspectCode: https://www.jetbrains.com/help/resharper/InspectCode.html
+- ReportGenerator: https://github.com/danielpalme/ReportGenerator
+- actionlint: https://github.com/rhysd/actionlint
+- GitHub CLI pull request commands: https://cli.github.com/manual/gh_pr
 - semantic-release configuration: https://semantic-release.gitbook.io/semantic-release/usage/configuration
 - semantic-release GitHub plugin: https://github.com/semantic-release/github
 - Node.js Corepack: https://nodejs.org/api/corepack.html

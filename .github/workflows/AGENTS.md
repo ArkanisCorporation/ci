@@ -45,9 +45,12 @@ Recommended order:
 ## Current Public Workflows
 
 - `wf-setup-dotnet.yml` verifies .NET restore, format, build, tests, coverage, and diagnostics.
+- `wf-setup-dotnet-generated-code.yml` verifies generated .NET source and fails when codegen commands create a Git diff.
 - `wf-setup-dotnet-jetbrains.yml` verifies JetBrains ReSharper CleanupCode and fails when cleanup creates a Git diff.
 - `wf-setup-node.yml` verifies Node.js install, lint, tests, build, cache, and diagnostics.
+- `wf-lint-github-actions.yml` lints caller GitHub Actions workflows with actionlint.
 - `wf-release-semantic.yml` runs semantic-release metadata without `@semantic-release/exec`.
+- `wf-release-backpropagation.yml` creates release branch backpropagation pull requests and can auto-merge them.
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
 - `wf-publish-container.yml` publishes OCI images through Docker Buildx and can stamp .NET versions before building.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.

@@ -28,6 +28,11 @@ ValidateWorkflowInputSchemas();
 ValidateWorkflows();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
+ValidateNuGetPublishContract();
+ValidateCoverageReportContract();
+ValidateGeneratedCodeContract();
+ValidateWorkflowLintContract();
+ValidateReleaseBackpropagationContract();
 ValidateDotNetJetBrainsContract();
 ValidateRepositoryPipelineContract();
 await RunActionlintWhenAvailableAsync();
@@ -204,9 +209,12 @@ void ValidateContainerPublishContract()
             AddFailure($"{workflowPath}: publish container workflow must expose bare version input.");
         }
 
-        if (GetYamlBlock(workflowLines, "build-args") is null)
+        foreach (var requiredInput in new[] { "build-args", "channel-latest", "extra-tags" })
         {
-            AddFailure($"{workflowPath}: publish container workflow must expose Docker build-args input.");
+            if (GetYamlBlock(workflowLines, requiredInput) is null)
+            {
+                AddFailure($"{workflowPath}: publish container workflow must expose {requiredInput} input.");
+            }
         }
 
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
@@ -310,6 +318,251 @@ void ValidateDotNetJetBrainsContract()
             if (!actionScriptText.Contains(requiredToken, StringComparison.Ordinal))
             {
                 AddFailure($"{actionScriptPath}: dotnet-jetbrains-cleanupcode script must contain {requiredToken}.");
+            }
+        }
+    }
+}
+
+void ValidateNuGetPublishContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-nuget.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-publish-nuget.schema.json");
+
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: NuGet publish workflow is required.");
+        return;
+    }
+
+    var workflowText = File.ReadAllText(workflowPath);
+    var workflowLines = File.ReadAllLines(workflowPath);
+    foreach (var requiredInput in new[] { "dotnet-setversion", "dotnet-setversion-tool-version", "include-source", "include-symbols" })
+    {
+        if (GetYamlBlock(workflowLines, requiredInput) is null)
+        {
+            AddFailure($"{workflowPath}: NuGet publish workflow must expose {requiredInput} input.");
+        }
+    }
+
+    if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: NuGet publish workflow must use dotnet-setversion action when enabled.");
+    }
+
+    if (!workflowText.Contains("--include-source", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: NuGet publish workflow must support dotnet pack --include-source.");
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: NuGet publish workflow schema is required.");
+    }
+}
+
+void ValidateCoverageReportContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-setup-dotnet.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-setup-dotnet.schema.json");
+    var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-coverage-report", "action.yml");
+    var scriptPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-coverage-report", "run-coverage-report.cs");
+
+    if (File.Exists(workflowPath))
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        var workflowLines = File.ReadAllLines(workflowPath);
+        foreach (var requiredInput in new[] { "coverage-report", "coverage-pr-comment", "coverage-report-custom-settings" })
+        {
+            if (GetYamlBlock(workflowLines, requiredInput) is null)
+            {
+                AddFailure($"{workflowPath}: .NET setup workflow must expose {requiredInput} input.");
+            }
+        }
+
+        if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-coverage-report", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: .NET setup workflow must use dotnet-coverage-report action when enabled.");
+        }
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: .NET setup workflow schema is required.");
+    }
+
+    if (!File.Exists(actionPath))
+    {
+        AddFailure($"{actionPath}: dotnet-coverage-report composite action is required.");
+    }
+    else
+    {
+        var actionText = File.ReadAllText(actionPath);
+        if (!actionText.Contains("dotnet run --file", StringComparison.Ordinal))
+        {
+            AddFailure($"{actionPath}: dotnet-coverage-report action must delegate command logic to a .NET file script.");
+        }
+    }
+
+    if (!File.Exists(scriptPath))
+    {
+        AddFailure($"{scriptPath}: dotnet-coverage-report .NET file script is required.");
+    }
+    else
+    {
+        var scriptText = File.ReadAllText(scriptPath);
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "reportgenerator", "gh", "pr", "comment" })
+        {
+            if (!scriptText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{scriptPath}: dotnet-coverage-report script must contain {requiredToken}.");
+            }
+        }
+    }
+}
+
+void ValidateGeneratedCodeContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-setup-dotnet-generated-code.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-setup-dotnet-generated-code.schema.json");
+    var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-generated-code-diff", "action.yml");
+    var scriptPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-generated-code-diff", "run-generated-code-diff.cs");
+
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: .NET generated code workflow is required.");
+    }
+    else
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        var workflowLines = File.ReadAllLines(workflowPath);
+        foreach (var requiredInput in new[] { "commands", "generated-paths", "run-commands-in-parallel", "enable-cache" })
+        {
+            if (GetYamlBlock(workflowLines, requiredInput) is null)
+            {
+                AddFailure($"{workflowPath}: .NET generated code workflow must expose {requiredInput} input.");
+            }
+        }
+
+        if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-generated-code-diff", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: .NET generated code workflow must use dotnet-generated-code-diff action.");
+        }
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: .NET generated code workflow schema is required.");
+    }
+
+    if (!File.Exists(actionPath))
+    {
+        AddFailure($"{actionPath}: dotnet-generated-code-diff composite action is required.");
+    }
+    else if (!File.ReadAllText(actionPath).Contains("dotnet run --file", StringComparison.Ordinal))
+    {
+        AddFailure($"{actionPath}: dotnet-generated-code-diff action must delegate command logic to a .NET file script.");
+    }
+
+    if (!File.Exists(scriptPath))
+    {
+        AddFailure($"{scriptPath}: dotnet-generated-code-diff .NET file script is required.");
+    }
+    else
+    {
+        var scriptText = File.ReadAllText(scriptPath);
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "git", "diff", "ls-files" })
+        {
+            if (!scriptText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{scriptPath}: dotnet-generated-code-diff script must contain {requiredToken}.");
+            }
+        }
+    }
+}
+
+void ValidateWorkflowLintContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-lint-github-actions.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-lint-github-actions.schema.json");
+
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: GitHub Actions lint workflow is required.");
+    }
+    else
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        foreach (var requiredToken in new[] { "raven-actions/actionlint@v2", "runs-on-self-hosted", "enable-cache" })
+        {
+            if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: GitHub Actions lint workflow must contain {requiredToken}.");
+            }
+        }
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: GitHub Actions lint workflow schema is required.");
+    }
+}
+
+void ValidateReleaseBackpropagationContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-release-backpropagation.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-release-backpropagation.schema.json");
+    var actionPath = Path.Combine(repoRoot, ".github", "actions", "release-backpropagation", "action.yml");
+    var scriptPath = Path.Combine(repoRoot, ".github", "actions", "release-backpropagation", "run-backpropagation.cs");
+
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: release backpropagation workflow is required.");
+    }
+    else
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        var workflowLines = File.ReadAllLines(workflowPath);
+        foreach (var requiredInput in new[] { "new-version", "release-ref-name", "default-branch", "auto-merge" })
+        {
+            if (GetYamlBlock(workflowLines, requiredInput) is null)
+            {
+                AddFailure($"{workflowPath}: release backpropagation workflow must expose {requiredInput} input.");
+            }
+        }
+
+        if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/release-backpropagation", StringComparison.Ordinal)
+            || !workflowText.Contains("PR_AUTOMATION_PAT", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: release backpropagation workflow must use release-backpropagation action and pass PR_AUTOMATION_PAT.");
+        }
+    }
+
+    if (!File.Exists(schemaPath))
+    {
+        AddFailure($"{schemaPath}: release backpropagation workflow schema is required.");
+    }
+
+    if (!File.Exists(actionPath))
+    {
+        AddFailure($"{actionPath}: release-backpropagation composite action is required.");
+    }
+    else if (!File.ReadAllText(actionPath).Contains("dotnet run --file", StringComparison.Ordinal))
+    {
+        AddFailure($"{actionPath}: release-backpropagation action must delegate command logic to a .NET file script.");
+    }
+
+    if (!File.Exists(scriptPath))
+    {
+        AddFailure($"{scriptPath}: release-backpropagation .NET file script is required.");
+    }
+    else
+    {
+        var scriptText = File.ReadAllText(scriptPath);
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "\"pr\"", "\"new\"", "\"merge\"", "PR_AUTOMATION_PAT" })
+        {
+            if (!scriptText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{scriptPath}: release-backpropagation script must contain {requiredToken}.");
             }
         }
     }
