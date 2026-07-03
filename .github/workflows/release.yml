@@ -1,12 +1,14 @@
 # Summary:
-#   Runs this repository's release automation after platform workflow self-tests pass.
+#   Runs this repository's validation and release automation after platform workflow self-tests pass.
 # Remarks:
+#   Pull requests exercise the same platform selftest and semantic-release workflow contract.
 #   This workflow publishes GitHub release metadata only.
 #   It does not publish NuGet packages, OCI images, deployments, or run semantic-release exec hooks.
 
 name: release
 
 on:
+  pull_request:
   push:
     branches: [main]
   workflow_dispatch:

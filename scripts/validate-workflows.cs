@@ -181,14 +181,23 @@ void ValidateCompositeActions()
 
 void ValidateContainerPublishContract()
 {
-    var oldWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-build-container.yml");
-    if (File.Exists(oldWorkflowPath))
+    foreach (var oldWorkflowName in new[] { "wf-build-container.yml", "wf-publish-container.yml" })
     {
-        AddFailure($"{oldWorkflowPath}: container workflow has been renamed to wf-publish-container.yml.");
+        var oldWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", oldWorkflowName);
+        if (File.Exists(oldWorkflowPath))
+        {
+            AddFailure($"{oldWorkflowPath}: .NET container publishing uses wf-publish-container-dotnet.yml.");
+        }
     }
 
-    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-container.yml");
-    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-publish-container.schema.json");
+    var oldSchemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-publish-container.schema.json");
+    if (File.Exists(oldSchemaPath))
+    {
+        AddFailure($"{oldSchemaPath}: .NET container publishing schema must be wf-publish-container-dotnet.schema.json.");
+    }
+
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-container-dotnet.yml");
+    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-publish-container-dotnet.schema.json");
     var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-setversion", "action.yml");
 
     if (!File.Exists(workflowPath))
@@ -199,27 +208,75 @@ void ValidateContainerPublishContract()
     {
         var workflowText = File.ReadAllText(workflowPath);
         var workflowLines = File.ReadAllLines(workflowPath);
-        if (GetYamlBlock(workflowLines, "dotnet-setversion") is null)
+
+        if (!Regex.IsMatch(workflowText, @"(?m)^name:\s*wf-publish-container-dotnet\s*$"))
         {
-            AddFailure($"{workflowPath}: publish container workflow must expose dotnet-setversion input.");
+            AddFailure($"{workflowPath}: workflow name must be wf-publish-container-dotnet.");
         }
 
-        if (GetYamlBlock(workflowLines, "version") is null)
-        {
-            AddFailure($"{workflowPath}: publish container workflow must expose bare version input.");
-        }
-
-        foreach (var requiredInput in new[] { "build-args", "channel-latest", "extra-tags" })
+        foreach (var requiredInput in new[]
+                 {
+                     "runs-on-json",
+                     "runs-on-self-hosted",
+                     "image",
+                     "context",
+                     "dockerfile",
+                     "platforms",
+                     "version",
+                     "version-tag",
+                     "version-channel",
+                     "channel-latest",
+                     "extra-tags",
+                     "push",
+                     "registry",
+                     "registry-username",
+                     "buildkit-endpoint",
+                     "build-args",
+                     "sdk-version",
+                     "global-json-file",
+                     "version-working-directory",
+                     "version-recursive",
+                     "version-project",
+                     "version-tool-version",
+                     "cache-from",
+                     "cache-to",
+                     "sbom",
+                     "provenance",
+                     "labels"
+                 })
         {
             if (GetYamlBlock(workflowLines, requiredInput) is null)
             {
-                AddFailure($"{workflowPath}: publish container workflow must expose {requiredInput} input.");
+                AddFailure($"{workflowPath}: .NET container publish workflow must expose {requiredInput} input.");
+            }
+        }
+
+        foreach (var forbiddenInput in new[]
+                 {
+                     "latest-on-stable",
+                     "dotnet-setversion",
+                     "dotnet-version",
+                     "dotnet-global-json-file",
+                     "dotnet-setversion-working-directory",
+                     "dotnet-setversion-recursive",
+                     "dotnet-setversion-project",
+                     "dotnet-setversion-tool-version"
+                 })
+        {
+            if (GetYamlBlock(workflowLines, forbiddenInput) is not null)
+            {
+                AddFailure($"{workflowPath}: .NET container publish workflow must not expose stale input {forbiddenInput}.");
             }
         }
 
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
         {
-            AddFailure($"{workflowPath}: publish container workflow must use the dotnet-setversion action when enabled.");
+            AddFailure($"{workflowPath}: .NET container publish workflow must stamp projects with dotnet-setversion before Docker Buildx.");
+        }
+
+        if (workflowText.Contains("LATEST_ON_STABLE", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: latest-on-stable tag path must be removed; use channel-latest or extra-tags.");
         }
     }
 
@@ -574,24 +631,9 @@ void ValidateRepositoryPipelineContract()
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
     var releaseConfigPath = Path.Combine(repoRoot, "release.config.cjs");
 
-    if (!File.Exists(buildWorkflowPath))
+    if (File.Exists(buildWorkflowPath))
     {
-        AddFailure($"{buildWorkflowPath}: repository build workflow is required.");
-    }
-    else
-    {
-        var buildText = File.ReadAllText(buildWorkflowPath);
-        if (!Regex.IsMatch(buildText, @"(?m)^\s*pull_request:\s*$")
-            || !Regex.IsMatch(buildText, @"(?m)^\s*push:\s*$")
-            || !buildText.Contains("branches: [main]", StringComparison.Ordinal))
-        {
-            AddFailure($"{buildWorkflowPath}: build workflow must run on pull_request and push to main.");
-        }
-
-        if (!buildText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
-        {
-            AddFailure($"{buildWorkflowPath}: build workflow must call wf-platform-selftest.yml.");
-        }
+        AddFailure($"{buildWorkflowPath}: release.yml owns PR, main, and manual platform selftests; remove build.yml.");
     }
 
     if (!File.Exists(releaseWorkflowPath))
@@ -601,10 +643,11 @@ void ValidateRepositoryPipelineContract()
     else
     {
         var releaseText = File.ReadAllText(releaseWorkflowPath);
-        if (!Regex.IsMatch(releaseText, @"(?m)^\s*push:\s*$")
+        if (!Regex.IsMatch(releaseText, @"(?m)^\s*pull_request:\s*$")
+            || !Regex.IsMatch(releaseText, @"(?m)^\s*push:\s*$")
             || !releaseText.Contains("branches: [main]", StringComparison.Ordinal))
         {
-            AddFailure($"{releaseWorkflowPath}: release workflow must run on push to main.");
+            AddFailure($"{releaseWorkflowPath}: release workflow must run on pull_request and push to main.");
         }
 
         if (!releaseText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))

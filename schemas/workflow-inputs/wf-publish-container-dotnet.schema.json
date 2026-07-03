@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-publish-container/v1/schema.json",
-  "title": "wf-publish-container inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-publish-container-dotnet/v1/schema.json",
+  "title": "wf-publish-container-dotnet inputs",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "image"
+    "image",
+    "version"
   ],
   "properties": {
     "runs-on-json": {
@@ -33,7 +34,6 @@
     },
     "version": {
       "type": "string",
-      "default": "",
       "description": "Bare semantic version without leading v."
     },
     "version-tag": {
@@ -47,10 +47,6 @@
     "channel-latest": {
       "type": "boolean",
       "default": true
-    },
-    "latest-on-stable": {
-      "type": "boolean",
-      "default": false
     },
     "extra-tags": {
       "type": "string",
@@ -76,31 +72,27 @@
       "type": "string",
       "default": ""
     },
-    "dotnet-setversion": {
-      "type": "boolean",
-      "default": false
-    },
-    "dotnet-version": {
+    "sdk-version": {
       "type": "string",
       "default": "10.0.x"
     },
-    "dotnet-global-json-file": {
+    "global-json-file": {
       "type": "string",
       "default": ""
     },
-    "dotnet-setversion-working-directory": {
+    "version-working-directory": {
       "type": "string",
       "default": "."
     },
-    "dotnet-setversion-recursive": {
+    "version-recursive": {
       "type": "boolean",
       "default": true
     },
-    "dotnet-setversion-project": {
+    "version-project": {
       "type": "string",
       "default": ""
     },
-    "dotnet-setversion-tool-version": {
+    "version-tool-version": {
       "type": "string",
       "default": "4.0.0"
     },

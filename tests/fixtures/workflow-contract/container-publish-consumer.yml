@@ -7,8 +7,8 @@ permissions: {}
 
 jobs:
   publish:
-    name: Container publish
-    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container.yml@v1
+    name: .NET container publish
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
     permissions:
       contents: read
       packages: write
@@ -26,7 +26,6 @@ jobs:
       channel-latest: true
       extra-tags: |
         latest
-      dotnet-setversion: true
       push: false
     secrets:
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,14 +1,14 @@
 # Summary:
-#   Reusable Docker Buildx workflow for publishing OCI images.
+#   Reusable .NET Docker Buildx workflow for publishing OCI images.
 # Remarks:
 #   This workflow runs in the caller repository context.
+#   It always stamps .NET project versions before Docker Buildx runs.
 #   It can use a remote BuildKit endpoint on self-hosted runners.
-#   It can stamp .NET project versions before the image build when dotnet-setversion is true.
 #   It forwards non-secret Docker build arguments to BuildKit.
 #   If push is true, it logs into the configured registry and may create or overwrite mutable tags.
 #   Consumers should deploy image digests from the digest output instead of mutable tags.
 
-name: wf-publish-container
+name: wf-publish-container-dotnet
 
 on:
   workflow_call:
@@ -43,10 +43,9 @@ on:
         required: false
         default: linux/amd64
       version:
-        description: Optional bare semantic version without leading v, used for .NET stamping and the VERSION Docker build argument.
+        description: Required bare semantic version without leading v, used for .NET stamping and the VERSION Docker build argument.
         type: string
-        required: false
-        default: ""
+        required: true
       version-tag:
         description: Optional release version tag to apply to the image, usually prefixed with v.
         type: string
@@ -62,11 +61,6 @@ on:
         type: boolean
         required: false
         default: true
-      latest-on-stable:
-        description: Adds the mutable latest tag when version-channel is stable.
-        type: boolean
-        required: false
-        default: false
       extra-tags:
         description: Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through.
         type: string
@@ -97,37 +91,32 @@ on:
         type: string
         required: false
         default: ""
-      dotnet-setversion:
-        description: Runs the dotnet-setversion action before Docker Buildx when true. Requires version to be a bare semantic version.
-        type: boolean
-        required: false
-        default: false
-      dotnet-version:
+      sdk-version:
         description: .NET SDK version used by the dotnet-setversion action.
         type: string
         required: false
         default: 10.0.x
-      dotnet-global-json-file:
+      global-json-file:
         description: Optional global.json path passed to actions/setup-dotnet for version stamping.
         type: string
         required: false
         default: ""
-      dotnet-setversion-working-directory:
+      version-working-directory:
         description: Working directory whose csproj files are stamped before Docker Buildx.
         type: string
         required: false
         default: .
-      dotnet-setversion-recursive:
-        description: Recursively stamps csproj files under dotnet-setversion-working-directory when true.
+      version-recursive:
+        description: Recursively stamps csproj files under version-working-directory when true.
         type: boolean
         required: false
         default: true
-      dotnet-setversion-project:
+      version-project:
         description: Optional project path passed to setversion when recursive stamping is false.
         type: string
         required: false
         default: ""
-      dotnet-setversion-tool-version:
+      version-tool-version:
         description: dotnet-setversion tool package version installed by the composite action.
         type: string
         required: false
@@ -186,7 +175,7 @@ permissions: {}
 
 jobs:
   publish:
-    name: Container publish
+    name: .NET container publish
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -212,7 +201,6 @@ jobs:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
           BUILDKIT_ENDPOINT: ${{ inputs.buildkit-endpoint }}
-          DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
         run: |
           mkdir -p artifacts/container artifacts/meta
           {
@@ -221,28 +209,27 @@ jobs:
             echo "Runner OS: ${RUNNER_OS}"
             echo "Runner arch: ${RUNNER_ARCH}"
             echo "Remote BuildKit endpoint configured: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
-            echo "Dotnet setversion enabled: ${DOTNET_SETVERSION}"
+            echo ".NET version stamping: true"
           } | tee artifacts/meta/runner-contract.txt
 
       - name: Validate publish inputs
         env:
           VERSION: ${{ inputs.version }}
-          DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
-          DOTNET_SETVERSION_PROJECT: ${{ inputs.dotnet-setversion-project }}
-          DOTNET_SETVERSION_RECURSIVE: ${{ inputs.dotnet-setversion-recursive }}
+          VERSION_PROJECT: ${{ inputs.version-project }}
+          VERSION_RECURSIVE: ${{ inputs.version-recursive }}
         run: |
-          if [[ -n "$VERSION" && "$VERSION" =~ ^[vV] ]]; then
+          if [[ -z "$VERSION" ]]; then
+            echo "version is required for .NET container publishing." >&2
+            exit 2
+          fi
+
+          if [[ "$VERSION" =~ ^[vV] ]]; then
             echo "version must be a bare semantic version without leading v. Use version-tag for Docker tags." >&2
             exit 2
           fi
 
-          if [[ "$DOTNET_SETVERSION" == "true" && -z "$VERSION" ]]; then
-            echo "version is required when dotnet-setversion is true." >&2
-            exit 2
-          fi
-
-          if [[ "$DOTNET_SETVERSION_RECURSIVE" == "true" && -n "$DOTNET_SETVERSION_PROJECT" ]]; then
-            echo "dotnet-setversion-project requires dotnet-setversion-recursive to be false." >&2
+          if [[ "$VERSION_RECURSIVE" == "true" && -n "$VERSION_PROJECT" ]]; then
+            echo "version-project requires version-recursive to be false." >&2
             exit 2
           fi
 
@@ -258,20 +245,8 @@ jobs:
             docker version
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Set up Docker Buildx
-        if: inputs.buildkit-endpoint == ''
-        uses: docker/setup-buildx-action@v4
-
-      - name: Set up remote Docker Buildx
-        if: inputs.buildkit-endpoint != ''
-        uses: docker/setup-buildx-action@v4
-        with:
-          driver: remote
-          endpoint: ${{ inputs.buildkit-endpoint }}
-
       - name: Resolve platform action source
         id: platform-source
-        if: inputs.dotnet-setversion
         env:
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
@@ -286,7 +261,6 @@ jobs:
           echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Checkout platform action source
-        if: inputs.dotnet-setversion
         uses: actions/checkout@v7
         with:
           repository: ${{ steps.platform-source.outputs.repository }}
@@ -298,20 +272,30 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Stamp .NET project versions
-        if: inputs.dotnet-setversion
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion
         with:
           version: ${{ inputs.version }}
-          working-directory: ${{ inputs.dotnet-setversion-working-directory }}
-          dotnet-version: ${{ inputs.dotnet-version }}
-          global-json-file: ${{ inputs.dotnet-global-json-file }}
-          recursive: ${{ inputs.dotnet-setversion-recursive }}
-          project: ${{ inputs.dotnet-setversion-project }}
-          tool-version: ${{ inputs.dotnet-setversion-tool-version }}
+          working-directory: ${{ inputs.version-working-directory }}
+          dotnet-version: ${{ inputs.sdk-version }}
+          global-json-file: ${{ inputs.global-json-file }}
+          recursive: ${{ inputs.version-recursive }}
+          project: ${{ inputs.version-project }}
+          tool-version: ${{ inputs.version-tool-version }}
 
       - name: Remove platform action source
-        if: always() && inputs.dotnet-setversion
+        if: always()
         run: rm -rf .ci/arkanis-ci
+
+      - name: Set up Docker Buildx
+        if: inputs.buildkit-endpoint == ''
+        uses: docker/setup-buildx-action@v4
+
+      - name: Set up remote Docker Buildx
+        if: inputs.buildkit-endpoint != ''
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: remote
+          endpoint: ${{ inputs.buildkit-endpoint }}
 
       - name: Resolve image tags
         id: tags
@@ -320,7 +304,6 @@ jobs:
           VERSION_TAG: ${{ inputs.version-tag }}
           VERSION_CHANNEL: ${{ inputs.version-channel }}
           CHANNEL_LATEST: ${{ inputs.channel-latest }}
-          LATEST_ON_STABLE: ${{ inputs.latest-on-stable }}
           EXTRA_TAGS: ${{ inputs.extra-tags }}
         run: |
           short_sha="${GITHUB_SHA::12}"
@@ -334,9 +317,6 @@ jobs:
               echo "${IMAGE}:${VERSION_CHANNEL}"
               if [[ "$CHANNEL_LATEST" == "true" ]]; then
                 echo "${IMAGE}:${VERSION_CHANNEL}-latest"
-              fi
-              if [[ "$LATEST_ON_STABLE" == "true" && "$VERSION_CHANNEL" == "stable" ]]; then
-                echo "${IMAGE}:latest"
               fi
             fi
             while IFS= read -r extra_tag; do
@@ -365,7 +345,7 @@ jobs:
             if [[ -n "$BUILD_ARGS" ]]; then
               printf '%s\n' "$BUILD_ARGS"
             fi
-            if [[ -n "$VERSION" ]] && ! grep -Eq '(^|[[:space:]])VERSION=' <<< "$BUILD_ARGS"; then
+            if ! grep -Eq '(^|[[:space:]])VERSION=' <<< "$BUILD_ARGS"; then
               printf 'VERSION=%s\n' "$VERSION"
             fi
             echo "BUILD_ARGS"
@@ -412,7 +392,7 @@ jobs:
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-publish-container",
+              "workflow": "wf-publish-container-dotnet",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
@@ -440,21 +420,21 @@ jobs:
           VERSION_CHANNEL: ${{ inputs.version-channel }}
           CHANNEL_LATEST: ${{ inputs.channel-latest }}
           EXTRA_TAGS: ${{ inputs.extra-tags }}
-          DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
+          SDK_VERSION: ${{ inputs.sdk-version }}
         run: |
           {
-            echo "# Container publishing"
+            echo "# .NET container publishing"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
             echo "| Image | \`${IMAGE}\` |"
-            echo "| Version | \`${VERSION:-none}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| .NET SDK | \`${SDK_VERSION}\` |"
             echo "| Version channel | \`${VERSION_CHANNEL:-none}\` |"
             echo "| Channel latest | \`${CHANNEL_LATEST}\` |"
             echo "| Extra tags | \`${EXTRA_TAGS:-none}\` |"
-            echo "| Dotnet setversion | \`${DOTNET_SETVERSION}\` |"
             echo "| Push | \`${PUSH}\` |"
             echo "| Digest | \`${DIGEST:-none}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
