@@ -31,6 +31,9 @@ node-{os}-{arch}-{node-version}-{manager}-{lockfile-hash}
 ```
 
 Strict installs only.
+Node workflows cache the package-manager store with `runs-on/cache`.
+`wf-setup-node.yml` computes cache path from npm, pnpm, or yarn after package-manager setup.
+Set `enable-cache` to false for cold-install validation or runners without cache service access.
 
 ## Python
 

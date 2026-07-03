@@ -24,6 +24,7 @@ Directory.SetCurrentDirectory(repoRoot);
 
 var failures = new List<string>();
 
+ValidateWorkflowInputSchemas();
 ValidateWorkflows();
 ValidateCompositeActions();
 await RunActionlintWhenAvailableAsync();
@@ -36,6 +37,25 @@ if (failures.Count > 0)
 
 Console.WriteLine("Workflow validation passed.");
 return 0;
+
+void ValidateWorkflowInputSchemas()
+{
+    var schemaRoot = Path.Combine(repoRoot, "schemas", "workflow-inputs");
+    if (!Directory.Exists(schemaRoot))
+    {
+        return;
+    }
+
+    foreach (var schema in Directory.EnumerateFiles(schemaRoot, "wf-*.schema.json").Order(StringComparer.Ordinal))
+    {
+        var workflowName = Path.GetFileName(schema).Replace(".schema.json", ".yml", StringComparison.Ordinal);
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            AddFailure($"{schema}: workflow input schema must have matching public workflow {workflowPath}.");
+        }
+    }
+}
 
 void ValidateWorkflows()
 {

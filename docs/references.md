@@ -12,6 +12,8 @@ Last verified: 2026-07-03.
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax
 - GitHub secure use reference: https://docs.github.com/en/actions/reference/security/secure-use
 - GitHub artifacts: https://docs.github.com/en/actions/tutorials/store-and-share-data
+- actions/setup-node: https://github.com/actions/setup-node
+- Node.js Corepack: https://nodejs.org/api/corepack.html
 - GitHub local reusable workflow reference changelog: https://github.blog/changelog/2022-01-25-github-actions-reusable-workflows-can-be-referenced-locally/
 - NuGet Trusted Publishing: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
 - NuGet/login action: https://github.com/NuGet/login

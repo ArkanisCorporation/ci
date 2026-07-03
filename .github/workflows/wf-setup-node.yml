@@ -1,0 +1,576 @@
+# Summary:
+#   Reusable Node.js verification workflow for strict install, lint, test, build, metadata, and diagnostics.
+# Remarks:
+#   This workflow runs in the caller repository context.
+#   It checks out caller source, writes artifacts under `artifacts/`, and uploads diagnostics even on failure.
+#   Preconditions include a valid package.json, a lockfile for the selected package manager, and a compatible Node.js version.
+#   It prepares pnpm and yarn through Corepack, using package-manager-version or package.json packageManager for deterministic resolution.
+#   It calls runs-on/cache only when enable-cache is true.
+#   It does not publish packages, releases, Pages sites, or deployments.
+
+name: wf-setup-node
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      node-version:
+        description: Node.js version range installed by actions/setup-node.
+        type: string
+        required: false
+        default: 24.x
+      package-manager:
+        description: Package manager used for cache detection, install, and scripts. Supported values are npm, pnpm, and yarn.
+        type: string
+        required: false
+        default: pnpm
+      package-manager-version:
+        description: Optional pnpm or yarn version installed by Corepack. Required for pnpm/yarn when package.json lacks packageManager.
+        type: string
+        required: false
+        default: ""
+      working-directory:
+        description: Directory containing package.json and the selected lockfile.
+        type: string
+        required: false
+        default: .
+      cache-dependency-path:
+        description: Optional newline-delimited lockfile glob list relative to the repository root. Defaults to selected package-manager lockfile in working-directory.
+        type: string
+        required: false
+        default: ""
+      enable-cache:
+        description: Restores and saves package-manager cache with runs-on/cache when true. Set false for cold-install validation or runners without cache service access.
+        type: boolean
+        required: false
+        default: true
+      run-install:
+        description: Runs dependency installation when true.
+        type: boolean
+        required: false
+        default: true
+      install-command:
+        description: Optional install command run from working-directory instead of generated strict install command.
+        type: string
+        required: false
+        default: ""
+      allow-lifecycle-scripts:
+        description: Allows dependency lifecycle scripts during generated install command. Keep false for untrusted pull_request verification.
+        type: boolean
+        required: false
+        default: false
+      run-lint:
+        description: Runs lint-script or lint-command when true.
+        type: boolean
+        required: false
+        default: true
+      lint-script:
+        description: package.json script name used for lint when lint-command is empty.
+        type: string
+        required: false
+        default: lint
+      lint-command:
+        description: Optional lint command run from working-directory.
+        type: string
+        required: false
+        default: ""
+      run-tests:
+        description: Runs test-script or test-command when true.
+        type: boolean
+        required: false
+        default: true
+      test-script:
+        description: package.json script name used for tests when test-command is empty.
+        type: string
+        required: false
+        default: test
+      test-command:
+        description: Optional test command run from working-directory.
+        type: string
+        required: false
+        default: ""
+      run-build:
+        description: Runs build-script or build-command when true.
+        type: boolean
+        required: false
+        default: true
+      build-script:
+        description: package.json script name used for build when build-command is empty.
+        type: string
+        required: false
+        default: build
+      build-command:
+        description: Optional build command run from working-directory.
+        type: string
+        required: false
+        default: ""
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+      upload-diagnostics:
+        description: Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact.
+        type: boolean
+        required: false
+        default: true
+      timeout-minutes:
+        description: Verification job timeout.
+        type: number
+        required: false
+        default: 30
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.verify.outputs.artifact-manifest }}
+      run-metadata:
+        description: Path to the generated run metadata.
+        value: ${{ jobs.verify.outputs.run-metadata }}
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Node verification
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+      run-metadata: ${{ steps.metadata.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        id: setup-node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Prepare package manager
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          PACKAGE_MANAGER_VERSION: ${{ inputs.package-manager-version }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          cd "$WORKING_DIRECTORY"
+          export COREPACK_HOME="${RUNNER_TEMP}/corepack-home"
+          echo "COREPACK_HOME=${COREPACK_HOME}" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/meta" "${RUNNER_TEMP}/corepack-bin" "${COREPACK_HOME}"
+
+          case "$PACKAGE_MANAGER" in
+            npm)
+              npm --version | tee "$GITHUB_WORKSPACE/artifacts/meta/package-manager-version.txt"
+              ;;
+            pnpm|yarn)
+              corepack enable --install-directory "${RUNNER_TEMP}/corepack-bin"
+              echo "${RUNNER_TEMP}/corepack-bin" >> "$GITHUB_PATH"
+              export PATH="${RUNNER_TEMP}/corepack-bin:${PATH}"
+
+              if [[ -n "$PACKAGE_MANAGER_VERSION" ]]; then
+                corepack install --global "${PACKAGE_MANAGER}@${PACKAGE_MANAGER_VERSION}"
+              else
+                node -e 'const fs = require("fs"); const manager = process.argv[1]; const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); if (!pkg.packageManager || !pkg.packageManager.startsWith(manager + "@")) { console.error("package-manager-version is required when package.json lacks packageManager for " + manager + "."); process.exit(2); }' "$PACKAGE_MANAGER"
+                corepack install
+              fi
+
+              "$PACKAGE_MANAGER" --version | tee "$GITHUB_WORKSPACE/artifacts/meta/package-manager-version.txt"
+              ;;
+            *)
+              echo "Unsupported package-manager: ${PACKAGE_MANAGER}" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Detect package manager context
+        id: node-context
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          CACHE_DEPENDENCY_PATH: ${{ inputs.cache-dependency-path }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          if [[ ! -d "$WORKING_DIRECTORY" ]]; then
+            echo "working-directory does not exist: ${WORKING_DIRECTORY}" >&2
+            exit 2
+          fi
+
+          cd "$WORKING_DIRECTORY"
+          if [[ ! -f package.json ]]; then
+            echo "package.json is missing in ${WORKING_DIRECTORY}" >&2
+            exit 2
+          fi
+
+          case "$PACKAGE_MANAGER" in
+            npm)
+              cache_path="$(npm config get cache)"
+              lockfile_candidates=(package-lock.json npm-shrinkwrap.json)
+              ;;
+            pnpm)
+              cache_path="$(pnpm store path --silent)"
+              lockfile_candidates=(pnpm-lock.yaml)
+              ;;
+            yarn)
+              cache_path="$(yarn config get cacheFolder 2>/dev/null || true)"
+              if [[ -z "$cache_path" || "$cache_path" == "undefined" ]]; then
+                cache_path="$(yarn cache dir)"
+              fi
+              lockfile_candidates=(yarn.lock)
+              ;;
+            *)
+              echo "Unsupported package-manager: ${PACKAGE_MANAGER}" >&2
+              exit 2
+              ;;
+          esac
+
+          lockfiles=()
+          cd "$GITHUB_WORKSPACE"
+          if [[ -n "$CACHE_DEPENDENCY_PATH" ]]; then
+            while IFS= read -r pattern; do
+              [[ -z "$pattern" ]] && continue
+              while IFS= read -r match; do
+                [[ -f "$match" ]] && lockfiles+=("$match")
+              done < <(compgen -G "$pattern" || true)
+            done <<< "$CACHE_DEPENDENCY_PATH"
+          else
+            for candidate in "${lockfile_candidates[@]}"; do
+              if [[ -f "${WORKING_DIRECTORY}/${candidate}" ]]; then
+                lockfiles+=("${WORKING_DIRECTORY}/${candidate}")
+              fi
+            done
+          fi
+
+          if [[ "${#lockfiles[@]}" -eq 0 ]]; then
+            echo "No lockfile found for ${PACKAGE_MANAGER}." >&2
+            echo "Set cache-dependency-path or add the package-manager lockfile under ${WORKING_DIRECTORY}." >&2
+            exit 2
+          fi
+
+          if [[ "$cache_path" != /* ]]; then
+            cache_path="${GITHUB_WORKSPACE}/${WORKING_DIRECTORY}/${cache_path}"
+          fi
+
+          mapfile -d '' sorted_lockfiles < <(printf '%s\0' "${lockfiles[@]}" | sort -z)
+          lock_hash="$(sha256sum "${sorted_lockfiles[@]}" | sha256sum | cut -d ' ' -f 1)"
+          cache_key="${RUNNER_OS}-${RUNNER_ARCH}-node-${{ inputs.node-version }}-${PACKAGE_MANAGER}-${lock_hash}"
+
+          mkdir -p artifacts/meta
+          {
+            echo "Package manager: ${PACKAGE_MANAGER}"
+            echo "Cache path: ${cache_path}"
+            echo "Cache key: ${cache_key}"
+            echo "Lockfiles:"
+            printf '%s\n' "${sorted_lockfiles[@]}"
+          } | tee artifacts/meta/node-cache-context.txt
+
+          {
+            echo "cache-path<<EOF"
+            printf '%s\n' "$cache_path"
+            echo "EOF"
+            echo "cache-key=${cache_key}"
+            echo "lock-hash=${lock_hash}"
+            echo "lockfiles<<EOF"
+            printf '%s\n' "${sorted_lockfiles[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache package manager store
+        if: inputs.enable-cache
+        id: node-cache
+        uses: runs-on/cache@v5.0.7
+        with:
+          path: ${{ steps.node-context.outputs.cache-path }}
+          key: ${{ steps.node-context.outputs.cache-key }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-${{ inputs.package-manager }}-
+
+      - name: Record tool versions
+        id: tool-versions
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/meta
+          node --version | tee artifacts/meta/node-version.txt
+          package_manager_version="$("${PACKAGE_MANAGER}" --version)"
+          printf '%s\n' "$package_manager_version" > artifacts/meta/package-manager-version.txt
+          printf 'tool_versions_json={"node":"%s","%s":"%s"}\n' "$(node --version)" "$PACKAGE_MANAGER" "$package_manager_version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Package manager: ${PACKAGE_MANAGER}"
+            echo "Working directory: ${WORKING_DIRECTORY}"
+            echo "Package cache enabled: ${ENABLE_CACHE}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Workspace: ${GITHUB_WORKSPACE}"
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            echo "Disk:"
+            df -h .
+            echo
+            echo "Temp:"
+            printf '%s\n' "${RUNNER_TEMP:-unset}"
+            echo
+            echo "Required tools:"
+            command -v git
+            command -v node
+            command -v npm
+            command -v "$PACKAGE_MANAGER"
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Install dependencies
+        if: inputs.run-install
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+          ALLOW_LIFECYCLE_SCRIPTS: ${{ inputs.allow-lifecycle-scripts }}
+        run: |
+          set -euo pipefail
+          cd "$WORKING_DIRECTORY"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/node"
+
+          run_logged() {
+            local log_file="$1"
+            shift
+            "$@" 2>&1 | tee "$GITHUB_WORKSPACE/$log_file"
+            local status="${PIPESTATUS[0]}"
+            return "$status"
+          }
+
+          if [[ -n "$INSTALL_COMMAND" ]]; then
+            run_logged artifacts/node/install.log bash -lc "$INSTALL_COMMAND"
+            exit $?
+          fi
+
+          case "$PACKAGE_MANAGER" in
+            npm)
+              args=(ci)
+              if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+                args+=(--ignore-scripts)
+              fi
+              ;;
+            pnpm)
+              args=(install --frozen-lockfile)
+              if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+                args+=(--ignore-scripts)
+              fi
+              ;;
+            yarn)
+              yarn_version="$(yarn --version)"
+              if [[ "$yarn_version" == 1.* ]]; then
+                args=(install --frozen-lockfile)
+                if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+                  args+=(--ignore-scripts)
+                fi
+              else
+                args=(install --immutable)
+                if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+                  args+=(--mode=skip-builds)
+                fi
+              fi
+              ;;
+          esac
+
+          run_logged artifacts/node/install.log "$PACKAGE_MANAGER" "${args[@]}"
+
+      - name: Run configured scripts
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          RUN_LINT: ${{ inputs.run-lint }}
+          LINT_SCRIPT: ${{ inputs.lint-script }}
+          LINT_COMMAND: ${{ inputs.lint-command }}
+          RUN_TESTS: ${{ inputs.run-tests }}
+          TEST_SCRIPT: ${{ inputs.test-script }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+          RUN_BUILD: ${{ inputs.run-build }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: |
+          set -euo pipefail
+          cd "$WORKING_DIRECTORY"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/node"
+
+          has_script() {
+            node -e 'const fs = require("fs"); const script = process.argv[1]; const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); process.exit(pkg.scripts && Object.prototype.hasOwnProperty.call(pkg.scripts, script) ? 0 : 1);' "$1"
+          }
+
+          run_logged() {
+            local log_file="$1"
+            shift
+            "$@" 2>&1 | tee "$GITHUB_WORKSPACE/$log_file"
+            local status="${PIPESTATUS[0]}"
+            return "$status"
+          }
+
+          run_stage() {
+            local stage="$1"
+            local enabled="$2"
+            local script_name="$3"
+            local command_override="$4"
+            local log_file="artifacts/node/${stage}.log"
+
+            if [[ "$enabled" != "true" ]]; then
+              echo "${stage} disabled." | tee "$GITHUB_WORKSPACE/$log_file"
+              return 0
+            fi
+
+            if [[ -n "$command_override" ]]; then
+              run_logged "$log_file" bash -lc "$command_override"
+              return $?
+            fi
+
+            if has_script "$script_name"; then
+              run_logged "$log_file" "$PACKAGE_MANAGER" run "$script_name"
+              return $?
+            fi
+
+            echo "package.json script '${script_name}' not found; ${stage} skipped." | tee "$GITHUB_WORKSPACE/$log_file"
+          }
+
+          run_stage lint "$RUN_LINT" "$LINT_SCRIPT" "$LINT_COMMAND"
+          run_stage test "$RUN_TESTS" "$TEST_SCRIPT" "$TEST_COMMAND"
+          run_stage build "$RUN_BUILD" "$BUILD_SCRIPT" "$BUILD_COMMAND"
+
+      - name: Write run metadata
+        id: metadata
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          TOOL_VERSIONS_JSON: ${{ steps.tool-versions.outputs.tool_versions_json || '{}' }}
+          CACHE_ENABLED: ${{ inputs.enable-cache }}
+          CACHE_KEY: ${{ steps.node-context.outputs.cache-key }}
+          CACHE_HIT: ${{ steps.node-cache.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p artifacts/meta
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-setup-node",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${RUNS_ON_JSON}
+            },
+            "tool_versions": ${TOOL_VERSIONS_JSON},
+            "cache": {
+              "enabled": "${CACHE_ENABLED}",
+              "key": "${CACHE_KEY}",
+              "hit": "${CACHE_HIT}"
+            }
+          }
+          JSON
+          echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
+
+      - name: Write artifact manifest
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-setup-node",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "verify"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-node-setup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary
+        if: always()
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          RUN_LINT: ${{ inputs.run-lint }}
+          RUN_TESTS: ${{ inputs.run-tests }}
+          RUN_BUILD: ${{ inputs.run-build }}
+          CACHE_ENABLED: ${{ inputs.enable-cache }}
+          CACHE_HIT: ${{ steps.node-cache.outputs.cache-hit || 'false' }}
+        run: |
+          {
+            echo "# Node setup verification"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Node version | \`${{ inputs.node-version }}\` |"
+            echo "| Package manager | \`${PACKAGE_MANAGER}\` |"
+            echo "| Working directory | \`${WORKING_DIRECTORY}\` |"
+            echo "| Cache enabled | \`${CACHE_ENABLED}\` |"
+            echo "| Cache hit | \`${CACHE_HIT}\` |"
+            echo "| Lint | \`${RUN_LINT}\` |"
+            echo "| Tests | \`${RUN_TESTS}\` |"
+            echo "| Build | \`${RUN_BUILD}\` |"
+            echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
+            echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics
+        if: ${{ always() && inputs.upload-diagnostics }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-node-setup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

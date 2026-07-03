@@ -5,7 +5,7 @@ allow:
   - actions/setup-dotnet
   - actions/setup-node
   - actions/setup-python
-  - actions/cache
+  - runs-on/cache
   - actions/upload-artifact
   - actions/download-artifact
   - actions/attest-build-provenance

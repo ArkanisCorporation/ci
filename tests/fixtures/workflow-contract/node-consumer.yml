@@ -1,14 +1,7 @@
-# node-pnpm
-
-Minimal consumer wrapper:
-
-```yaml
-name: build
+name: Node consumer fixture
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions: {}
 
@@ -26,4 +19,4 @@ jobs:
       package-manager-version: "10"
       working-directory: .
       enable-cache: true
-```
+      upload-diagnostics: true

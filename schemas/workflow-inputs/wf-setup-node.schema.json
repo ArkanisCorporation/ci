@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-setup-node/v1/schema.json",
+  "title": "wf-setup-node inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs-on-json": {
+      "type": "string",
+      "default": "[\"ubuntu-latest\"]"
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "node-version": {
+      "type": "string",
+      "default": "24.x"
+    },
+    "package-manager": {
+      "type": "string",
+      "enum": [
+        "npm",
+        "pnpm",
+        "yarn"
+      ],
+      "default": "pnpm"
+    },
+    "package-manager-version": {
+      "type": "string",
+      "default": ""
+    },
+    "working-directory": {
+      "type": "string",
+      "default": "."
+    },
+    "cache-dependency-path": {
+      "type": "string",
+      "default": ""
+    },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true
+    },
+    "run-install": {
+      "type": "boolean",
+      "default": true
+    },
+    "install-command": {
+      "type": "string",
+      "default": ""
+    },
+    "allow-lifecycle-scripts": {
+      "type": "boolean",
+      "default": false
+    },
+    "run-lint": {
+      "type": "boolean",
+      "default": true
+    },
+    "lint-script": {
+      "type": "string",
+      "default": "lint"
+    },
+    "lint-command": {
+      "type": "string",
+      "default": ""
+    },
+    "run-tests": {
+      "type": "boolean",
+      "default": true
+    },
+    "test-script": {
+      "type": "string",
+      "default": "test"
+    },
+    "test-command": {
+      "type": "string",
+      "default": ""
+    },
+    "run-build": {
+      "type": "boolean",
+      "default": true
+    },
+    "build-script": {
+      "type": "string",
+      "default": "build"
+    },
+    "build-command": {
+      "type": "string",
+      "default": ""
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 14,
+      "minimum": 1,
+      "maximum": 90
+    },
+    "upload-diagnostics": {
+      "type": "boolean",
+      "default": true
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1
+    }
+  }
+}

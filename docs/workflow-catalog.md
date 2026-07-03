@@ -7,6 +7,7 @@ Audience: consumers and platform maintainers.
 | File | Purpose | Trust zone | Required caller permissions | Main artifacts |
 |---|---|---|---|---|
 | `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | test results, coverage files, binlog, metadata, manifest |
+| `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | install/lint/test/build logs, metadata, manifest |
 | `wf-release-semantic.yml` | Run semantic-release metadata without `@semantic-release/exec`. | publish | `contents: write`, `issues: write`, `pull-requests: write` | release diagnostics |
 | `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish | `contents: read`, `id-token: write` | `.nupkg`, `.snupkg`, manifest |
 | `wf-build-container.yml` | Build and optionally push one OCI image. | trusted-build or publish | `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | digest, Buildx metadata, manifest |
@@ -44,6 +45,25 @@ Side effects:
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
+
+## Node Setup Workflow
+
+`wf-setup-node.yml` checks out the caller repository.
+It sets up Node.js, prepares npm/pnpm/yarn, restores package-manager cache when enabled, installs dependencies with strict lockfile behavior, optionally runs lint/test/build scripts, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+
+Preconditions:
+
+- `working-directory` contains package.json.
+- A lockfile exists for the selected package manager unless `cache-dependency-path` points at matching lockfiles.
+- pnpm and yarn projects either set `package-manager-version` or include package.json `packageManager`.
+- Lifecycle scripts are blocked in the generated install command unless `allow-lifecycle-scripts` is true.
+
+Side effects:
+
+- Writes under `artifacts/`.
+- Writes Corepack shims and package-manager downloads under `RUNNER_TEMP`.
+- Reads and writes package-manager cache when `enable-cache` is true.
+- Uploads diagnostics with `if: always()` when `upload-diagnostics` is true.
 
 ## Semantic Release Workflow
 

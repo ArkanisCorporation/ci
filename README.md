@@ -9,6 +9,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | Workflow | Purpose |
 |---|---|
 | `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics for .NET repositories. |
+| `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
 | `wf-release-semantic.yml` | Run semantic-release without `@semantic-release/exec` verification or publishing scripts. |
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |
 | `wf-build-container.yml` | Build and optionally push OCI images through Docker Buildx. |
@@ -48,6 +49,34 @@ jobs:
       enable-cache: true
       global-json-file: global.json
       solution: CitizenId.slnx
+```
+
+Node projects use the same runner model.
+
+```yaml
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  node:
+    name: Node setup
+    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-node.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: .
+      enable-cache: true
 ```
 
 ## Release Shape
