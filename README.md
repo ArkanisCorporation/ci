@@ -102,10 +102,13 @@ It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
 ## Local Validation
 
 ```bash
+dotnet run --file scripts/generate-docs.cs -- --check
 dotnet run --file scripts/validate-workflows.cs
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 act workflow_dispatch -W .github/workflows/wf-platform-selftest.yml -j validate -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
 ```
 
 The validation script requires version tags for external actions.
+It also checks that generated workflow input tables in `docs/workflow-catalog.md` are current.
+The platform selftest pins actionlint 1.7.12 through `raven-actions/actionlint@v2` before running the validator.
 The `act` command runs the platform self-test locally.

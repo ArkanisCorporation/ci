@@ -54,6 +54,282 @@ Use `runs-on-json` to override GitHub-hosted runner images or self-hosted runner
 Use `runs-on-self-hosted` to let workflows gate hosted-only and self-hosted-only assumptions.
 Set `enable-cache` to false for cold-restore validation, cache incident isolation, or runners without cache service access.
 
+## Schema-Backed Workflow Inputs
+
+The following tables are generated from `schemas/workflow-inputs/*.schema.json`.
+Run `dotnet run --file scripts/generate-docs.cs` after schema changes.
+
+<!-- generated:workflow-inputs:start -->
+### wf-deploy-k8s-aspire.yml
+
+Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `environment-name` | string | yes | none | n/a |
+| `aspire-environment` | string | yes | none | n/a |
+| `kubernetes-namespace` | string | yes | none | n/a |
+| `apphost-project` | string | no | `"src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj"` | n/a |
+| `output-path` | string | no | `"artifacts/k8s"` | n/a |
+| `image-tag` | string | no | `""` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `kubectl-version` | string | no | `"v1.36.2"` | n/a |
+| `helm-version` | string | no | `"v4.2.2"` | n/a |
+| `dry-run` | boolean | no | `false` | n/a |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-lint-github-actions.yml
+
+Schema: `schemas/workflow-inputs/wf-lint-github-actions.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `10` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-platform-selftest.yml
+
+Schema: `schemas/workflow-inputs/wf-platform-selftest.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-publish-container-dotnet.yml
+
+Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `image` | string | yes | none | n/a |
+| `context` | string | no | `"."` | n/a |
+| `dockerfile` | string | no | `"Dockerfile"` | n/a |
+| `platforms` | string | no | `"linux/amd64"` | n/a |
+| `version` | string | yes | none | Bare semantic version without leading v. |
+| `version-tag` | string | no | `""` | n/a |
+| `version-channel` | string | no | `""` | n/a |
+| `channel-latest` | boolean | no | `true` | n/a |
+| `extra-tags` | string | no | `""` | n/a |
+| `push` | boolean | no | `false` | n/a |
+| `registry` | string | no | `"ghcr.io"` | n/a |
+| `registry-username` | string | no | `""` | n/a |
+| `buildkit-endpoint` | string | no | `""` | n/a |
+| `build-args` | string | no | `""` | n/a |
+| `sdk-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `version-working-directory` | string | no | `"."` | n/a |
+| `version-recursive` | boolean | no | `true` | n/a |
+| `version-project` | string | no | `""` | n/a |
+| `version-tool-version` | string | no | `"4.0.0"` | n/a |
+| `cache-from` | string | no | `""` | n/a |
+| `cache-to` | string | no | `""` | n/a |
+| `sbom` | string | no | `"true"` | n/a |
+| `provenance` | string | no | `"mode=max"` | n/a |
+| `labels` | string | no | `""` | n/a |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-publish-nuget.yml
+
+Schema: `schemas/workflow-inputs/wf-publish-nuget.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `environment-name` | string | no | `"nuget"` | n/a |
+| `project` | string | yes | none | n/a |
+| `version` | string | yes | none | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `configuration` | string | no | `"Release"` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `source` | string | no | `"https://api.nuget.org/v3/index.json"` | n/a |
+| `trusted-publishing` | boolean | no | `true` | n/a |
+| `nuget-user` | string | no | `""` | n/a |
+| `skip-duplicate` | boolean | no | `true` | n/a |
+| `include-symbols` | boolean | no | `true` | n/a |
+| `include-source` | boolean | no | `true` | n/a |
+| `dotnet-setversion` | boolean | no | `true` | n/a |
+| `dotnet-setversion-working-directory` | string | no | `"."` | n/a |
+| `dotnet-setversion-recursive` | boolean | no | `true` | n/a |
+| `dotnet-setversion-project` | string | no | `""` | n/a |
+| `dotnet-setversion-tool-version` | string | no | `"4.0.0"` | n/a |
+| `dry-run` | boolean | no | `false` | n/a |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-release-backpropagation.yml
+
+Schema: `schemas/workflow-inputs/wf-release-backpropagation.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `new-version` | string | yes | none | n/a |
+| `release-ref-name` | string | yes | none | n/a |
+| `default-branch` | string | yes | none | n/a |
+| `labels` | string | no | `"ci\nautomated\n"` | n/a |
+| `auto-merge` | boolean | no | `true` | n/a |
+| `merge-method` | string | no | `"merge"` | Allowed: "merge", "squash", "rebase" |
+| `approve` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `10` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-release-semantic.yml
+
+Schema: `schemas/workflow-inputs/wf-release-semantic.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `dry-run` | boolean | no | `false` | n/a |
+| `node-version` | string | no | `"24.x"` | n/a |
+| `semantic-release-version` | string | no | `"25.0.5"` | n/a |
+| `extra-plugins` | string | no | `"@semantic-release/changelog@6.0.3"` | n/a |
+| `allow-exec-plugin` | boolean | no | `false` | n/a |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-setup-dotnet-generated-code.yml
+
+Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `solution` | string | yes | none | n/a |
+| `configuration` | string | no | `"Release"` | n/a |
+| `restore-locked-mode` | boolean | no | `true` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `build-before-commands` | boolean | no | `true` | n/a |
+| `commands` | string | yes | none | n/a |
+| `generated-paths` | string | yes | none | n/a |
+| `run-commands-in-parallel` | boolean | no | `true` | n/a |
+| `fail-on-diff` | boolean | no | `true` | n/a |
+| `remediation-message` | string | no | `"Regenerate generated source locally and commit the resulting changes."` | n/a |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-setup-dotnet-jetbrains.yml
+
+Schema: `schemas/workflow-inputs/wf-setup-dotnet-jetbrains.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `solution` | string | yes | none | n/a |
+| `working-directory` | string | no | `"."` | n/a |
+| `restore-locked-mode` | boolean | no | `true` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `profile` | string | no | `"Built-in: Reformat & Apply Syntax Style"` | n/a |
+| `include` | string | no | `""` | n/a |
+| `exclude` | string | no | `"**/*.razor;**/*.svg;**/*.md"` | n/a |
+| `no-updates` | boolean | no | `true` | n/a |
+| `restore-tools` | boolean | no | `true` | n/a |
+| `install-tool` | boolean | no | `false` | n/a |
+| `tool-version` | string | no | `""` | n/a |
+| `fail-on-diff` | boolean | no | `true` | n/a |
+| `remediation-message` | string | no | `"Run \`dotnet husky run --name dotnet-cleanupcode\` locally and commit the resulting changes."` | n/a |
+| `timeout-minutes` | integer | no | `15` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-setup-dotnet.yml
+
+Schema: `schemas/workflow-inputs/wf-setup-dotnet.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `solution` | string | yes | none | n/a |
+| `configuration` | string | no | `"Release"` | n/a |
+| `restore-locked-mode` | boolean | no | `true` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `run-format` | boolean | no | `true` | n/a |
+| `run-tests` | boolean | no | `true` | n/a |
+| `test-filter` | string | no | `""` | n/a |
+| `coverage` | boolean | no | `true` | n/a |
+| `coverage-report` | boolean | no | `true` | n/a |
+| `coverage-pr-comment` | boolean | no | `true` | n/a |
+| `coverage-reporttypes` | string | no | `"HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary"` | n/a |
+| `coverage-assemblyfilters` | string | no | `"+*;-*.UnitTests;-*.IntegrationTests"` | n/a |
+| `coverage-report-custom-settings` | string | no | `""` | n/a |
+| `coverage-report-tool-version` | string | no | `"5.5.10"` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-setup-node.yml
+
+Schema: `schemas/workflow-inputs/wf-setup-node.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `node-version` | string | no | `"24.x"` | n/a |
+| `package-manager` | string | no | `"pnpm"` | Allowed: "npm", "pnpm", "yarn" |
+| `package-manager-version` | string | no | `""` | n/a |
+| `working-directory` | string | no | `"."` | n/a |
+| `cache-dependency-path` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `run-install` | boolean | no | `true` | n/a |
+| `install-command` | string | no | `""` | n/a |
+| `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
+| `run-lint` | boolean | no | `true` | n/a |
+| `lint-script` | string | no | `"lint"` | n/a |
+| `lint-command` | string | no | `""` | n/a |
+| `run-tests` | boolean | no | `true` | n/a |
+| `test-script` | string | no | `"test"` | n/a |
+| `test-command` | string | no | `""` | n/a |
+| `run-build` | boolean | no | `true` | n/a |
+| `build-script` | string | no | `"build"` | n/a |
+| `build-command` | string | no | `""` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+<!-- generated:workflow-inputs:end -->
+
 ## Diagram Style
 
 Workflow diagrams use the same Mermaid node classes throughout this catalog.
@@ -799,7 +1075,7 @@ Side effects:
 ## Platform Selftest Workflow
 
 `wf-platform-selftest.yml` validates this CI platform repository.
-It runs the static workflow contract validator and writes a step summary.
+It runs actionlint 1.7.12, runs the static workflow contract validator, checks generated workflow input docs, and writes a step summary.
 It is callable as a reusable workflow and directly runnable with `workflow_dispatch` for local `act` smoke tests.
 
 Flow:
@@ -807,12 +1083,11 @@ Flow:
 ```mermaid
 flowchart TD
   platform[("CI platform repository")] --> checkout[[Checkout platform]]
-  checkout --> dotnet[[Setup .NET 10]]
+  checkout --> actionlint[[actionlint 1.7.12]]
+  actionlint --> dotnet[[Setup .NET 10]]
   dotnet --> validator[[scripts/validate-workflows.cs]]
-  validator --> lint{actionlint available?}
-  lint -->|yes| actionlint[[Run actionlint]]
-  lint -->|no| summary>Step summary]
-  actionlint --> summary
+  validator --> docs[[Generated docs check]]
+  docs --> summary>Step summary]
   summary --> outputs(("no workflow outputs"))
   classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
   classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
@@ -821,8 +1096,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class platform repo
-  class checkout,dotnet,validator,actionlint action
-  class lint decision
+  class checkout,actionlint,dotnet,validator,docs action
   class summary artifact
   class outputs output
 ```
@@ -831,7 +1105,8 @@ Preconditions:
 
 - The repository contains `.github/workflows`, `.github/actions`, `schemas/workflow-inputs`, policy files, fixtures, and docs.
 - The selected runner can install or run .NET 10.
-- `actionlint` is optional; the validator runs it when available.
+- The selected runner can run `raven-actions/actionlint@v2` with actionlint `1.7.12`.
+- Local validator runs still use a system `actionlint` when available.
 
 Side effects:
 

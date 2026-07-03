@@ -39,6 +39,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Actionlint
+        uses: raven-actions/actionlint@v2
+        with:
+          version: 1.7.12
+          flags: -color
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -56,6 +62,7 @@ jobs:
           {
             echo "## Platform selftest"
             echo ""
+            echo "- Actionlint: \`1.7.12\`"
             echo "- Validator: \`scripts/validate-workflows.cs\`"
             echo "- Runner labels: \`$RUNS_ON_JSON\`"
             echo "- Self-hosted: \`$RUNS_ON_SELF_HOSTED\`"

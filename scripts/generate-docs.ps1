@@ -1,4 +1,9 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Write-Host 'TODO: generate docs/workflow-catalog.md input tables from schemas/workflow-inputs/*.schema.json'
+$scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+$generator = Join-Path $scriptDirectory 'generate-docs.cs'
+$dotnetArgs = @('run', '--file', $generator, '--') + $args
+
+& dotnet @dotnetArgs
+exit $LASTEXITCODE

@@ -35,6 +35,7 @@ Last verified: 2026-07-03.
 - NuGet/login action: https://github.com/NuGet/login
 - nektos/act: https://github.com/nektos/act
 - actionlint: https://github.com/rhysd/actionlint
+- raven-actions/actionlint: https://github.com/raven-actions/actionlint
 
 ## Current Platform Changes To Monitor
 

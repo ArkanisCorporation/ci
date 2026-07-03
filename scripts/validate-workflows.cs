@@ -22,10 +22,13 @@ using CliWrap.Buffered;
 var repoRoot = FindRepositoryRoot();
 Directory.SetCurrentDirectory(repoRoot);
 
+const string ActionlintVersion = "1.7.12";
+
 var failures = new List<string>();
 
 ValidateWorkflowInputSchemas();
 ValidateWorkflows();
+ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
@@ -33,9 +36,11 @@ ValidateNuGetPublishContract();
 ValidateCoverageReportContract();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
+ValidatePlatformSelftestContract();
 ValidateReleaseBackpropagationContract();
 ValidateDotNetJetBrainsContract();
 ValidateRepositoryPipelineContract();
+await ValidateGeneratedWorkflowDocsAsync();
 await RunActionlintWhenAvailableAsync();
 
 if (failures.Count > 0)
@@ -62,6 +67,84 @@ void ValidateWorkflowInputSchemas()
         if (!File.Exists(workflowPath))
         {
             AddFailure($"{schema}: workflow input schema must have matching public workflow {workflowPath}.");
+        }
+    }
+}
+
+void ValidateWorkflowCatalogDiagrams()
+{
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    var catalogPath = Path.Combine(repoRoot, "docs", "workflow-catalog.md");
+
+    if (!Directory.Exists(workflowRoot))
+    {
+        AddFailure($"{workflowRoot}: workflow directory is required for catalog diagram validation.");
+        return;
+    }
+
+    if (!File.Exists(catalogPath))
+    {
+        AddFailure($"{catalogPath}: workflow catalog is required.");
+        return;
+    }
+
+    var publicWorkflows = Directory.EnumerateFiles(workflowRoot, "wf-*.yml")
+        .Select(Path.GetFileName)
+        .Where(name => name is not null)
+        .Select(name => name!)
+        .Order(StringComparer.Ordinal)
+        .ToArray();
+
+    var expected = publicWorkflows.ToHashSet(StringComparer.Ordinal);
+    var diagramCounts = publicWorkflows.ToDictionary(name => name, _ => 0, StringComparer.Ordinal);
+    var catalogText = File.ReadAllText(catalogPath);
+    var sectionHeadings = Regex.Matches(catalogText, @"(?m)^##\s+(?<title>.+?)\s*$")
+        .Cast<Match>()
+        .ToArray();
+
+    for (var index = 0; index < sectionHeadings.Length; index++)
+    {
+        var heading = sectionHeadings[index];
+        var nextStart = index + 1 < sectionHeadings.Length ? sectionHeadings[index + 1].Index : catalogText.Length;
+        var sectionText = catalogText[heading.Index..nextStart];
+        var mermaidCount = Regex.Matches(sectionText, @"(?m)^```mermaid\s*$").Count;
+        if (mermaidCount == 0)
+        {
+            continue;
+        }
+
+        var workflowNames = Regex.Matches(sectionText, @"wf-[A-Za-z0-9-]+\.yml")
+            .Select(match => match.Value)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        if (workflowNames.Length != 1)
+        {
+            AddFailure($"{catalogPath}: section '{heading.Groups["title"].Value}' has {mermaidCount} Mermaid diagram(s) but references {workflowNames.Length} public workflow name(s): {string.Join(", ", workflowNames)}.");
+            continue;
+        }
+
+        var workflowName = workflowNames[0];
+        if (!expected.Contains(workflowName))
+        {
+            AddFailure($"{catalogPath}: section '{heading.Groups["title"].Value}' documents stale workflow {workflowName}.");
+            continue;
+        }
+
+        diagramCounts[workflowName] += mermaidCount;
+    }
+
+    foreach (var workflowName in publicWorkflows)
+    {
+        var count = diagramCounts[workflowName];
+        if (count == 0)
+        {
+            AddFailure($"{catalogPath}: missing Mermaid diagram for public workflow {workflowName}.");
+        }
+        else if (count > 1)
+        {
+            AddFailure($"{catalogPath}: public workflow {workflowName} must have exactly one Mermaid diagram, found {count}.");
         }
     }
 }
@@ -565,6 +648,39 @@ void ValidateWorkflowLintContract()
     }
 }
 
+void ValidatePlatformSelftestContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-platform-selftest.yml");
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: platform selftest workflow is required.");
+        return;
+    }
+
+    var workflowText = File.ReadAllText(workflowPath);
+    var actionlintIndex = workflowText.IndexOf("uses: raven-actions/actionlint@v2", StringComparison.Ordinal);
+    var validatorIndex = workflowText.IndexOf("dotnet run --file scripts/validate-workflows.cs", StringComparison.Ordinal);
+
+    if (actionlintIndex < 0)
+    {
+        AddFailure($"{workflowPath}: platform selftest must run raven-actions/actionlint@v2 before the contract validator.");
+    }
+    else if (validatorIndex >= 0 && actionlintIndex > validatorIndex)
+    {
+        AddFailure($"{workflowPath}: platform selftest actionlint step must run before scripts/validate-workflows.cs.");
+    }
+
+    if (!Regex.IsMatch(workflowText, $@"(?m)^\s*version:\s*{Regex.Escape(ActionlintVersion)}\s*$"))
+    {
+        AddFailure($"{workflowPath}: platform selftest actionlint version must be pinned to {ActionlintVersion}.");
+    }
+
+    if (!Regex.IsMatch(workflowText, @"(?m)^\s*flags:\s*-color\s*$"))
+    {
+        AddFailure($"{workflowPath}: platform selftest actionlint step must pass '-color' for consistent diagnostics.");
+    }
+}
+
 void ValidateJobDisplayNameContract()
 {
     var expectedWorkflowJobNames = new[]
@@ -895,6 +1011,36 @@ async Task RunActionlintWhenAvailableAsync()
     if (result.ExitCode != 0)
     {
         AddFailure($"actionlint failed with exit code {result.ExitCode}.");
+    }
+}
+
+async Task ValidateGeneratedWorkflowDocsAsync()
+{
+    var generatorPath = Path.Combine(repoRoot, "scripts", "generate-docs.cs");
+    if (!File.Exists(generatorPath))
+    {
+        AddFailure($"{generatorPath}: generated workflow docs script is required.");
+        return;
+    }
+
+    var dotnet = FindExecutableOnPath("dotnet");
+    if (dotnet is null)
+    {
+        AddFailure("dotnet executable is required to check generated workflow docs.");
+        return;
+    }
+
+    var result = await Cli.Wrap(dotnet)
+        .WithArguments(["run", "--file", generatorPath, "--", "--check"])
+        .WithValidation(CommandResultValidation.None)
+        .ExecuteBufferedAsync();
+
+    Console.Write(result.StandardOutput);
+    Console.Error.Write(result.StandardError);
+
+    if (result.ExitCode != 0)
+    {
+        AddFailure($"generated workflow docs are stale; run `dotnet run --file scripts/generate-docs.cs`.");
     }
 }
 
