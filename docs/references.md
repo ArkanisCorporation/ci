@@ -17,6 +17,8 @@ Last verified: 2026-07-03.
 - Docker build-push action: https://github.com/docker/build-push-action
 - dotnet tool install: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install
 - dotnet-setversion NuGet package: https://www.nuget.org/packages/dotnet-setversion
+- semantic-release configuration: https://semantic-release.gitbook.io/semantic-release/usage/configuration
+- semantic-release GitHub plugin: https://github.com/semantic-release/github
 - Node.js Corepack: https://nodejs.org/api/corepack.html
 - GitHub local reusable workflow reference changelog: https://github.blog/changelog/2022-01-25-github-actions-reusable-workflows-can-be-referenced-locally/
 - NuGet Trusted Publishing: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing

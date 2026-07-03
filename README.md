@@ -87,6 +87,14 @@ Package publishing, image publishing, and deployment consume release outputs in 
 Container publishing passes the bare semantic-release version as `version` and the tagged release ref as `version-tag`.
 For .NET images, set `dotnet-setversion: true` so assemblies are stamped before Docker Buildx runs.
 
+## Repository Pipeline
+
+This repository dogfoods its platform workflows.
+[build.yml](.github/workflows/build.yml) runs `wf-platform-selftest.yml` on pull requests, pushes to `main`, and manual dispatch.
+[release.yml](.github/workflows/release.yml) runs the same selftest before calling `wf-release-semantic.yml` on pushes to `main`.
+[release.config.cjs](release.config.cjs) publishes GitHub release metadata only.
+It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
+
 ## Local Validation
 
 ```bash

@@ -52,6 +52,11 @@ Recommended order:
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.
 
+## Repository Workflows
+
+- `build.yml` runs the platform selftest on pull requests, main pushes, and manual dispatch.
+- `release.yml` runs platform selftest before semantic-release on main pushes and manual dispatch.
+
 ## Security Rules
 
 - `pull_request` may build and test without secrets.

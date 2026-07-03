@@ -14,6 +14,13 @@ Audience: consumers and platform maintainers.
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy | `contents: read`, `packages: read` | deploy output, manifest |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build | `contents: read` | validation logs |
 
+## Repository Workflows
+
+| File | Purpose | Trust zone | Required permissions | Notes |
+|---|---|---|---|---|
+| `build.yml` | Run platform selftests for pull requests, main pushes, and manual dispatch. | untrusted or trusted-build | `contents: read` | Calls `wf-platform-selftest.yml` locally. |
+| `release.yml` | Run selftest, then publish GitHub release metadata on main pushes. | publish | `contents: write`, `issues: write`, `pull-requests: write` | Calls `wf-release-semantic.yml` locally and uses `release.config.cjs`. |
+
 ## Common Inputs
 
 | Input | Meaning |

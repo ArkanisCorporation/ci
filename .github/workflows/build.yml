@@ -1,0 +1,25 @@
+# Summary:
+#   Runs this repository's workflow contract tests on pull requests and main pushes.
+# Remarks:
+#   This workflow dogfoods wf-platform-selftest through a local reusable workflow call.
+#   It does not publish, deploy, or request secrets.
+
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  selftest:
+    name: Platform selftest
+    uses: ./.github/workflows/wf-platform-selftest.yml
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false

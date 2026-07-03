@@ -1,0 +1,44 @@
+# Summary:
+#   Runs this repository's release automation after platform workflow self-tests pass.
+# Remarks:
+#   This workflow publishes GitHub release metadata only.
+#   It does not publish NuGet packages, OCI images, deployments, or run semantic-release exec hooks.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Run semantic-release without publishing tags or GitHub releases.
+        type: boolean
+        required: false
+        default: false
+
+permissions: {}
+
+jobs:
+  selftest:
+    name: Platform selftest
+    uses: ./.github/workflows/wf-platform-selftest.yml
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+
+  release:
+    name: Semantic release
+    needs: selftest
+    uses: ./.github/workflows/wf-release-semantic.yml
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      dry-run: ${{ inputs.dry-run || false }}
+      extra-plugins: ""

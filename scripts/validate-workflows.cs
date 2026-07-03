@@ -28,6 +28,7 @@ ValidateWorkflowInputSchemas();
 ValidateWorkflows();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
+ValidateRepositoryPipelineContract();
 await RunActionlintWhenAvailableAsync();
 
 if (failures.Count > 0)
@@ -231,6 +232,85 @@ void ValidateContainerPublishContract()
             {
                 AddFailure($"{actionPath}: dotnet-setversion action must expose {requiredInput} input.");
             }
+        }
+    }
+}
+
+void ValidateRepositoryPipelineContract()
+{
+    var buildWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "build.yml");
+    var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+    var releaseConfigPath = Path.Combine(repoRoot, "release.config.cjs");
+
+    if (!File.Exists(buildWorkflowPath))
+    {
+        AddFailure($"{buildWorkflowPath}: repository build workflow is required.");
+    }
+    else
+    {
+        var buildText = File.ReadAllText(buildWorkflowPath);
+        if (!Regex.IsMatch(buildText, @"(?m)^\s*pull_request:\s*$")
+            || !Regex.IsMatch(buildText, @"(?m)^\s*push:\s*$")
+            || !buildText.Contains("branches: [main]", StringComparison.Ordinal))
+        {
+            AddFailure($"{buildWorkflowPath}: build workflow must run on pull_request and push to main.");
+        }
+
+        if (!buildText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{buildWorkflowPath}: build workflow must call wf-platform-selftest.yml.");
+        }
+    }
+
+    if (!File.Exists(releaseWorkflowPath))
+    {
+        AddFailure($"{releaseWorkflowPath}: repository release workflow is required.");
+    }
+    else
+    {
+        var releaseText = File.ReadAllText(releaseWorkflowPath);
+        if (!Regex.IsMatch(releaseText, @"(?m)^\s*push:\s*$")
+            || !releaseText.Contains("branches: [main]", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: release workflow must run on push to main.");
+        }
+
+        if (!releaseText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: release workflow must run platform selftest before release.");
+        }
+
+        if (!releaseText.Contains("uses: ./.github/workflows/wf-release-semantic.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: release workflow must call wf-release-semantic.yml.");
+        }
+
+        if (!Regex.IsMatch(releaseText, @"(?m)^\s*needs:\s*selftest\s*$"))
+        {
+            AddFailure($"{releaseWorkflowPath}: semantic release job must depend on selftest.");
+        }
+    }
+
+    if (!File.Exists(releaseConfigPath))
+    {
+        AddFailure($"{releaseConfigPath}: semantic-release config is required.");
+    }
+    else
+    {
+        var releaseConfigText = File.ReadAllText(releaseConfigPath);
+        if (releaseConfigText.Contains("@semantic-release/exec", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseConfigPath}: @semantic-release/exec is not allowed.");
+        }
+
+        if (releaseConfigText.Contains("@semantic-release/npm", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseConfigPath}: this platform repository must not publish npm packages.");
+        }
+
+        if (!releaseConfigText.Contains("@semantic-release/github", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseConfigPath}: semantic-release config must publish GitHub release metadata.");
         }
     }
 }
