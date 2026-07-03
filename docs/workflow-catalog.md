@@ -4,26 +4,41 @@ Audience: consumers and platform maintainers.
 
 ## Public Workflows
 
-| File | Purpose | Trust zone | Required caller permissions | Main artifacts |
-|---|---|---|---|---|
-| `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | test results, coverage files, binlog, metadata, manifest |
-| `wf-setup-dotnet-generated-code.yml` | Verify generated .NET source stays committed after codegen commands. | untrusted or trusted-build | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
-| `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. | untrusted or trusted-build | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
-| `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build | `contents: read` | install/lint/test/build logs, metadata, manifest |
-| `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows with actionlint. | untrusted or trusted-build | `contents: read` | step summary |
-| `wf-release-semantic.yml` | Run semantic-release metadata without `@semantic-release/exec`. | publish | `contents: write`, `issues: write`, `pull-requests: write` | release diagnostics |
-| `wf-release-backpropagation.yml` | Create release branch backpropagation PRs. | publish | `contents: write`, `pull-requests: write` | step summary |
-| `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish | `contents: read`, `id-token: write` | `.nupkg`, `.snupkg`, manifest |
-| `wf-publish-container.yml` | Publish one OCI image with optional .NET version stamping. | trusted-build or publish | `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | digest, Buildx metadata, manifest |
-| `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy | `contents: read`, `packages: read` | deploy output, manifest |
-| `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build | `contents: read` | validation logs |
+| Workflow | Purpose | Trust zone |
+|---|---|---|
+| `wf-setup-dotnet.yml` | .NET restore, format, build, test, coverage, metadata, and diagnostics. | untrusted or trusted-build |
+| `wf-setup-dotnet-generated-code.yml` | Verify committed .NET generated source. | untrusted or trusted-build |
+| `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode creates no diff. | untrusted or trusted-build |
+| `wf-setup-node.yml` | Node install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build |
+| `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows. | untrusted or trusted-build |
+| `wf-release-semantic.yml` | Run semantic-release metadata without `@semantic-release/exec`. | publish |
+| `wf-release-backpropagation.yml` | Create release branch backpropagation PRs. | publish |
+| `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish |
+| `wf-publish-container-dotnet.yml` | Stamp and publish one .NET OCI image. | trusted-build or publish |
+| `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy |
+| `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build |
+
+## Public Workflow Permissions
+
+| Workflow | Minimum caller permissions | Main outputs |
+|---|---|---|
+| `wf-setup-dotnet.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
+| `wf-setup-dotnet-generated-code.yml` | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
+| `wf-setup-dotnet-jetbrains.yml` | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
+| `wf-setup-node.yml` | `contents: read` | install, lint, test, build logs, metadata, manifest |
+| `wf-lint-github-actions.yml` | `contents: read` | step summary |
+| `wf-release-semantic.yml` | `contents: write`<br>`issues: write`<br>`pull-requests: write` | release diagnostics and release outputs |
+| `wf-release-backpropagation.yml` | `contents: write`<br>`pull-requests: write` | pull request summary |
+| `wf-publish-nuget.yml` | `contents: read`<br>`id-token: write` for Trusted Publishing | `.nupkg`, `.snupkg`, manifest |
+| `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
+| `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` when pulling package images | deploy output, manifest |
+| `wf-platform-selftest.yml` | `contents: read` | validation logs |
 
 ## Repository Workflows
 
-| File | Purpose | Trust zone | Required permissions | Notes |
-|---|---|---|---|---|
-| `build.yml` | Run platform selftests for pull requests, main pushes, and manual dispatch. | untrusted or trusted-build | `contents: read` | Calls `wf-platform-selftest.yml` locally. |
-| `release.yml` | Run selftest, then publish GitHub release metadata on main pushes. | publish | `contents: write`, `issues: write`, `pull-requests: write` | Calls `wf-release-semantic.yml` locally and uses `release.config.cjs`. |
+| Workflow | Purpose | Permissions |
+|---|---|---|
+| `release.yml` | Run platform selftests and semantic-release contract checks on pull requests, main pushes, and manual dispatch. | Selftest uses `contents: read`.<br>Semantic release uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
 ## Common Inputs
 
@@ -52,7 +67,13 @@ Preconditions:
 - Lock files exist when `restore-locked-mode` is true.
 - The selected runner can install or run the requested .NET SDK.
 - Coverage report generation requires .NET 10 action tooling and NuGet access for `dotnet-reportgenerator-globaltool`.
-- Coverage PR comments require GitHub CLI and `pull-requests: write`.
+
+Requirements:
+
+| Requirement | Permission | Mode |
+|---|---|---|
+| GitHub CLI and `GH_TOKEN` for updating the pull request comment. | `pull-requests: write` | `coverage-pr-comment` |
+| Coverage files matching the workflow coverage glob. | none | `coverage-report` |
 
 Side effects:
 
@@ -280,24 +301,32 @@ Side effects:
 - Modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
 - Publishes packages unless `dry-run` is true.
 
-## Container Publish Workflow
+## .NET Container Publish Workflow
 
-`wf-publish-container.yml` uses Docker Buildx.
+`wf-publish-container-dotnet.yml` stamps .NET project versions, then uses Docker Buildx.
 It supports GitHub-hosted Docker, self-hosted Docker, and remote BuildKit endpoints.
-It can run the `dotnet-setversion` composite action before Docker Buildx for .NET container images.
-It appends a non-secret `VERSION=<version>` Docker build argument when `version` is set and `build-args` does not already define `VERSION`.
+It always runs the `dotnet-setversion` composite action before Docker Buildx.
+It appends a non-secret `VERSION=<version>` Docker build argument unless `build-args` already defines `VERSION`.
 `version` is always the bare semantic version, such as `1.2.3`.
 `version-tag` is only for image tags and may use the release tag form, such as `v1.2.3`.
 `version-channel` adds both the raw channel tag and, by default, a `<channel>-latest` tag.
-Use `extra-tags` for additional mutable tags such as `latest`, or set `latest-on-stable` when `stable` should publish `latest`.
+Use `extra-tags` for additional mutable tags such as `latest`.
+
+Requirements:
+
+| Requirement | Permission | Mode |
+|---|---|---|
+| Caller repository checkout and platform action checkout. | `contents: read` | always |
+| Registry write token for pushed images. | `packages: write` for GHCR, or registry-specific write scope | `push` |
+| Provenance metadata and attestations. | `id-token: write`<br>`attestations: write` | `provenance` or `sbom` |
 
 Preconditions:
 
 - The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
 - Registry credentials are available when `push` is true.
-- `version` is a bare SemVer value without a leading `v` when set.
-- `dotnet-setversion` requires .NET project files under `dotnet-setversion-working-directory`.
-- `dotnet-setversion` requires Bash, network access to restore actions/tool packages, and `github.workflow_ref` / `github.workflow_sha` support from reusable workflows.
+- `version` is a required bare SemVer value without a leading `v`.
+- `version-working-directory` contains .NET project files unless `version-recursive` is false and `version-project` is set.
+- Version stamping requires Bash, network access to restore actions/tool packages, and `github.workflow_ref` / `github.workflow_sha` support from reusable workflows.
 - `extra-tags` accepts newline-delimited bare tag names or full image references.
 
 Side effects:
@@ -305,8 +334,8 @@ Side effects:
 - Builds container layers before pushing them when `push` is true.
 - Pushes registry tags when `push` is true.
 - May create mutable channel tags, channel-latest tags, and extra tags when configured.
-- Checks out this CI platform repository under `.ci/arkanis-ci` when `dotnet-setversion` is true, then removes that checkout before Docker Buildx runs.
-- Modifies matched `.csproj` files before Docker Buildx when `dotnet-setversion` is true.
+- Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.
+- Modifies matched `.csproj` files before Docker Buildx runs.
 - Passes Docker build args to BuildKit; never put secrets in `build-args`.
 - Emits a digest output for downstream deploys.
 
@@ -316,7 +345,7 @@ Example:
 jobs:
   publish_web:
     name: Publish web image
-    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container.yml@v1
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
     permissions:
       contents: read
       packages: write
@@ -331,7 +360,8 @@ jobs:
       version: ${{ needs.release.outputs.new-version }}
       version-tag: ${{ needs.release.outputs.new-tag }}
       version-channel: ${{ needs.release.outputs.new-channel }}
-      dotnet-setversion: true
+      extra-tags: |
+        latest
       push: true
     secrets:
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

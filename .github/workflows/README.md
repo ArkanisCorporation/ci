@@ -8,12 +8,15 @@ Start each workflow from `AGENTS.md` contract, then add schema in `schemas/workf
 
 ## Repository workflows
 
-`build.yml` is this repository's pull request and main push self-test pipeline.
-It calls `wf-platform-selftest.yml` through a local reusable workflow reference.
-
-`release.yml` is this repository's release pipeline.
+`release.yml` is this repository's pull request, main push, manual self-test, and release pipeline.
 It runs `wf-platform-selftest.yml` before `wf-release-semantic.yml`.
 It publishes GitHub release metadata only.
+
+## .NET Container Publish
+
+`wf-publish-container-dotnet.yml` is the reusable .NET container publishing workflow.
+It stamps .NET project versions before Docker Buildx runs.
+Use `extra-tags` for additional mutable tags such as `latest`.
 
 ## .NET JetBrains CleanupCode
 

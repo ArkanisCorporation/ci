@@ -18,10 +18,10 @@ Deployment consumes an image tag or digest.
 ## Checklist
 
 - Replace old checkout/setup-dotnet majors with `wf-setup-dotnet.yml`.
-- Replace Docker setup, login, and build-push steps with `wf-publish-container.yml`.
+- Replace Docker setup, login, and build-push steps with `wf-publish-container-dotnet.yml`.
 - Pass semantic-release `new-version` to `version`.
 - Pass semantic-release `new-tag` to `version-tag`.
-- Set `dotnet-setversion: true` for .NET container images.
+- Remove old `dotnet-setversion` flags because the .NET container workflow stamps versions before Docker Buildx by default.
 - Replace semantic-release job with `wf-release-semantic.yml`.
 - Remove `@semantic-release/exec` from release configuration.
 - Move release backpropagation into a separate job.

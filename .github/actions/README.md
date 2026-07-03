@@ -23,9 +23,15 @@ The action installs `dotnet-reportgenerator-globaltool`, generates reports, appe
 
 Preconditions:
 
-- The runner has Bash, GitHub CLI, and .NET 10 SDK.
+- The runner has Bash and .NET 10 SDK.
 - Coverage files exist at the `reports` glob unless `fail-if-no-reports` is false.
-- Pull request comments require `GH_TOKEN`, `pull-requests: write`, and `pr-number`.
+
+Requirements:
+
+| Requirement | Permission | Mode |
+|---|---|---|
+| GitHub CLI, `GH_TOKEN`, and `pr-number` for pull request comments. | `pull-requests: write` | `comment-on-pr` |
+| Coverage files at the `reports` glob. | none | report generation |
 
 Side effects:
 

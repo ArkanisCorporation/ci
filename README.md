@@ -16,7 +16,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-release-semantic.yml` | Run semantic-release without `@semantic-release/exec` verification or publishing scripts. |
 | `wf-release-backpropagation.yml` | Create and optionally auto-merge release branch backpropagation PRs. |
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |
-| `wf-publish-container.yml` | Publish OCI images through Docker Buildx with optional .NET version stamping. |
+| `wf-publish-container-dotnet.yml` | Stamp .NET versions and publish OCI images through Docker Buildx. |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |
 | `wf-platform-selftest.yml` | Validate this platform repository. |
 
@@ -89,13 +89,13 @@ Verification runs before release as separate workflow jobs.
 `wf-release-semantic.yml` only decides and publishes release metadata.
 Package publishing, image publishing, and deployment consume release outputs in separate jobs.
 Container publishing passes the bare semantic-release version as `version` and the tagged release ref as `version-tag`.
-For .NET images, set `dotnet-setversion: true` so assemblies are stamped before Docker Buildx runs.
+For .NET images, use `wf-publish-container-dotnet.yml` so assemblies are stamped before Docker Buildx runs.
+Use `extra-tags` for additional mutable tags such as `latest`.
 
 ## Repository Pipeline
 
 This repository dogfoods its platform workflows.
-[build.yml](.github/workflows/build.yml) runs `wf-platform-selftest.yml` on pull requests, pushes to `main`, and manual dispatch.
-[release.yml](.github/workflows/release.yml) runs the same selftest before calling `wf-release-semantic.yml` on pushes to `main`.
+[release.yml](.github/workflows/release.yml) runs `wf-platform-selftest.yml` before calling `wf-release-semantic.yml` on pull requests, pushes to `main`, and manual dispatch.
 [release.config.cjs](release.config.cjs) publishes GitHub release metadata only.
 It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
 

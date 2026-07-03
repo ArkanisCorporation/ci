@@ -21,9 +21,10 @@ Remove script-driven publishing from semantic-release.
 - Use `wf-setup-dotnet.yml` for restore, format, build, tests, coverage, and diagnostics.
 - Use `wf-setup-dotnet-jetbrains.yml` when the legacy service already has JetBrains CleanupCode as a CI or pre-commit gate.
 - Use `wf-release-semantic.yml` only for release metadata.
-- Use `wf-publish-container.yml` for container publish.
+- Use `wf-publish-container-dotnet.yml` for .NET container publish.
 - Pass bare release versions through `version` and release tags through `version-tag`.
-- Set `dotnet-setversion: true` for .NET images so assemblies are stamped before Docker Buildx.
+- Do not set old `dotnet-setversion` flags.
+- `wf-publish-container-dotnet.yml` stamps assemblies before Docker Buildx by default.
 - Keep deployment in a separate deploy workflow or job.
 - Keep release backpropagation separate from release metadata.
 

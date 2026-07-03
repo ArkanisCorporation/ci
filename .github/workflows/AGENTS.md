@@ -52,14 +52,13 @@ Recommended order:
 - `wf-release-semantic.yml` runs semantic-release metadata without `@semantic-release/exec`.
 - `wf-release-backpropagation.yml` creates release branch backpropagation pull requests and can auto-merge them.
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
-- `wf-publish-container.yml` publishes OCI images through Docker Buildx and can stamp .NET versions before building.
+- `wf-publish-container-dotnet.yml` stamps .NET versions before publishing OCI images through Docker Buildx.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.
 
 ## Repository Workflows
 
-- `build.yml` runs the platform selftest on pull requests, main pushes, and manual dispatch.
-- `release.yml` runs platform selftest before semantic-release on main pushes and manual dispatch.
+- `release.yml` runs platform selftest before semantic-release on pull requests, main pushes, and manual dispatch.
 
 ## Security Rules
 

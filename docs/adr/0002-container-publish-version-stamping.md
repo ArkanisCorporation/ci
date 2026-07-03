@@ -11,30 +11,33 @@ Docker and deployment tags may still use release tag values such as `v1.2.3`.
 
 ## Decision
 
-Rename `wf-build-container.yml` to `wf-publish-container.yml`.
-The workflow name now reflects that registry writes are a publishing concern.
+Rename the .NET container workflow to `wf-publish-container-dotnet.yml`.
+The workflow name now reflects that registry writes are a publishing concern and that the workflow is scoped to .NET images.
 Add `.github/actions/dotnet-setversion/action.yml` as the reusable step bundle for .NET project stamping.
 Expose `version` as the bare semantic version input.
 Keep `version-tag` as the Docker image tag input.
-Expose `dotnet-setversion` as an opt-in flag because not every container image is a .NET image.
-When `dotnet-setversion` is enabled, the publish workflow checks out this CI platform source, runs the composite action, then removes the checkout before Docker Buildx.
-When `version` is set, the publish workflow adds `VERSION=<version>` to Docker build args unless the caller already provided `VERSION`.
+Stamp .NET projects in every run before Docker Buildx.
+The publish workflow checks out this CI platform source, runs the composite action, then removes the checkout before Docker Buildx.
+The publish workflow adds `VERSION=<version>` to Docker build args unless the caller already provided `VERSION`.
+Use `extra-tags` for extra mutable tags such as `latest`.
+Use `channel-latest` only for `<channel>-latest`.
 
 ## Consequences
 
 .NET image publishers can stamp assemblies before Docker Buildx runs.
-Generic image publishers can continue using the workflow without installing .NET tools.
-Consumers must migrate from `wf-build-container.yml` to `wf-publish-container.yml`.
+Generic image publishers should use a future non-.NET workflow instead of this scoped workflow.
+Consumers must migrate from `wf-build-container.yml` or `wf-publish-container.yml` to `wf-publish-container-dotnet.yml`.
 Consumers must pass `needs.release.outputs.new-version` to `version`.
 Consumers must pass `needs.release.outputs.new-tag` to `version-tag`.
 Consumers must not pass secrets through `build-args`.
 
 ## Migration
 
-Replace reusable workflow references from `wf-build-container.yml@v1` to `wf-publish-container.yml@v1`.
-For .NET images, set `dotnet-setversion: true`.
+Replace reusable workflow references from `wf-build-container.yml@v1` or `wf-publish-container.yml@v1` to `wf-publish-container-dotnet.yml@v1`.
+Remove the `dotnet-setversion` input.
 For release images, pass the bare release output to `version`.
 For image tags, pass the tagged release output to `version-tag`.
+Use `extra-tags: latest` when a stable release should also publish `latest`.
 Validate changed workflows with `actionlint`, platform validation, and a bounded `act` smoke test where possible.
 
 ## References

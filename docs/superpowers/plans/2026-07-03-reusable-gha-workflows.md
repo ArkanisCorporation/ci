@@ -43,7 +43,7 @@ Consumer repositories keep small wrapper workflows that call the platform workfl
 - Create: `.github/workflows/wf-setup-dotnet.yml`
 - Create: `.github/workflows/wf-release-semantic.yml`
 - Create: `.github/workflows/wf-publish-nuget.yml`
-- Create: `.github/workflows/wf-publish-container.yml`
+- Create: `.github/workflows/wf-publish-container-dotnet.yml`
 - Create: `.github/workflows/wf-deploy-k8s-aspire.yml`
 
 - [ ] Implement .NET restore/build/test/coverage workflow under the requested `wf-setup-*` naming.

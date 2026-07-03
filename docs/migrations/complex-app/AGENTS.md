@@ -21,7 +21,7 @@ Extract common verification, release metadata, package publishing, image publish
 - Use `wf-setup-dotnet.yml` and `wf-setup-node.yml` for verification lanes.
 - Use `wf-setup-dotnet-jetbrains.yml` when a repository already gates JetBrains CleanupCode or Rider/ReSharper cleanup conventions.
 - Use `wf-release-semantic.yml` only for release metadata.
-- Use `wf-publish-nuget.yml` and `wf-publish-container.yml` for publish lanes.
+- Use `wf-publish-nuget.yml` and `wf-publish-container-dotnet.yml` for .NET publish lanes.
 - Use bare `new-version` for package and assembly stamping.
 - Use tagged `new-tag` only for image or deployment tags.
 - Use `wf-deploy-k8s-aspire.yml` for Aspire Kubernetes deploys where applicable.
