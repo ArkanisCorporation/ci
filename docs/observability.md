@@ -36,7 +36,7 @@ Summaries should include:
 Self-hosted runs should write a preflight file under `artifacts/meta/`.
 The preflight file should include disk space, workspace, runner OS, runner arch, and required tool paths.
 
-Hosted runs should still record selected image labels through `runs-on-json`.
+Hosted runs should still record the effective runner labels resolved from `runs-on` or `runs-on-json`.
 
 ## Diagnostic Layout
 

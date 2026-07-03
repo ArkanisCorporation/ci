@@ -20,7 +20,7 @@ Backpropagation runs only after a real release.
 - Replace local setup action calls with `wf-setup-dotnet.yml` when behavior matches.
 - Add `wf-release-semantic.yml` with `allow-exec-plugin: false`.
 - Add `wf-publish-nuget.yml` gated on release output.
-- Preserve `runs-on-json` and `runs-on-self-hosted` inputs.
+- Preserve `runs-on`, `runs-on-json`, and `runs-on-self-hosted` inputs.
 - Preserve package symbols and deterministic build settings.
 - Update examples and fixtures if a package workflow pattern changes.
 

@@ -9,13 +9,18 @@ name: wf-platform-selftest
 on:
   workflow_call:
     inputs:
-      runs-on-json:
-        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+      runs-on:
+        description: Single runner label used when runs-on-json is empty.
         type: string
         required: false
-        default: '["ubuntu-latest"]'
+        default: ubuntu-latest
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels. Overrides runs-on when set.
+        type: string
+        required: false
+        default: ""
       runs-on-self-hosted:
-        description: True when runs-on-json targets self-hosted runners.
+        description: True when the effective runner selection targets self-hosted runners.
         type: boolean
         required: false
         default: false
@@ -26,7 +31,7 @@ permissions: {}
 jobs:
   validate:
     name: contracts @ ${{ github.head_ref || github.ref_name }}
-    runs-on: ${{ fromJSON(inputs.runs-on-json || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -56,7 +61,7 @@ jobs:
       - name: Publish summary @ ${{ github.run_id }}
         if: always()
         env:
-          RUNS_ON_JSON: ${{ inputs.runs-on-json || '["ubuntu-latest"]' }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted || false }}
         run: |
           {

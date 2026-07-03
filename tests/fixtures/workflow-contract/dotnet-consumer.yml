@@ -13,7 +13,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
       solution: Example.slnx

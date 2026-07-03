@@ -11,13 +11,18 @@ name: wf-release-backpropagation
 on:
   workflow_call:
     inputs:
-      runs-on-json:
-        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+      runs-on:
+        description: Single runner label used when runs-on-json is empty.
         type: string
         required: false
-        default: '["ubuntu-latest"]'
+        default: ubuntu-latest
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels. Overrides runs-on when set.
+        type: string
+        required: false
+        default: ""
       runs-on-self-hosted:
-        description: True when runs-on-json targets self-hosted runners.
+        description: True when the effective runner selection targets self-hosted runners.
         type: boolean
         required: false
         default: false
@@ -77,7 +82,7 @@ permissions: {}
 jobs:
   backpropagate:
     name: ${{ inputs.new-version }} @ ${{ inputs.default-branch }}
-    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: write
@@ -99,10 +104,10 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
+      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
-          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
         run: |
           mkdir -p artifacts/meta
           {
@@ -113,7 +118,7 @@ jobs:
             command -v gh
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -166,7 +171,7 @@ jobs:
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
-            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
             echo "| Version | \`${{ inputs.new-version }}\` |"
             echo "| Source branch | \`${{ inputs.release-ref-name }}\` |"
             echo "| Target branch | \`${{ inputs.default-branch }}\` |"

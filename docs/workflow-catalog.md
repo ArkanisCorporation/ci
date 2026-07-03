@@ -53,13 +53,15 @@ Audience: consumers and platform maintainers.
 
 | Input | Meaning |
 |---|---|
-| `runs-on-json` | JSON array passed to `runs-on`. |
-| `runs-on-self-hosted` | True when `runs-on-json` targets self-hosted runners. |
+| `runs-on` | Single runner label used when `runs-on-json` is empty. |
+| `runs-on-json` | JSON array passed to `runs-on`, overriding `runs-on` when set. |
+| `runs-on-self-hosted` | True when the effective runner selection targets self-hosted runners. |
 | `enable-cache` | Enables dependency cache where the workflow uses `runs-on/cache`. |
 | `timeout-minutes` | Job timeout. |
 | `artifact-retention-days` | Diagnostic or output artifact retention. |
 
-Use `runs-on-json` to override GitHub-hosted runner images or self-hosted runner labels.
+Use `runs-on` for a single GitHub-hosted label such as `ubuntu-latest`.
+Use `runs-on-json` for self-hosted or multi-label runner selection.
 Use `runs-on-self-hosted` to let workflows gate hosted-only and self-hosted-only assumptions.
 Set `enable-cache` to false for cold-restore validation, cache incident isolation, or runners without cache service access.
 
@@ -82,7 +84,8 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `environment-name` | string | yes | none | n/a |
 | `aspire-environment` | string | yes | none | n/a |
@@ -106,7 +109,8 @@ Schema: `schemas/workflow-inputs/wf-lint-github-actions.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `10` | Minimum: 1 |
@@ -119,7 +123,8 @@ Schema: `schemas/workflow-inputs/wf-platform-selftest.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 
 Outputs: schema does not define workflow outputs.
@@ -130,7 +135,8 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `environment-name` | string | no | `"container"` | n/a |
 | `image` | string | yes | none | n/a |
@@ -168,7 +174,8 @@ Schema: `schemas/workflow-inputs/wf-publish-nuget.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `environment-name` | string | no | `"nuget"` | n/a |
 | `project` | string | yes | none | n/a |
@@ -199,7 +206,8 @@ Schema: `schemas/workflow-inputs/wf-release-backpropagation.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `new-version` | string | yes | none | n/a |
 | `release-ref-name` | string | yes | none | n/a |
@@ -218,7 +226,8 @@ Schema: `schemas/workflow-inputs/wf-release-semantic.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `environment-name` | string | no | `"release"` | n/a |
 | `node-version` | string | no | `"24.x"` | n/a |
@@ -236,7 +245,8 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
@@ -261,7 +271,8 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-jetbrains.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
@@ -289,7 +300,8 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
@@ -318,7 +330,8 @@ Schema: `schemas/workflow-inputs/wf-setup-node.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `node-version` | string | no | `"24.x"` | n/a |
 | `package-manager` | string | no | `"pnpm"` | Allowed: "npm", "pnpm", "yarn" |
@@ -350,7 +363,8 @@ Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `aspire-environment` | string | yes | none | n/a |
 | `kubernetes-namespace` | string | yes | none | n/a |
@@ -373,7 +387,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `image` | string | yes | none | n/a |
 | `context` | string | no | `"."` | n/a |
@@ -406,7 +421,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-nuget.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `project` | string | yes | none | n/a |
 | `version` | string | yes | none | n/a |
@@ -432,7 +448,8 @@ Schema: `schemas/workflow-inputs/wf-verify-release-semantic.schema.json`.
 
 | Input | Type | Required | Default | Details |
 |---|---|---|---|---|
-| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `node-version` | string | no | `"24.x"` | n/a |
 | `semantic-release-version` | string | no | `"25.0.5"` | n/a |
@@ -604,7 +621,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
       solution: CitizenId.slnx
@@ -691,7 +708,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
       solution: CitizenId.slnx
@@ -817,7 +834,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
 ```
 
@@ -990,7 +1007,7 @@ jobs:
       contents: write
       pull-requests: write
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       new-version: ${{ needs.release.outputs.new-version }}
       release-ref-name: ${{ github.ref_name }}
@@ -1329,7 +1346,7 @@ jobs:
       id-token: write
       attestations: write
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       image: ghcr.io/arkaniscorporation/example-web
       context: .
@@ -1509,6 +1526,6 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
 ```

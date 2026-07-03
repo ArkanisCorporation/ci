@@ -39,11 +39,15 @@ Composite actions are optional step bundles for same-repository workflows or exp
 
 ## Runner Model
 
+Every public workflow accepts `runs-on`.
+Use it for a single runner label such as `ubuntu-latest`.
+
 Every public workflow accepts `runs-on-json`.
-Use it to select GitHub-hosted images such as `["ubuntu-latest"]` or self-hosted labels such as `["self-hosted","linux","x64","arc","dotnet"]`.
+Use it when a caller needs a full JSON label array such as `["self-hosted","linux","x64","arc","dotnet"]`.
+When `runs-on-json` is set, it overrides `runs-on`.
 
 Every public workflow accepts `runs-on-self-hosted`.
-Set it to `true` when `runs-on-json` targets self-hosted runners.
+Set it to `true` when the effective runner selection targets self-hosted runners.
 The workflows use it to gate preflight and runner-specific behavior.
 
 ## Consumer Example
@@ -65,7 +69,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       enable-cache: true
       global-json-file: global.json
@@ -91,7 +95,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       node-version: 24.x
       package-manager: pnpm

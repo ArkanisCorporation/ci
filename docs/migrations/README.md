@@ -25,7 +25,7 @@ Use them before editing consumer repositories.
 3. Produce a before/after workflow map.
 4. Replace repeated setup with platform reusable workflows.
 5. Split release, publish, and deploy side effects into separate jobs.
-6. Encode runner selection through `runs-on-json` and `runs-on-self-hosted`.
+6. Encode runner selection through `runs-on` or `runs-on-json` plus `runs-on-self-hosted`.
 7. Reduce workflow-level permissions to `permissions: {}` and job-level grants.
 8. Run `actionlint`, platform validation, and a bounded `act` smoke test where practical.
 

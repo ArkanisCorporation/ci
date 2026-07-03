@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
 
   verify-release:
@@ -30,7 +30,7 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       extra-plugins: |
         semantic-release-major-tag@0.3.2

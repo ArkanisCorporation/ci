@@ -22,9 +22,11 @@ Applies to public reusable workflows in `.github/workflows/*.yml`.
 
 ## Runner Model
 
+- Every public workflow accepts `runs-on`.
 - Every public workflow accepts `runs-on-json`.
 - Every public workflow accepts `runs-on-self-hosted`.
-- `runs-on-json` selects GitHub-hosted images or self-hosted labels.
+- `runs-on` selects one runner label.
+- `runs-on-json` selects a JSON runner-label array and overrides `runs-on` when set.
 - `runs-on-self-hosted` selects behavior gates for hosted or self-hosted assumptions.
 - Self-hosted jobs must record runner OS, arch, disk, workspace, and required tool availability.
 - Hosted-only steps must use `if: ${{ !inputs.runs-on-self-hosted }}`.

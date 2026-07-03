@@ -8,9 +8,13 @@
     "solution"
   ],
   "properties": {
+    "runs-on": {
+      "type": "string",
+      "default": "ubuntu-latest"
+    },
     "runs-on-json": {
       "type": "string",
-      "default": "[\"ubuntu-latest\"]"
+      "default": ""
     },
     "runs-on-self-hosted": {
       "type": "boolean",

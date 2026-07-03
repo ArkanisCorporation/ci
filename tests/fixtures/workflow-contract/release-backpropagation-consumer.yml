@@ -13,7 +13,7 @@ jobs:
       contents: write
       pull-requests: write
     with:
-      runs-on-json: '["ubuntu-latest"]'
+      runs-on: ubuntu-latest
       runs-on-self-hosted: false
       new-version: 1.2.3
       release-ref-name: release/stable

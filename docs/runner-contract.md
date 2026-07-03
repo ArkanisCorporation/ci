@@ -4,17 +4,21 @@ Audience: platform maintainers and infrastructure owners.
 
 ## Inputs
 
+Every public workflow accepts `runs-on`.
+This input selects one runner label and defaults to `ubuntu-latest`.
+
 Every public workflow accepts `runs-on-json`.
-This input is passed through `fromJSON()` into `runs-on`.
+This input is passed through `fromJSON()` into `runs-on` when set.
+It overrides `runs-on`.
 
 Every public workflow accepts `runs-on-self-hosted`.
-This input is true when `runs-on-json` targets self-hosted runners.
+This input is true when the effective runner selection targets self-hosted runners.
 
 GitHub-hosted example:
 
 ```yaml
 with:
-  runs-on-json: '["ubuntu-latest"]'
+  runs-on: ubuntu-latest
   runs-on-self-hosted: false
 ```
 
@@ -29,7 +33,8 @@ with:
 ## Hosted Runners
 
 Hosted runners may use image labels such as `ubuntu-latest`, `windows-latest`, or versioned images.
-Consumers override hosted images through `runs-on-json`.
+Consumers override hosted images through `runs-on`.
+Consumers use `runs-on-json` when a runner requires multiple labels.
 Hosted-only behavior must be gated with `if: ${{ !inputs.runs-on-self-hosted }}`.
 
 ## Self-Hosted Runners

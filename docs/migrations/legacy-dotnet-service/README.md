@@ -28,7 +28,7 @@ Deployment consumes an image tag or digest.
 - Move deploy calls into deploy jobs with explicit environments.
 - Set top-level `permissions: {}`.
 - Grant `contents`, `packages`, `id-token`, `issues`, and `pull-requests` only where needed.
-- Use `runs-on-json` and `runs-on-self-hosted`.
+- Use `runs-on` or `runs-on-json` plus `runs-on-self-hosted`.
 
 ## Rollback
 

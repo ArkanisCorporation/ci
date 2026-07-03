@@ -28,6 +28,7 @@ var failures = new List<string>();
 
 ValidateWorkflowInputSchemas();
 ValidateWorkflows();
+ValidateRunnerSelectionInputContract();
 ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
 ValidateStepDisplayNameContract();
@@ -205,6 +206,67 @@ void ValidateWorkflows()
 
         ValidateUsesReferences(file, lines);
         ValidateCacheOptOutContract(file, text, lines, isWorkflow: true);
+    }
+}
+
+void ValidateRunnerSelectionInputContract()
+{
+    const string EffectiveRunsOnJsonExpression = "${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}";
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    var schemaRoot = Path.Combine(repoRoot, "schemas", "workflow-inputs");
+    if (!Directory.Exists(workflowRoot))
+    {
+        return;
+    }
+
+    foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
+    {
+        var workflowName = Path.GetFileName(workflowPath);
+        var workflowText = File.ReadAllText(workflowPath);
+        var workflowLines = File.ReadAllLines(workflowPath);
+
+        var runsOnBlock = GetYamlBlock(workflowLines, "runs-on");
+        if (runsOnBlock is null
+            || !runsOnBlock.Contains("type: string", StringComparison.Ordinal)
+            || !Regex.IsMatch(runsOnBlock, @"(?m)^\s*default:\s*ubuntu-latest\s*$"))
+        {
+            AddFailure($"{workflowPath}: public workflows must expose a string runs-on input defaulting to ubuntu-latest.");
+        }
+
+        var runsOnJsonBlock = GetYamlBlock(workflowLines, "runs-on-json");
+        if (runsOnJsonBlock is null
+            || !runsOnJsonBlock.Contains("type: string", StringComparison.Ordinal)
+            || !Regex.IsMatch(runsOnJsonBlock, "(?m)^\\s*default:\\s*\"\"\\s*$"))
+        {
+            AddFailure($"{workflowPath}: runs-on-json must be an optional JSON-array override with an empty default.");
+        }
+
+        if (!workflowText.Contains($"runs-on: {EffectiveRunsOnJsonExpression}", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: job runs-on must collapse runs-on into runs-on-json with '{EffectiveRunsOnJsonExpression}'.");
+        }
+
+        if (!workflowText.Contains("inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: workflow diagnostics must record the effective runner JSON selection.");
+        }
+
+        var schemaPath = Path.Combine(schemaRoot, Path.ChangeExtension(workflowName, ".schema.json"));
+        if (!File.Exists(schemaPath))
+        {
+            continue;
+        }
+
+        var schemaText = File.ReadAllText(schemaPath);
+        if (!Regex.IsMatch(schemaText, "\"runs-on\"\\s*:\\s*\\{[^}]*\"type\"\\s*:\\s*\"string\"[^}]*\"default\"\\s*:\\s*\"ubuntu-latest\"", RegexOptions.Singleline))
+        {
+            AddFailure($"{schemaPath}: schema must document the runs-on single-label input default.");
+        }
+
+        if (!Regex.IsMatch(schemaText, "\"runs-on-json\"\\s*:\\s*\\{[^}]*\"type\"\\s*:\\s*\"string\"[^}]*\"default\"\\s*:\\s*\"\"", RegexOptions.Singleline))
+        {
+            AddFailure($"{schemaPath}: schema must document runs-on-json as an empty-default JSON-array override.");
+        }
     }
 }
 
