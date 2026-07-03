@@ -1,11 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-deploy-k8s-aspire/v1/schema.json",
-  "title": "wf-deploy-k8s-aspire inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-verify-deploy-k8s-aspire/v1/schema.json",
+  "title": "wf-verify-deploy-k8s-aspire inputs",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "environment-name",
     "aspire-environment",
     "kubernetes-namespace"
   ],
@@ -17,9 +16,6 @@
     "runs-on-self-hosted": {
       "type": "boolean",
       "default": false
-    },
-    "environment-name": {
-      "type": "string"
     },
     "aspire-environment": {
       "type": "string"

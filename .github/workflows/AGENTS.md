@@ -49,16 +49,21 @@ Recommended order:
 - `wf-setup-dotnet-jetbrains.yml` verifies JetBrains ReSharper CleanupCode and fails when cleanup creates a Git diff.
 - `wf-setup-node.yml` verifies Node.js install, lint, tests, build, cache, and diagnostics.
 - `wf-lint-github-actions.yml` lints caller GitHub Actions workflows with actionlint.
+- `wf-verify-release-semantic.yml` verifies semantic-release without publishing.
 - `wf-release-semantic.yml` runs semantic-release metadata without `@semantic-release/exec`.
 - `wf-release-backpropagation.yml` creates release branch backpropagation pull requests and can auto-merge them.
+- `wf-verify-publish-nuget.yml` packs NuGet packages without publishing.
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
+- `wf-verify-publish-container-dotnet.yml` stamps .NET versions and builds OCI images without pushing.
 - `wf-publish-container-dotnet.yml` stamps .NET versions before publishing OCI images through Docker Buildx.
+- `wf-verify-deploy-k8s-aspire.yml` verifies Aspire Kubernetes deployment inputs without applying cluster changes.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.
 
 ## Repository Workflows
 
-- `release.yml` runs platform selftest before semantic-release on pull requests, main pushes, and manual dispatch.
+- `verify-release.yml` runs platform selftest before semantic-release verification on pull requests and manual dispatch.
+- `release.yml` runs platform selftest before environment-gated semantic-release publication on main pushes and manual dispatch.
 
 ## Security Rules
 

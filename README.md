@@ -26,10 +26,14 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
 | `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows with actionlint. |
-| `wf-release-semantic.yml` | Run semantic-release without `@semantic-release/exec` verification or publishing scripts. |
+| `wf-verify-release-semantic.yml` | Verify semantic-release in dry-run mode with read-only permissions. |
+| `wf-release-semantic.yml` | Publish semantic-release metadata without `@semantic-release/exec` verification or publishing scripts. |
 | `wf-release-backpropagation.yml` | Create and optionally auto-merge release branch backpropagation PRs. |
+| `wf-verify-publish-nuget.yml` | Pack NuGet packages without publishing or requesting NuGet credentials. |
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |
+| `wf-verify-publish-container-dotnet.yml` | Stamp .NET versions and build OCI images without pushing. |
 | `wf-publish-container-dotnet.yml` | Stamp .NET versions and publish OCI images through Docker Buildx. |
+| `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying cluster changes. |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |
 | `wf-platform-selftest.yml` | Validate this platform repository. |
 
@@ -98,9 +102,11 @@ jobs:
 
 ## Release Shape
 
-Verification runs before release as separate workflow jobs.
-`wf-release-semantic.yml` only decides and publishes release metadata.
+Release verification and release publication use separate workflows.
+`wf-verify-release-semantic.yml` exercises semantic-release without publish permissions.
+`wf-release-semantic.yml` publishes release metadata from an environment-gated job.
 Package publishing, image publishing, and deployment consume release outputs in separate jobs.
+Use `wf-verify-publish-*` and `wf-verify-deploy-*` workflows for dry-run style validation without environments.
 Container publishing passes the bare semantic-release version as `version` and the tagged release ref as `version-tag`.
 For .NET images, use `wf-publish-container-dotnet.yml` so assemblies are stamped before Docker Buildx runs.
 Use `extra-tags` for additional mutable tags such as `latest`.
@@ -108,7 +114,8 @@ Use `extra-tags` for additional mutable tags such as `latest`.
 ## Repository Pipeline
 
 This repository dogfoods its platform workflows.
-[release.yml](.github/workflows/release.yml) runs `wf-platform-selftest.yml` before calling `wf-release-semantic.yml` on pull requests, pushes to `main`, and manual dispatch.
+[verify-release.yml](.github/workflows/verify-release.yml) runs `wf-platform-selftest.yml` before read-only release verification on pull requests and manual dispatches.
+[release.yml](.github/workflows/release.yml) runs `wf-platform-selftest.yml` before environment-gated release publication on main pushes and manual dispatches.
 [release.config.cjs](release.config.cjs) publishes GitHub release metadata only.
 It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
 

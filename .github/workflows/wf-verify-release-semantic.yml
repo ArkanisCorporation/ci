@@ -1,12 +1,10 @@
 # Summary:
-#   Reusable production semantic-release workflow for version, changelog, tag, and GitHub release metadata.
+#   Reusable semantic-release verification workflow.
 # Remarks:
-#   This workflow intentionally does not run @semantic-release/exec verification or publishing scripts.
-#   Verification, package creation, image creation, package publishing, and deployment should be separate jobs.
-#   Use wf-verify-release-semantic.yml for pull request and manual dry-run validation.
-#   The release job writes diagnostics and exposes semantic-release outputs for downstream publish jobs.
+#   This workflow runs semantic-release in dry-run mode.
+#   It does not bind a GitHub environment or publish tags, releases, comments, packages, images, or deployments.
 
-name: wf-release-semantic
+name: wf-verify-release-semantic
 
 on:
   workflow_call:
@@ -21,11 +19,6 @@ on:
         type: boolean
         required: false
         default: false
-      environment-name:
-        description: GitHub environment guarding release publication.
-        type: string
-        required: false
-        default: release
       node-version:
         description: Node.js version used for semantic-release.
         type: string
@@ -48,7 +41,7 @@ on:
         required: false
         default: false
       timeout-minutes:
-        description: Release job timeout.
+        description: Verification job timeout.
         type: number
         required: false
         default: 30
@@ -59,36 +52,33 @@ on:
         default: 14
     outputs:
       new-version:
-        description: Newly published version.
-        value: ${{ jobs.release.outputs.new-version }}
+        description: Version semantic-release would publish.
+        value: ${{ jobs.verify.outputs.new-version }}
       new-tag:
-        description: Newly published Git tag.
-        value: ${{ jobs.release.outputs.new-tag }}
+        description: Git tag semantic-release would publish.
+        value: ${{ jobs.verify.outputs.new-tag }}
       new-channel:
-        description: Newly published release channel.
-        value: ${{ jobs.release.outputs.new-channel }}
+        description: Release channel semantic-release would publish.
+        value: ${{ jobs.verify.outputs.new-channel }}
       last-version:
         description: Previous release version.
-        value: ${{ jobs.release.outputs.last-version }}
+        value: ${{ jobs.verify.outputs.last-version }}
       last-tag:
         description: Previous release tag.
-        value: ${{ jobs.release.outputs.last-tag }}
+        value: ${{ jobs.verify.outputs.last-tag }}
       release-published:
-        description: Whether semantic-release published a new release.
-        value: ${{ jobs.release.outputs.release-published }}
+        description: Whether semantic-release would publish a new release.
+        value: ${{ jobs.verify.outputs.release-published }}
 
 permissions: {}
 
 jobs:
-  release:
-    name: ${{ github.head_ref || github.ref_name }} @ ${{ inputs.environment-name }}
+  verify:
+    name: ${{ github.head_ref || github.ref_name }} @ verify
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    environment: ${{ inputs.environment-name }}
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: read
     outputs:
       new-version: ${{ steps.semantic-release.outputs.new_release_version }}
       new-tag: ${{ steps.semantic-release.outputs.new_release_git_tag }}
@@ -166,14 +156,15 @@ jobs:
             exit 2
           fi
 
-      - name: Semantic Release
+      - name: Semantic Release dry run
         id: semantic-release
         uses: cycjimmy/semantic-release-action@v6.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          DEBUG: '*'
         with:
-          ci: true
-          dry_run: false
+          ci: false
+          dry_run: true
           semantic_version: ${{ inputs.semantic-release-version }}
           extra_plugins: ${{ inputs.extra-plugins }}
 
@@ -190,15 +181,14 @@ jobs:
         run: |
           mkdir -p artifacts/release artifacts/meta
           {
-            echo "# Semantic release"
+            echo "# Semantic release verification"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
             echo "| Outcome | \`${OUTCOME:-unknown}\` |"
-            echo "| Environment | \`${{ inputs.environment-name }}\` |"
-            echo "| New release published | \`${PUBLISHED:-false}\` |"
+            echo "| New release predicted | \`${PUBLISHED:-false}\` |"
             echo "| New version | \`${NEW_VERSION:-none}\` |"
             echo "| New tag | \`${NEW_TAG:-none}\` |"
             echo "| New channel | \`${NEW_CHANNEL:-none}\` |"
@@ -210,7 +200,7 @@ jobs:
           {
             "schema": "run-metadata/v1",
             "repository": "${GITHUB_REPOSITORY}",
-            "workflow": "wf-release-semantic",
+            "workflow": "wf-verify-release-semantic",
             "sha": "${GITHUB_SHA}",
             "ref": "${GITHUB_REF}",
             "event_name": "${GITHUB_EVENT_NAME}",
@@ -231,7 +221,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-semantic-release-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event.repository.name }}-semantic-release-verify-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

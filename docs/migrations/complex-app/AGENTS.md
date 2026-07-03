@@ -39,5 +39,5 @@ Extract common verification, release metadata, package publishing, image publish
 
 - Run each verification lane independently.
 - Check artifact manifest and release outputs before publish jobs.
-- Use dry-run mode for publish and deploy where available.
+- Use `wf-verify-publish-*` and `wf-verify-deploy-*` workflows for publish and deploy validation where available.
 - Confirm environment protection exists for signing, production deploy, and third-party upload jobs.

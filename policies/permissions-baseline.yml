@@ -21,12 +21,16 @@ jobs:
   nuget-publish:
     contents: read
     id-token: write
+  nuget-publish-api-key:
+    contents: read
+  verify:
+    contents: read
   release:
     contents: write
+    issues: write
     pull-requests: write
   deploy:
     contents: read
-    id-token: write
 forbidden:
   - write-all
   - read-all

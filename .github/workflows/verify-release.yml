@@ -1,0 +1,34 @@
+# Summary:
+#   Runs this repository's platform selftest and semantic-release verification.
+# Remarks:
+#   This workflow does not publish tags or GitHub releases.
+#   It does not bind GitHub environments or request write permissions.
+
+name: verify-release
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  selftest:
+    name: platform @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-platform-selftest.yml
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+
+  verify-release:
+    name: repo @ verify
+    needs: selftest
+    uses: ./.github/workflows/wf-verify-release-semantic.yml
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      extra-plugins: ""

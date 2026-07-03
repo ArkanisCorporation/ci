@@ -1,15 +1,10 @@
 # Summary:
-#   Reusable .NET Docker Buildx workflow for publishing OCI images.
+#   Reusable .NET Docker Buildx verification workflow for OCI images.
 # Remarks:
-#   This workflow runs in the caller repository context.
-#   It always stamps .NET project versions before Docker Buildx runs.
-#   It can use a remote BuildKit endpoint on self-hosted runners.
-#   It forwards non-secret Docker build arguments to BuildKit.
-#   It logs into the configured registry and may create or overwrite mutable tags.
-#   Use wf-verify-publish-container-dotnet.yml for build-only verification.
-#   Consumers should deploy image digests from the digest output instead of mutable tags.
+#   This workflow stamps .NET project versions and builds the container without pushing.
+#   It does not bind a GitHub environment or request registry, OIDC, package, or attestation permissions.
 
-name: wf-publish-container-dotnet
+name: wf-verify-publish-container-dotnet
 
 on:
   workflow_call:
@@ -24,11 +19,6 @@ on:
         type: boolean
         required: false
         default: false
-      environment-name:
-        description: GitHub environment guarding image publication.
-        type: string
-        required: false
-        default: container
       image:
         description: Fully-qualified image name without tag.
         type: string
@@ -69,16 +59,6 @@ on:
         default: true
       extra-tags:
         description: Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through.
-        type: string
-        required: false
-        default: ""
-      registry:
-        description: Registry host used for docker/login-action.
-        type: string
-        required: false
-        default: ghcr.io
-      registry-username:
-        description: Registry username; defaults to github.actor when empty.
         type: string
         required: false
         default: ""
@@ -132,23 +112,13 @@ on:
         type: string
         required: false
         default: ""
-      sbom:
-        description: Docker Buildx sbom input.
-        type: string
-        required: false
-        default: "true"
-      provenance:
-        description: Docker Buildx provenance input.
-        type: string
-        required: false
-        default: mode=max
       labels:
         description: Optional newline-delimited OCI labels.
         type: string
         required: false
         default: ""
       timeout-minutes:
-        description: Publish job timeout.
+        description: Verification job timeout.
         type: number
         required: false
         default: 45
@@ -157,36 +127,24 @@ on:
         type: number
         required: false
         default: 30
-    secrets:
-      REGISTRY_TOKEN:
-        description: Registry token; defaults to github.token when omitted.
-        required: false
     outputs:
-      digest:
-        description: Image digest produced by docker/build-push-action.
-        value: ${{ jobs.publish.outputs.digest }}
       metadata:
-        description: Publish metadata JSON produced by docker/build-push-action.
-        value: ${{ jobs.publish.outputs.metadata }}
+        description: Build metadata JSON produced by docker/build-push-action.
+        value: ${{ jobs.verify.outputs.metadata }}
       artifact-manifest:
         description: Path to the generated artifact manifest.
-        value: ${{ jobs.publish.outputs.artifact-manifest }}
+        value: ${{ jobs.verify.outputs.artifact-manifest }}
 
 permissions: {}
 
 jobs:
-  publish:
-    name: ${{ inputs.version-tag || inputs.version }} @ ${{ inputs.environment-name }}
+  verify:
+    name: ${{ inputs.version-tag || inputs.version }} @ verify
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    environment: ${{ inputs.environment-name }}
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
       metadata: ${{ steps.build.outputs.metadata }}
       artifact-manifest: ${{ steps.manifest.outputs.path }}
     defaults:
@@ -353,55 +311,45 @@ jobs:
             echo "BUILD_ARGS"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Login to registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ inputs.registry }}
-          username: ${{ inputs.registry-username || github.actor }}
-          password: ${{ secrets.REGISTRY_TOKEN || github.token }}
-          logout: true
-
-      - name: Publish image
+      - name: Build image
         id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
           platforms: ${{ inputs.platforms }}
-          push: true
+          push: false
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ inputs.labels }}
           build-args: ${{ steps.build-args.outputs.value }}
           cache-from: ${{ inputs.cache-from }}
           cache-to: ${{ inputs.cache-to }}
-          sbom: ${{ inputs.sbom }}
-          provenance: ${{ inputs.provenance }}
+          sbom: false
+          provenance: false
 
       - name: Write image metadata
         id: manifest
         if: always()
         env:
           RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
-          DIGEST: ${{ steps.build.outputs.digest }}
           METADATA: ${{ steps.build.outputs.metadata }}
         run: |
           mkdir -p artifacts/container
-          printf '%s\n' "$DIGEST" > artifacts/container/digest.txt
           printf '%s\n' "$METADATA" > artifacts/container/build-metadata.json
           cat > artifacts/artifact-manifest.json <<JSON
           {
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-publish-container-dotnet",
+              "workflow": "wf-verify-publish-container-dotnet",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
-              "job": "publish"
+              "job": "verify"
             },
             "artifacts": [
               {
-                "name": "${GITHUB_REPOSITORY#*/}-container-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "name": "${GITHUB_REPOSITORY#*/}-container-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
                 "kind": "image-metadata",
                 "paths": ["artifacts/container"],
                 "retention_days": ${RETENTION_DAYS}
@@ -415,7 +363,6 @@ jobs:
         if: always()
         env:
           IMAGE: ${{ inputs.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
           VERSION: ${{ inputs.version }}
           VERSION_CHANNEL: ${{ inputs.version-channel }}
           CHANNEL_LATEST: ${{ inputs.channel-latest }}
@@ -423,20 +370,18 @@ jobs:
           SDK_VERSION: ${{ inputs.sdk-version }}
         run: |
           {
-            echo "# .NET container publishing"
+            echo "# .NET container verification"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
             echo "| Image | \`${IMAGE}\` |"
-            echo "| Environment | \`${{ inputs.environment-name }}\` |"
             echo "| Version | \`${VERSION}\` |"
             echo "| .NET SDK | \`${SDK_VERSION}\` |"
             echo "| Version channel | \`${VERSION_CHANNEL:-none}\` |"
             echo "| Channel latest | \`${CHANNEL_LATEST}\` |"
             echo "| Extra tags | \`${EXTRA_TAGS:-none}\` |"
-            echo "| Digest | \`${DIGEST:-none}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -444,7 +389,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-container-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event.repository.name }}-container-verify-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

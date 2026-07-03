@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-release-semantic/v1/schema.json",
-  "title": "wf-release-semantic inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-verify-release-semantic/v1/schema.json",
+  "title": "wf-verify-release-semantic inputs",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -12,10 +12,6 @@
     "runs-on-self-hosted": {
       "type": "boolean",
       "default": false
-    },
-    "environment-name": {
-      "type": "string",
-      "default": "release"
     },
     "node-version": {
       "type": "string",

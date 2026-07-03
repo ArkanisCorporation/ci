@@ -20,7 +20,7 @@ source -> build artifact/image digest -> attest/manifest -> environment approval
 - On failure collect events, describe, pod logs.
 - Namespace explicit.
 - Context explicit.
-- Dry-run supported.
+- Verification workflow supported without environment approval or cluster mutation.
 
 ## Auth
 

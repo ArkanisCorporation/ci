@@ -1,14 +1,10 @@
 # Summary:
-#   Reusable production NuGet pack and publish workflow.
+#   Reusable NuGet package verification workflow.
 # Remarks:
-#   This workflow builds packages from a project path, then publishes them from an environment-gated job.
-#   It supports NuGet Trusted Publishing through NuGet/login or long-lived API-key fallback for legacy feeds.
-#   Use wf-verify-publish-nuget.yml for package verification without environments, secrets, id-token, or publication.
-#   Trusted Publishing requires the nuget.org policy to match the workflow that requests the OIDC token.
-#   It stamps .NET project versions with dotnet-setversion by default before packing.
-#   It calls runs-on/cache only when enable-cache is true.
+#   This workflow builds package artifacts without publishing them.
+#   It does not bind a GitHub environment, request id-token, or read package publishing secrets.
 
-name: wf-publish-nuget
+name: wf-verify-publish-nuget
 
 on:
   workflow_call:
@@ -23,11 +19,6 @@ on:
         type: boolean
         required: false
         default: false
-      environment-name:
-        description: GitHub environment guarding package publication.
-        type: string
-        required: false
-        default: nuget
       project:
         description: Project path passed to dotnet restore and dotnet pack.
         type: string
@@ -53,26 +44,6 @@ on:
         default: Release
       enable-cache:
         description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-pack validation or runners without cache service access.
-        type: boolean
-        required: false
-        default: true
-      source:
-        description: NuGet package source.
-        type: string
-        required: false
-        default: https://api.nuget.org/v3/index.json
-      trusted-publishing:
-        description: Uses NuGet/login OIDC flow instead of NUGET_API_KEY.
-        type: boolean
-        required: false
-        default: true
-      nuget-user:
-        description: NuGet profile or organization name used by NuGet/login.
-        type: string
-        required: false
-        default: ""
-      skip-duplicate:
-        description: Adds --skip-duplicate to dotnet nuget push.
         type: boolean
         required: false
         default: true
@@ -112,7 +83,7 @@ on:
         required: false
         default: 4.0.0
       timeout-minutes:
-        description: Publish workflow job timeout.
+        description: Verification job timeout.
         type: number
         required: false
         default: 30
@@ -121,14 +92,10 @@ on:
         type: number
         required: false
         default: 30
-    secrets:
-      NUGET_API_KEY:
-        description: Long-lived NuGet API key used only when trusted-publishing is false.
-        required: false
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
-        value: ${{ jobs.pack.outputs.artifact-manifest }}
+        value: ${{ jobs.verify.outputs.artifact-manifest }}
 
 permissions: {}
 
@@ -136,15 +103,14 @@ env:
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
 jobs:
-  pack:
-    name: ${{ inputs.version }} @ pack
+  verify:
+    name: ${{ inputs.version }} @ verify
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}
-      package-artifact-name: ${{ steps.package-artifact.outputs.name }}
     defaults:
       run:
         shell: bash
@@ -155,7 +121,6 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET
-        id: setup-dotnet
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
@@ -320,15 +285,15 @@ jobs:
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-publish-nuget",
+              "workflow": "wf-verify-publish-nuget",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
-              "job": "pack"
+              "job": "verify"
             },
             "artifacts": [
               {
-                "name": "${GITHUB_REPOSITORY#*/}-nuget-${{ inputs.version }}",
+                "name": "${GITHUB_REPOSITORY#*/}-nuget-verify-${{ inputs.version }}",
                 "kind": "package",
                 "paths": ["artifacts/nuget"],
                 "retention_days": ${RETENTION_DAYS}
@@ -338,23 +303,17 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve package artifact name
-        id: package-artifact
-        run: echo "name=${GITHUB_REPOSITORY#*/}-nuget-${{ inputs.version }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
-
       - name: Publish summary
         if: always()
         env:
           PROJECT: ${{ inputs.project }}
           VERSION: ${{ inputs.version }}
-          TRUSTED_PUBLISHING: ${{ inputs.trusted-publishing }}
-          SOURCE: ${{ inputs.source }}
           INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
           INCLUDE_SOURCE: ${{ inputs.include-source }}
           DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
         run: |
           {
-            echo "# NuGet package publish preparation"
+            echo "# NuGet package verification"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
@@ -362,12 +321,9 @@ jobs:
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
             echo "| Project | \`${PROJECT}\` |"
             echo "| Version | \`${VERSION}\` |"
-            echo "| Publish environment | \`${{ inputs.environment-name }}\` |"
-            echo "| Trusted publishing | \`${TRUSTED_PUBLISHING}\` |"
             echo "| Include symbols | \`${INCLUDE_SYMBOLS}\` |"
             echo "| Include source | \`${INCLUDE_SOURCE}\` |"
             echo "| Dotnet setversion | \`${DOTNET_SETVERSION}\` |"
-            echo "| Source | \`${SOURCE}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -375,132 +331,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package-artifact.outputs.name }}
+          name: ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
           if-no-files-found: error
           retention-days: ${{ inputs.artifact-retention-days }}
-
-  publish-trusted:
-    name: ${{ inputs.version }} @ ${{ inputs.environment-name }}
-    if: inputs.trusted-publishing
-    needs: pack
-    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    environment: ${{ inputs.environment-name }}
-    concurrency:
-      group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.pack.outputs.package-artifact-name }}
-          path: artifacts
-
-      - name: Validate trusted publishing inputs
-        env:
-          NUGET_USER: ${{ inputs.nuget-user }}
-        run: |
-          if [[ -z "$NUGET_USER" ]]; then
-            echo "nuget-user is required when trusted-publishing is true." >&2
-            exit 2
-          fi
-
-      - name: NuGet Trusted Publishing login
-        id: nuget-login
-        uses: NuGet/login@v1
-        with:
-          user: ${{ inputs.nuget-user }}
-
-      - name: Publish packages with trusted publishing
-        env:
-          API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-          SOURCE: ${{ inputs.source }}
-          SKIP_DUPLICATE: ${{ inputs.skip-duplicate }}
-        run: |
-          shopt -s nullglob
-          push_args=()
-          if [[ "$SKIP_DUPLICATE" == "true" ]]; then
-            push_args+=(--skip-duplicate)
-          fi
-          for package in artifacts/nuget/*.nupkg; do
-            dotnet nuget push "$package" --api-key "$API_KEY" --source "$SOURCE" "${push_args[@]}"
-          done
-
-      - name: Publish summary
-        if: always()
-        run: |
-          {
-            echo "# NuGet Trusted Publishing"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Environment | \`${{ inputs.environment-name }}\` |"
-            echo "| Source | \`${{ inputs.source }}\` |"
-            echo "| Artifact | \`${{ needs.pack.outputs.package-artifact-name }}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  publish-api-key:
-    name: ${{ inputs.version }} @ ${{ inputs.environment-name }}
-    if: ${{ !inputs.trusted-publishing }}
-    needs: pack
-    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    environment: ${{ inputs.environment-name }}
-    concurrency:
-      group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.pack.outputs.package-artifact-name }}
-          path: artifacts
-
-      - name: Validate API key publishing inputs
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [[ -z "$NUGET_API_KEY" ]]; then
-            echo "NUGET_API_KEY secret is required when trusted-publishing is false." >&2
-            exit 2
-          fi
-
-      - name: Publish packages with API key
-        env:
-          API_KEY: ${{ secrets.NUGET_API_KEY }}
-          SOURCE: ${{ inputs.source }}
-          SKIP_DUPLICATE: ${{ inputs.skip-duplicate }}
-        run: |
-          shopt -s nullglob
-          push_args=()
-          if [[ "$SKIP_DUPLICATE" == "true" ]]; then
-            push_args+=(--skip-duplicate)
-          fi
-          for package in artifacts/nuget/*.nupkg; do
-            dotnet nuget push "$package" --api-key "$API_KEY" --source "$SOURCE" "${push_args[@]}"
-          done
-
-      - name: Publish summary
-        if: always()
-        run: |
-          {
-            echo "# NuGet API-key publishing"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Environment | \`${{ inputs.environment-name }}\` |"
-            echo "| Source | \`${{ inputs.source }}\` |"
-            echo "| Artifact | \`${{ needs.pack.outputs.package-artifact-name }}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"

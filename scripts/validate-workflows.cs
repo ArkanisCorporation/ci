@@ -39,6 +39,7 @@ ValidateWorkflowLintContract();
 ValidatePlatformSelftestContract();
 ValidateReleaseBackpropagationContract();
 ValidateDotNetJetBrainsContract();
+ValidateSplitVerificationWorkflowsContract();
 ValidateRepositoryPipelineContract();
 await ValidateGeneratedWorkflowDocsAsync();
 await RunActionlintWhenAvailableAsync();
@@ -311,7 +312,7 @@ void ValidateContainerPublishContract()
                      "version-channel",
                      "channel-latest",
                      "extra-tags",
-                     "push",
+                     "environment-name",
                      "registry",
                      "registry-username",
                      "buildkit-endpoint",
@@ -337,7 +338,9 @@ void ValidateContainerPublishContract()
 
         foreach (var forbiddenInput in new[]
                  {
-                     "latest-on-stable",
+                      "latest-on-stable",
+                      "push",
+                      "dry-run",
                      "dotnet-setversion",
                      "dotnet-version",
                      "dotnet-global-json-file",
@@ -356,6 +359,16 @@ void ValidateContainerPublishContract()
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: .NET container publish workflow must stamp projects with dotnet-setversion before Docker Buildx.");
+        }
+
+        if (!Regex.IsMatch(workflowText, @"(?m)^\s*environment:\s*\$\{\{\s*inputs\.environment-name\s*\}\}\s*$"))
+        {
+            AddFailure($"{workflowPath}: .NET container publish workflow must bind the publish job to inputs.environment-name.");
+        }
+
+        if (!workflowText.Contains("push: true", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: .NET container publish workflow must always push; use wf-verify-publish-container-dotnet.yml for build-only verification.");
         }
 
         if (workflowText.Contains("LATEST_ON_STABLE", StringComparison.Ordinal))
@@ -495,9 +508,101 @@ void ValidateNuGetPublishContract()
         AddFailure($"{workflowPath}: NuGet publish workflow must support dotnet pack --include-source.");
     }
 
+    if (GetYamlBlock(workflowLines, "dry-run") is not null)
+    {
+        AddFailure($"{workflowPath}: NuGet publish workflow must not expose dry-run; use wf-verify-publish-nuget.yml for package verification.");
+    }
+
+    if (!Regex.IsMatch(workflowText, @"(?m)^\s*environment:\s*\$\{\{\s*inputs\.environment-name\s*\}\}\s*$"))
+    {
+        AddFailure($"{workflowPath}: NuGet publish workflow must bind publish jobs to inputs.environment-name.");
+    }
+
     if (!File.Exists(schemaPath))
     {
         AddFailure($"{schemaPath}: NuGet publish workflow schema is required.");
+    }
+}
+
+void ValidateSplitVerificationWorkflowsContract()
+{
+    var expectedVerifyWorkflows = new[]
+    {
+        "wf-verify-release-semantic.yml",
+        "wf-verify-publish-nuget.yml",
+        "wf-verify-publish-container-dotnet.yml",
+        "wf-verify-deploy-k8s-aspire.yml",
+    };
+
+    foreach (var workflowName in expectedVerifyWorkflows)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", Path.ChangeExtension(workflowName, ".schema.json"));
+        if (!File.Exists(workflowPath))
+        {
+            AddFailure($"{workflowPath}: verification workflow is required for dry-run/no-environment validation.");
+            continue;
+        }
+
+        if (!File.Exists(schemaPath))
+        {
+            AddFailure($"{schemaPath}: verification workflow schema is required.");
+        }
+
+        var workflowText = File.ReadAllText(workflowPath);
+        if (Regex.IsMatch(workflowText, @"(?m)^\s*environment:\s*"))
+        {
+            AddFailure($"{workflowPath}: verification workflows must not bind GitHub environments.");
+        }
+
+        if (Regex.IsMatch(workflowText, @"(?m)^\s*dry-run:\s*$"))
+        {
+            AddFailure($"{workflowPath}: verification workflows must not expose dry-run; verification is the only mode.");
+        }
+    }
+
+    var productionChecks = new (string WorkflowName, string RequiredInput)[]
+    {
+        ("wf-release-semantic.yml", "environment-name"),
+        ("wf-publish-container-dotnet.yml", "environment-name"),
+        ("wf-deploy-k8s-aspire.yml", "global-json-file"),
+    };
+
+    foreach (var (workflowName, requiredInput) in productionChecks)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            AddFailure($"{workflowPath}: production workflow is required.");
+            continue;
+        }
+
+        var workflowLines = File.ReadAllLines(workflowPath);
+        if (GetYamlBlock(workflowLines, requiredInput) is null)
+        {
+            AddFailure($"{workflowPath}: production workflow must expose {requiredInput} input.");
+        }
+    }
+
+    var noDryRunWorkflows = new[]
+    {
+        "wf-release-semantic.yml",
+        "wf-publish-nuget.yml",
+        "wf-deploy-k8s-aspire.yml",
+    };
+
+    foreach (var workflowName in noDryRunWorkflows)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            continue;
+        }
+
+        if (GetYamlBlock(File.ReadAllLines(workflowPath), "dry-run") is not null)
+        {
+            AddFailure($"{workflowPath}: production workflow must not expose dry-run; use the matching wf-verify-* workflow.");
+        }
     }
 }
 
@@ -685,11 +790,15 @@ void ValidateJobDisplayNameContract()
 {
     var expectedWorkflowJobNames = new[]
     {
-        ("wf-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }} @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}"),
+        ("wf-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }} @ ${{ inputs.environment-name }}"),
         ("wf-release-backpropagation.yml", "    name: ${{ inputs.new-version }} @ ${{ inputs.default-branch }}"),
         ("wf-publish-nuget.yml", "    name: ${{ inputs.version }} @ ${{ inputs.environment-name }}"),
-        ("wf-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ ${{ inputs.push && inputs.registry || github.ref_name }}"),
+        ("wf-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ ${{ inputs.environment-name }}"),
         ("wf-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ ${{ inputs.environment-name }}"),
+        ("wf-verify-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }} @ verify"),
+        ("wf-verify-publish-nuget.yml", "    name: ${{ inputs.version }} @ verify"),
+        ("wf-verify-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ verify"),
+        ("wf-verify-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ verify"),
         ("wf-setup-node.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-setup-dotnet.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-setup-dotnet-jetbrains.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
@@ -714,22 +823,44 @@ void ValidateJobDisplayNameContract()
     }
 
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+    var verifyReleaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "verify-release.yml");
     if (!File.Exists(releaseWorkflowPath))
     {
         AddFailure($"{releaseWorkflowPath}: release workflow is required for caller display name contract.");
-        return;
+    }
+    else
+    {
+        var releaseText = File.ReadAllText(releaseWorkflowPath);
+        foreach (var expectedNameLine in new[]
+                 {
+                     "    name: platform @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: repo @ publish",
+                 })
+        {
+            if (!releaseText.Contains(expectedNameLine, StringComparison.Ordinal))
+            {
+                AddFailure($"{releaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
+            }
+        }
     }
 
-    var releaseText = File.ReadAllText(releaseWorkflowPath);
-    foreach (var expectedNameLine in new[]
-             {
-                 "    name: platform @ ${{ github.head_ref || github.ref_name }}",
-                 "    name: repo @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}",
-             })
+    if (!File.Exists(verifyReleaseWorkflowPath))
     {
-        if (!releaseText.Contains(expectedNameLine, StringComparison.Ordinal))
+        AddFailure($"{verifyReleaseWorkflowPath}: verify release workflow is required for caller display name contract.");
+    }
+    else
+    {
+        var verifyReleaseText = File.ReadAllText(verifyReleaseWorkflowPath);
+        foreach (var expectedNameLine in new[]
+                 {
+                     "    name: platform @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: repo @ verify",
+                 })
         {
-            AddFailure($"{releaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
+            if (!verifyReleaseText.Contains(expectedNameLine, StringComparison.Ordinal))
+            {
+                AddFailure($"{verifyReleaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
+            }
         }
     }
 }
@@ -799,11 +930,12 @@ void ValidateRepositoryPipelineContract()
 {
     var buildWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "build.yml");
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+    var verifyReleaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "verify-release.yml");
     var releaseConfigPath = Path.Combine(repoRoot, "release.config.cjs");
 
     if (File.Exists(buildWorkflowPath))
     {
-        AddFailure($"{buildWorkflowPath}: release.yml owns PR, main, and manual platform selftests; remove build.yml.");
+        AddFailure($"{buildWorkflowPath}: verify-release.yml and release.yml own platform selftests; remove build.yml.");
     }
 
     if (!File.Exists(releaseWorkflowPath))
@@ -813,11 +945,17 @@ void ValidateRepositoryPipelineContract()
     else
     {
         var releaseText = File.ReadAllText(releaseWorkflowPath);
-        if (!Regex.IsMatch(releaseText, @"(?m)^\s*pull_request:\s*$")
-            || !Regex.IsMatch(releaseText, @"(?m)^\s*push:\s*$")
+        if (!Regex.IsMatch(releaseText, @"(?m)^\s*push:\s*$")
             || !releaseText.Contains("branches: [main]", StringComparison.Ordinal))
         {
-            AddFailure($"{releaseWorkflowPath}: release workflow must run on pull_request and push to main.");
+            AddFailure($"{releaseWorkflowPath}: release workflow must run on push to main.");
+        }
+
+        if (Regex.IsMatch(releaseText, @"(?m)^\s*pull_request:\s*$")
+            || GetYamlBlock(File.ReadAllLines(releaseWorkflowPath), "dry-run") is not null
+            || releaseText.Contains("wf-verify-release-semantic.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: release workflow must not include verification or dry-run paths; use verify-release.yml.");
         }
 
         if (!releaseText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
@@ -833,6 +971,37 @@ void ValidateRepositoryPipelineContract()
         if (!Regex.IsMatch(releaseText, @"(?m)^\s*needs:\s*selftest\s*$"))
         {
             AddFailure($"{releaseWorkflowPath}: semantic release job must depend on selftest.");
+        }
+    }
+
+    if (!File.Exists(verifyReleaseWorkflowPath))
+    {
+        AddFailure($"{verifyReleaseWorkflowPath}: repository release verification workflow is required.");
+    }
+    else
+    {
+        var verifyReleaseText = File.ReadAllText(verifyReleaseWorkflowPath);
+        if (!Regex.IsMatch(verifyReleaseText, @"(?m)^\s*pull_request:\s*$")
+            || !Regex.IsMatch(verifyReleaseText, @"(?m)^\s*workflow_dispatch:\s*$"))
+        {
+            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must run on pull_request and manual dispatch.");
+        }
+
+        if (Regex.IsMatch(verifyReleaseText, @"(?m)^\s*environment:\s*")
+            || !verifyReleaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml", StringComparison.Ordinal)
+            || verifyReleaseText.Contains("uses: ./.github/workflows/wf-release-semantic.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must use the verification reusable workflow without environments or production release jobs.");
+        }
+
+        if (!verifyReleaseText.Contains("uses: ./.github/workflows/wf-platform-selftest.yml", StringComparison.Ordinal))
+        {
+            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must run platform selftest before semantic-release verification.");
+        }
+
+        if (!Regex.IsMatch(verifyReleaseText, @"(?m)^\s*needs:\s*selftest\s*$"))
+        {
+            AddFailure($"{verifyReleaseWorkflowPath}: semantic release verification job must depend on selftest.");
         }
     }
 

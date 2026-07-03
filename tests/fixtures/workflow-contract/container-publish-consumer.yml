@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   publish:
-    name: v1.2.3 @ ghcr.io
+    name: v1.2.3 @ container
     uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
     permissions:
       contents: read
@@ -26,6 +26,6 @@ jobs:
       channel-latest: true
       extra-tags: |
         latest
-      push: false
+      environment-name: container
     secrets:
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

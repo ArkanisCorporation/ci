@@ -11,10 +11,14 @@ Audience: consumers and platform maintainers.
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode creates no diff. | untrusted or trusted-build |
 | `wf-setup-node.yml` | Node install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build |
 | `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows. | untrusted or trusted-build |
-| `wf-release-semantic.yml` | Run semantic-release metadata without `@semantic-release/exec`. | publish |
+| `wf-verify-release-semantic.yml` | Verify semantic-release metadata without publishing. | untrusted or trusted-build |
+| `wf-release-semantic.yml` | Publish semantic-release metadata without `@semantic-release/exec`. | publish |
 | `wf-release-backpropagation.yml` | Create release branch backpropagation PRs. | publish |
+| `wf-verify-publish-nuget.yml` | Pack one NuGet project without publishing. | untrusted or trusted-build |
 | `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish |
-| `wf-publish-container-dotnet.yml` | Stamp and publish one .NET OCI image. | trusted-build or publish |
+| `wf-verify-publish-container-dotnet.yml` | Stamp and build one .NET OCI image without pushing. | untrusted or trusted-build |
+| `wf-publish-container-dotnet.yml` | Stamp and publish one .NET OCI image. | publish |
+| `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying changes. | untrusted or trusted-build |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build |
 
@@ -27,18 +31,23 @@ Audience: consumers and platform maintainers.
 | `wf-setup-dotnet-jetbrains.yml` | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
 | `wf-setup-node.yml` | `contents: read` | install, lint, test, build logs, metadata, manifest |
 | `wf-lint-github-actions.yml` | `contents: read` | step summary |
+| `wf-verify-release-semantic.yml` | `contents: read` | release diagnostics and predicted release outputs |
 | `wf-release-semantic.yml` | `contents: write`<br>`issues: write`<br>`pull-requests: write` | release diagnostics and release outputs |
 | `wf-release-backpropagation.yml` | `contents: write`<br>`pull-requests: write` | pull request summary |
-| `wf-publish-nuget.yml` | `contents: read`<br>`id-token: write` for Trusted Publishing | `.nupkg`, `.snupkg`, manifest |
+| `wf-verify-publish-nuget.yml` | `contents: read` | `.nupkg`, `.snupkg`, manifest |
+| `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
+| `wf-verify-publish-container-dotnet.yml` | `contents: read` | Buildx metadata, manifest |
 | `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
-| `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` when pulling package images | deploy output, manifest |
+| `wf-verify-deploy-k8s-aspire.yml` | `contents: read` | verification manifest |
+| `wf-deploy-k8s-aspire.yml` | `contents: read` | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
 
 ## Repository Workflows
 
 | Workflow | Purpose | Permissions |
 |---|---|---|
-| `release.yml` | Run platform selftests and semantic-release contract checks on pull requests, main pushes, and manual dispatch. | Selftest uses `contents: read`.<br>Semantic release uses `contents: write`, `issues: write`, and `pull-requests: write`. |
+| `verify-release.yml` | Run platform selftests and read-only semantic-release verification. | `contents: read` |
+| `release.yml` | Run platform selftests and environment-gated release publication. | Selftest uses `contents: read`.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
 ## Common Inputs
 
@@ -75,10 +84,10 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `output-path` | string | no | `"artifacts/k8s"` | n/a |
 | `image-tag` | string | no | `""` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `kubectl-version` | string | no | `"v1.36.2"` | n/a |
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
-| `dry-run` | boolean | no | `false` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
 
@@ -116,6 +125,7 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 |---|---|---|---|---|
 | `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `environment-name` | string | no | `"container"` | n/a |
 | `image` | string | yes | none | n/a |
 | `context` | string | no | `"."` | n/a |
 | `dockerfile` | string | no | `"Dockerfile"` | n/a |
@@ -125,7 +135,6 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `version-channel` | string | no | `""` | n/a |
 | `channel-latest` | boolean | no | `true` | n/a |
 | `extra-tags` | string | no | `""` | n/a |
-| `push` | boolean | no | `false` | n/a |
 | `registry` | string | no | `"ghcr.io"` | n/a |
 | `registry-username` | string | no | `""` | n/a |
 | `buildkit-endpoint` | string | no | `""` | n/a |
@@ -172,7 +181,6 @@ Schema: `schemas/workflow-inputs/wf-publish-nuget.schema.json`.
 | `dotnet-setversion-recursive` | boolean | no | `true` | n/a |
 | `dotnet-setversion-project` | string | no | `""` | n/a |
 | `dotnet-setversion-tool-version` | string | no | `"4.0.0"` | n/a |
-| `dry-run` | boolean | no | `false` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
 
@@ -205,7 +213,7 @@ Schema: `schemas/workflow-inputs/wf-release-semantic.schema.json`.
 |---|---|---|---|---|
 | `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
-| `dry-run` | boolean | no | `false` | n/a |
+| `environment-name` | string | no | `"release"` | n/a |
 | `node-version` | string | no | `"24.x"` | n/a |
 | `semantic-release-version` | string | no | `"25.0.5"` | n/a |
 | `extra-plugins` | string | no | `"@semantic-release/changelog@6.0.3"` | n/a |
@@ -326,6 +334,105 @@ Schema: `schemas/workflow-inputs/wf-setup-node.schema.json`.
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-verify-deploy-k8s-aspire.yml
+
+Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `aspire-environment` | string | yes | none | n/a |
+| `kubernetes-namespace` | string | yes | none | n/a |
+| `apphost-project` | string | no | `"src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj"` | n/a |
+| `output-path` | string | no | `"artifacts/k8s"` | n/a |
+| `image-tag` | string | no | `""` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `kubectl-version` | string | no | `"v1.36.2"` | n/a |
+| `helm-version` | string | no | `"v4.2.2"` | n/a |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-verify-publish-container-dotnet.yml
+
+Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `image` | string | yes | none | n/a |
+| `context` | string | no | `"."` | n/a |
+| `dockerfile` | string | no | `"Dockerfile"` | n/a |
+| `platforms` | string | no | `"linux/amd64"` | n/a |
+| `version` | string | yes | none | Bare semantic version without leading v. |
+| `version-tag` | string | no | `""` | n/a |
+| `version-channel` | string | no | `""` | n/a |
+| `channel-latest` | boolean | no | `true` | n/a |
+| `extra-tags` | string | no | `""` | n/a |
+| `buildkit-endpoint` | string | no | `""` | n/a |
+| `build-args` | string | no | `""` | n/a |
+| `sdk-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `version-working-directory` | string | no | `"."` | n/a |
+| `version-recursive` | boolean | no | `true` | n/a |
+| `version-project` | string | no | `""` | n/a |
+| `version-tool-version` | string | no | `"4.0.0"` | n/a |
+| `cache-from` | string | no | `""` | n/a |
+| `cache-to` | string | no | `""` | n/a |
+| `labels` | string | no | `""` | n/a |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-verify-publish-nuget.yml
+
+Schema: `schemas/workflow-inputs/wf-verify-publish-nuget.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `project` | string | yes | none | n/a |
+| `version` | string | yes | none | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `configuration` | string | no | `"Release"` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `include-symbols` | boolean | no | `true` | n/a |
+| `include-source` | boolean | no | `true` | n/a |
+| `dotnet-setversion` | boolean | no | `true` | n/a |
+| `dotnet-setversion-working-directory` | string | no | `"."` | n/a |
+| `dotnet-setversion-recursive` | boolean | no | `true` | n/a |
+| `dotnet-setversion-project` | string | no | `""` | n/a |
+| `dotnet-setversion-tool-version` | string | no | `"4.0.0"` | n/a |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-verify-release-semantic.yml
+
+Schema: `schemas/workflow-inputs/wf-verify-release-semantic.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on-json` | string | no | `"[\"ubuntu-latest\"]"` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `node-version` | string | no | `"24.x"` | n/a |
+| `semantic-release-version` | string | no | `"25.0.5"` | n/a |
+| `extra-plugins` | string | no | `"@semantic-release/changelog@6.0.3"` | n/a |
+| `allow-exec-plugin` | boolean | no | `false` | n/a |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
 
 Outputs: schema does not define workflow outputs.
 <!-- generated:workflow-inputs:end -->
@@ -704,11 +811,61 @@ jobs:
       runs-on-self-hosted: false
 ```
 
+## Semantic Release Verification Workflow
+
+`wf-verify-release-semantic.yml` runs semantic-release with Node 24 in dry-run mode.
+It rejects `@semantic-release/exec` unless `allow-exec-plugin` is explicitly true.
+It uses read-only repository permissions and does not bind a GitHub environment.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> node[[Setup Node.js]]
+  node --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| execGate{exec plugin detected?}
+  sh --> execGate
+  execGate -->|yes and not allowed| reject[/Fail closed/]
+  execGate -->|no or allowed| release[[semantic-release dry run]]
+  release --> predicted{release predicted?}
+  predicted -->|yes| outputs(("new-version, new-tag, channel"))
+  predicted -->|no| noRelease(("release-published=false"))
+  outputs --> diagnostics[/Release diagnostics/]
+  noRelease --> diagnostics
+  reject --> diagnostics
+  diagnostics --> upload[/Diagnostics artifact/]
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,node,validate,sh,reject,release action
+  class preflight,execGate,predicted decision
+  class diagnostics,upload artifact
+  class outputs,noRelease output
+```
+
+Preconditions:
+
+- The caller repository contains valid semantic-release configuration.
+- The selected runner can run Node.js and npm.
+
+Side effects:
+
+- Writes release diagnostics.
+- Uploads diagnostic artifacts.
+- Does not publish tags, releases, comments, packages, images, or deployments.
+
 ## Semantic Release Workflow
 
 `wf-release-semantic.yml` runs semantic-release with Node 24 by default.
 It rejects `@semantic-release/exec` unless `allow-exec-plugin` is explicitly true.
-Verification and publishing must be modeled as separate workflow jobs.
+It binds the release job to `environment-name`.
 
 Flow:
 
@@ -746,6 +903,7 @@ flowchart TD
 Preconditions:
 
 - The caller grants release permissions.
+- The caller passes or accepts the protected release environment name.
 - The caller repository contains valid semantic-release configuration.
 - Release branches are protected by caller policy.
 
@@ -831,10 +989,69 @@ jobs:
       PR_AUTOMATION_PAT: ${{ secrets.PR_AUTOMATION_PAT }}
 ```
 
+## NuGet Publish Verification Workflow
+
+`wf-verify-publish-nuget.yml` restores and packs one project without publishing it.
+It uses read-only repository permissions and never requests NuGet secrets or OIDC.
+It runs `dotnet-setversion` before packing by default so package assemblies and package metadata use the same release version.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> dotnet[[Setup .NET]]
+  dotnet --> cache{enable cache?}
+  cache -->|yes| nugetCache[("NuGet cache")]
+  cache -->|no| validate[[Validate runner contract]]
+  nugetCache --> validate
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| inputs[[Validate package inputs]]
+  sh --> inputs
+  inputs --> restore[[Restore package project]]
+  restore --> stamp{dotnet-setversion?}
+  stamp -->|yes| platform[("CI platform checkout")]
+  platform --> setversion[[dotnet-setversion action]]
+  stamp -->|no| pack[[Pack package]]
+  setversion --> pack
+  pack --> verify[[Verify package output]]
+  verify --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> packages[/Package artifacts/]
+  manifest --> outputs(("artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,dotnet,validate,sh,inputs,restore,setversion,pack,verify action
+  class cache,preflight,stamp decision
+  class manifest,summary,packages artifact
+  class outputs output
+  class nugetCache external
+```
+
+Preconditions:
+
+- The project is packable.
+- `version` is the semantic version to pack.
+- `version` must be bare SemVer without a leading `v` when `dotnet-setversion` is true.
+
+Side effects:
+
+- Creates packages under `artifacts/nuget`.
+- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Checks out this CI platform repository under `.ci/arkanis-ci` when `dotnet-setversion` is true, then removes that checkout before pack runs.
+- Modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
+- Does not publish packages.
+
 ## NuGet Publish Workflow
 
 `wf-publish-nuget.yml` restores and packs one project.
-It publishes packages with NuGet Trusted Publishing by default.
+It publishes packages from environment-gated jobs with NuGet Trusted Publishing by default.
 It can use `NUGET_API_KEY` when `trusted-publishing` is false.
 It runs `dotnet-setversion` before packing by default so package assemblies and package metadata use the same release version.
 It exposes `include-symbols` and `include-source` as independent `dotnet pack` flags.
@@ -860,17 +1077,18 @@ flowchart TD
   stamp -->|no| pack[[Pack package]]
   setversion --> pack
   pack --> verify[[Verify package output]]
-  verify --> auth{trusted publishing?}
-  auth -->|yes| oidc[[NuGet/login OIDC]]
-  auth -->|no| apiKey[("NUGET_API_KEY")]
-  oidc --> publish{dry run?}
-  apiKey --> publish
-  publish -->|no| push[[dotnet nuget push]]
-  publish -->|yes| manifest[/artifact-manifest.json/]
-  push --> manifest
+  verify --> packageArtifact[/Package artifact/]
+  packageArtifact --> auth{trusted publishing?}
+  auth -->|yes| envOidc[["Environment-gated OIDC publish job"]]
+  auth -->|no| envApi[["Environment-gated API-key publish job"]]
+  envOidc --> oidc[[NuGet/login OIDC]]
+  oidc --> trustedPush[[dotnet nuget push]]
+  envApi --> apiKey[("NUGET_API_KEY")]
+  apiKey --> keyPush[[dotnet nuget push]]
+  trustedPush --> manifest[/artifact-manifest.json/]
+  keyPush --> manifest
   manifest --> summary>Step summary]
-  summary --> packages[/Package artifacts/]
-  manifest --> outputs(("artifact-manifest"))
+  summary --> outputs(("artifact-manifest"))
   classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
   classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
   classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
@@ -878,9 +1096,9 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,dotnet,validate,sh,inputs,restore,setversion,pack,verify,oidc,push action
-  class cache,preflight,stamp,auth,publish decision
-  class manifest,summary,packages artifact
+  class checkout,dotnet,validate,sh,inputs,restore,setversion,pack,verify,envOidc,envApi,oidc,trustedPush,keyPush action
+  class cache,preflight,stamp,auth decision
+  class packageArtifact,manifest,summary artifact
   class outputs output
   class nugetCache,apiKey external
 ```
@@ -892,6 +1110,7 @@ Preconditions:
 - `version` must be bare SemVer without a leading `v` when `dotnet-setversion` is true.
 - Trusted Publishing requires a nuget.org policy that matches the workflow requesting the OIDC token.
 - API-key fallback requires the `NUGET_API_KEY` secret.
+- Production publication binds the publish job to `environment-name`.
 
 Side effects:
 
@@ -899,7 +1118,111 @@ Side effects:
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Checks out this CI platform repository under `.ci/arkanis-ci` when `dotnet-setversion` is true, then removes that checkout before pack runs.
 - Modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
-- Publishes packages unless `dry-run` is true.
+- Publishes packages from the selected environment-gated publish job.
+
+## NuGet Trusted Publishing Caller Pattern
+
+Use a caller-owned protected publish job when nuget.org policy ownership must match the consumer repository workflow file.
+Call `wf-verify-publish-nuget.yml` first to produce package artifacts without secrets.
+Then download the package artifact in the caller repository publish job, run `NuGet/login`, and push with the returned API key in a subsequent step in the same job.
+Do not pass the temporary API key through job outputs, workflow outputs, artifacts, caches, or summaries.
+
+Example:
+
+```yaml
+jobs:
+  verify_nuget:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-verify-publish-nuget.yml@v1
+    permissions:
+      contents: read
+    with:
+      project: src/Library/Library.csproj
+      version: ${{ needs.release.outputs.new-version }}
+
+  publish_nuget:
+    needs: verify_nuget
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download verified package
+        uses: actions/download-artifact@v7
+        with:
+          pattern: '*-nuget-verify-*'
+          path: artifacts
+          merge-multiple: true
+      - name: NuGet login
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: arkanis
+      - name: Push packages
+        run: |
+          for package in artifacts/nuget/*.nupkg; do
+            dotnet nuget push "$package" \
+              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+```
+
+## .NET Container Publish Verification Workflow
+
+`wf-verify-publish-container-dotnet.yml` stamps .NET project versions, then builds with Docker Buildx without pushing.
+It uses read-only repository permissions.
+It disables SBOM and provenance emission so verification does not need OIDC or attestation permissions.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> inputs[[Validate publish inputs]]
+  inputs --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| builder{remote BuildKit?}
+  sh --> builder
+  builder -->|yes| remote[[Set up remote Buildx]]
+  builder -->|no| local[[Set up Docker Buildx]]
+  remote --> platform[("CI platform checkout")]
+  local --> platform
+  platform --> setversion[[dotnet-setversion action]]
+  setversion --> tags[[Resolve image tags]]
+  tags --> args[[Resolve Docker build args]]
+  args --> build[[docker/build-push-action build only]]
+  build --> metadata[/Buildx metadata/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> upload[/Container metadata artifact/]
+  manifest --> outputs(("metadata, artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,build action
+  class preflight,builder decision
+  class metadata,manifest,summary,upload artifact
+  class outputs output
+```
+
+Preconditions:
+
+- The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
+- `version` is a required bare SemVer value without a leading `v`.
+- `version-working-directory` contains .NET project files unless `version-recursive` is false and `version-project` is set.
+
+Side effects:
+
+- Builds container layers without pushing them.
+- Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.
+- Modifies matched `.csproj` files before Docker Buildx runs.
+- Passes Docker build args to BuildKit; never put secrets in `build-args`.
 
 ## .NET Container Publish Workflow
 
@@ -917,7 +1240,7 @@ Requirements:
 | Requirement | Permission | Mode |
 |---|---|---|
 | Caller repository checkout and platform action checkout. | `contents: read` | always |
-| Registry write token for pushed images. | `packages: write` for GHCR, or registry-specific write scope | `push` |
+| Registry write token for pushed images. | `packages: write` for GHCR, or registry-specific write scope | always |
 | Provenance metadata and attestations. | `id-token: write`<br>`attestations: write` | `provenance` or `sbom` |
 
 Flow:
@@ -938,10 +1261,9 @@ flowchart TD
   platform --> setversion[[dotnet-setversion action]]
   setversion --> tags
   tags --> args[[Resolve Docker build args]]
-  args --> login{push?}
-  login -->|yes| registry[("Container registry")]
-  login -->|no| build[[docker/build-push-action]]
-  registry --> build
+  args --> envGate[["Environment-gated publish job"]]
+  envGate --> registry[("Container registry")]
+  registry --> build[[docker/build-push-action push]]
   build --> metadata[/Buildx metadata/]
   build --> digest(("digest"))
   metadata --> manifest[/artifact-manifest.json/]
@@ -956,8 +1278,8 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,build action
-  class preflight,builder,login decision
+  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,envGate,build action
+  class preflight,builder decision
   class metadata,manifest,summary,upload artifact
   class digest,outputs output
   class registry external
@@ -966,7 +1288,8 @@ flowchart TD
 Preconditions:
 
 - The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
-- Registry credentials are available when `push` is true.
+- Registry credentials are available.
+- Production publication binds the publish job to `environment-name`.
 - `version` is a required bare SemVer value without a leading `v`.
 - `version-working-directory` contains .NET project files unless `version-recursive` is false and `version-project` is set.
 - Version stamping requires Bash, network access to restore actions/tool packages, and `github.workflow_ref` / `github.workflow_sha` support from reusable workflows.
@@ -974,8 +1297,8 @@ Preconditions:
 
 Side effects:
 
-- Builds container layers before pushing them when `push` is true.
-- Pushes registry tags when `push` is true.
+- Builds container layers before pushing them.
+- Pushes registry tags.
 - May create mutable channel tags, channel-latest tags, and extra tags when configured.
 - Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.
 - Modifies matched `.csproj` files before Docker Buildx runs.
@@ -1005,10 +1328,62 @@ jobs:
       version-channel: ${{ needs.release.outputs.new-channel }}
       extra-tags: |
         latest
-      push: true
+      environment-name: container
     secrets:
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+## Aspire Kubernetes Deploy Verification Workflow
+
+`wf-verify-deploy-k8s-aspire.yml` validates Aspire deployment inputs and tool availability without applying cluster changes.
+It does not bind a GitHub environment or read `KUBE_CONFIG`.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> dotnet[[Setup .NET]]
+  dotnet --> cache{enable cache?}
+  cache -->|yes| nugetCache[("NuGet cache")]
+  cache -->|no| tools[[Restore local .NET tools]]
+  nugetCache --> tools
+  tools --> kubectl[[Setup kubectl]]
+  kubectl --> helm[[Setup Helm]]
+  helm --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| inputs[[Validate deployment inputs]]
+  sh --> inputs
+  inputs --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> upload[/Verification artifact/]
+  manifest --> outputs(("artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,dotnet,tools,kubectl,helm,validate,sh,inputs action
+  class cache,preflight decision
+  class manifest,summary,upload artifact
+  class outputs output
+  class nugetCache external
+```
+
+Preconditions:
+
+- The AppHost project exists.
+- The target namespace is a valid Kubernetes namespace.
+- The selected runner can install .NET, kubectl, and Helm.
+
+Side effects:
+
+- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Writes a verification manifest.
+- Does not configure kube credentials, create namespaces, deploy, or use GitHub environments.
 
 ## Aspire Kubernetes Deploy Workflow
 
@@ -1038,9 +1413,7 @@ flowchart TD
   tempKube --> inputs[[Validate deployment inputs]]
   context --> inputs
   inputs --> namespace[[Ensure namespace]]
-  namespace --> dry{dry run?}
-  dry -->|yes| manifest[/artifact-manifest.json/]
-  dry -->|no| aspire[[aspire deploy]]
+  namespace --> aspire[[aspire deploy]]
   aspire --> manifest
   manifest --> summary>Step summary]
   summary --> deployArtifact[/Deploy output artifact/]
@@ -1053,7 +1426,7 @@ flowchart TD
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
   class checkout,dotnet,tools,kubectl,helm,validate,sh,context,inputs,namespace,aspire action
-  class cache,preflight,kube,dry decision
+  class cache,preflight,kube decision
   class manifest,summary,deployArtifact artifact
   class outputs output
   class nugetCache,tempKube external
@@ -1064,12 +1437,13 @@ Preconditions:
 - The runner can reach the Kubernetes API.
 - The AppHost project exists.
 - The target namespace is a valid Kubernetes namespace.
+- Production deployment binds the deploy job to `environment-name`.
 
 Side effects:
 
 - Creates the namespace when missing.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
-- Applies deployment changes unless `dry-run` is true.
+- Applies deployment changes.
 - Writes deploy output under `output-path/environment-name`.
 
 ## Platform Selftest Workflow

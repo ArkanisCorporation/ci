@@ -35,7 +35,9 @@ Artifacts moving into a higher-trust zone require a manifest and digest or prove
 
 ## Semantic Release
 
-`wf-release-semantic.yml` does not run verification or publishing scripts.
+The release verification workflow runs semantic-release in dry-run mode with `contents: read`.
+`wf-release-semantic.yml` publishes release metadata from an environment-gated job.
+It does not run verification or publishing scripts.
 It rejects `@semantic-release/exec` by default.
 Use standalone jobs for pre-release verification, package publishing, image publishing, and deployment.
 
@@ -45,12 +47,19 @@ This separation keeps release metadata from becoming a privileged shell-script d
 
 Trusted Publishing is preferred over long-lived API keys.
 `wf-publish-nuget.yml` uses `NuGet/login` when `trusted-publishing` is true.
-The job needs `id-token: write`.
+Only the Trusted Publishing job needs `id-token: write`.
+The API-key fallback job uses `contents: read` plus the explicit `NUGET_API_KEY` secret.
 
 Important edge case:
 NuGet Trusted Publishing validates the workflow that requests the OIDC token.
 Consumers must configure the nuget.org policy to match the reusable workflow behavior they use.
 If that does not fit a package policy, use API-key fallback or keep the `NuGet/login` step in the consumer repository.
+
+Caller-owned Trusted Publishing:
+Run `NuGet/login` and `dotnet nuget push` in the same protected caller job when the nuget.org policy must match the caller workflow file exactly.
+The `NuGet/login` output is a short-lived API key for subsequent steps in that job.
+Do not pass that value through job outputs or artifacts.
+If reusable platform packaging is still desired, call the package verification workflow first, then download the verified package artifact in the protected caller-owned publish job.
 
 ## Secrets
 

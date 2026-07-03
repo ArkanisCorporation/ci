@@ -1,23 +1,16 @@
 # Summary:
 #   Runs this repository's validation and release automation after platform workflow self-tests pass.
 # Remarks:
-#   Pull requests exercise the same platform selftest and semantic-release workflow contract.
+#   Pull requests exercise platform selftest and semantic-release verification through verify-release.yml.
 #   This workflow publishes GitHub release metadata only.
 #   It does not publish NuGet packages, OCI images, deployments, or run semantic-release exec hooks.
 
 name: release
 
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      dry-run:
-        description: Run semantic-release without publishing tags or GitHub releases.
-        type: boolean
-        required: false
-        default: false
 
 permissions: {}
 
@@ -32,7 +25,7 @@ jobs:
       runs-on-self-hosted: false
 
   release:
-    name: repo @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}
+    name: repo @ publish
     needs: selftest
     uses: ./.github/workflows/wf-release-semantic.yml
     permissions:
@@ -42,5 +35,5 @@ jobs:
     with:
       runs-on-json: '["ubuntu-latest"]'
       runs-on-self-hosted: false
-      dry-run: ${{ inputs.dry-run || false }}
+      environment-name: release
       extra-plugins: ""

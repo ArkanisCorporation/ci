@@ -8,14 +8,24 @@ Start each workflow from `AGENTS.md` contract, then add schema in `schemas/workf
 
 ## Repository workflows
 
-`release.yml` is this repository's pull request, main push, manual self-test, and release pipeline.
-It runs `wf-platform-selftest.yml` before `wf-release-semantic.yml`.
+`verify-release.yml` is this repository's pull request and manual release verification pipeline.
+It runs `wf-platform-selftest.yml` before read-only release verification.
+`release.yml` is this repository's main push and manual release publication pipeline.
+It runs `wf-platform-selftest.yml` before calling `wf-release-semantic.yml` for trusted publication paths.
 It publishes GitHub release metadata only.
+
+## Verification Workflows
+
+`wf-verify-release-semantic.yml` runs semantic-release in dry-run mode with read-only permissions.
+`wf-verify-publish-nuget.yml` packs NuGet packages without credentials or environments.
+`wf-verify-publish-container-dotnet.yml` builds .NET container images without pushing.
+`wf-verify-deploy-k8s-aspire.yml` validates deployment inputs without configuring kube credentials or applying changes.
 
 ## .NET Container Publish
 
 `wf-publish-container-dotnet.yml` is the reusable .NET container publishing workflow.
 It stamps .NET project versions before Docker Buildx runs.
+It binds publication to `environment-name` and always pushes.
 Use `extra-tags` for additional mutable tags such as `latest`.
 
 ## .NET JetBrains CleanupCode

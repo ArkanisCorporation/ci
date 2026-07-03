@@ -1,13 +1,10 @@
 # Summary:
-#   Reusable Aspire Kubernetes deployment workflow.
+#   Reusable Aspire Kubernetes deployment verification workflow.
 # Remarks:
-#   This workflow runs in the caller repository context.
-#   It assumes the runner already has cluster network access and either a current kube context or a KUBE_CONFIG secret.
-#   It creates the target namespace when missing and then runs `dotnet tool run aspire -- deploy`.
-#   Use wf-verify-deploy-k8s-aspire.yml for deployment input verification without cluster mutation.
-#   It calls runs-on/cache only when enable-cache is true.
+#   This workflow validates deployment inputs and tool availability without applying cluster changes.
+#   It does not bind a GitHub environment or read deployment secrets.
 
-name: wf-deploy-k8s-aspire
+name: wf-verify-deploy-k8s-aspire
 
 on:
   workflow_call:
@@ -22,10 +19,6 @@ on:
         type: boolean
         required: false
         default: false
-      environment-name:
-        description: GitHub environment guarding deployment.
-        type: string
-        required: true
       aspire-environment:
         description: Aspire deployment environment.
         type: string
@@ -65,33 +58,29 @@ on:
         required: false
         default: true
       kubectl-version:
-        description: kubectl version installed before deployment.
+        description: kubectl version installed before deployment validation.
         type: string
         required: false
         default: v1.36.2
       helm-version:
-        description: Helm version installed before deployment.
+        description: Helm version installed before deployment validation.
         type: string
         required: false
         default: v4.2.2
       timeout-minutes:
-        description: Deployment job timeout.
+        description: Verification job timeout.
         type: number
         required: false
         default: 45
       artifact-retention-days:
-        description: Deployment artifact retention in days.
+        description: Deployment verification artifact retention in days.
         type: number
         required: false
         default: 30
-    secrets:
-      KUBE_CONFIG:
-        description: Optional kubeconfig content written to RUNNER_TEMP.
-        required: false
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
-        value: ${{ jobs.deploy.outputs.artifact-manifest }}
+        value: ${{ jobs.verify.outputs.artifact-manifest }}
 
 permissions: {}
 
@@ -99,14 +88,10 @@ env:
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
 jobs:
-  deploy:
-    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ ${{ inputs.environment-name }}
+  verify:
+    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ verify
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    environment: ${{ inputs.environment-name }}
-    concurrency:
-      group: deploy-k8s-${{ inputs.environment-name }}
-      cancel-in-progress: false
     permissions:
       contents: read
     outputs:
@@ -114,8 +99,6 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      HAS_KUBE_CONFIG: ${{ secrets.KUBE_CONFIG != '' }}
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v7
@@ -181,16 +164,6 @@ jobs:
             command -v helm
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Configure kubeconfig
-        if: env.HAS_KUBE_CONFIG == 'true'
-        env:
-          KUBE_CONFIG_SECRET: ${{ secrets.KUBE_CONFIG }}
-        run: |
-          kubeconfig_path="${RUNNER_TEMP}/kubeconfig"
-          printf '%s' "$KUBE_CONFIG_SECRET" > "$kubeconfig_path"
-          chmod 600 "$kubeconfig_path"
-          echo "KUBECONFIG=$kubeconfig_path" >> "$GITHUB_ENV"
-
       - name: Validate deployment inputs
         env:
           KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
@@ -206,46 +179,11 @@ jobs:
             exit 2
           fi
 
-      - name: Ensure Kubernetes namespace exists
-        env:
-          KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
-        run: |
-          kubectl create namespace "$KUBERNETES_NAMESPACE" --dry-run=client -o yaml > namespace.yaml
-          kubectl apply -f namespace.yaml
-
-      - name: Aspire deploy
-        env:
-          ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
-          APPHOST_PROJECT: ${{ inputs.apphost-project }}
-          OUTPUT_PATH: ${{ inputs.output-path }}
-          ENVIRONMENT_NAME: ${{ inputs.environment-name }}
-          IMAGE_TAG: ${{ inputs.image-tag }}
-        run: |
-          mkdir -p "${OUTPUT_PATH}/${ENVIRONMENT_NAME}"
-          if [[ -n "$IMAGE_TAG" ]]; then
-            export Kubernetes__Images__Tag="$IMAGE_TAG"
-          fi
-
-          dotnet tool run aspire -- deploy \
-            --apphost "$APPHOST_PROJECT" \
-            --output-path "${OUTPUT_PATH}/${ENVIRONMENT_NAME}" \
-            --environment "$ASPIRE_ENVIRONMENT" \
-            --non-interactive \
-            --pipeline-log-level debug \
-            --include-exception-details \
-            --debug
-
-      - name: Remove temporary kubeconfig
-        if: always() && env.HAS_KUBE_CONFIG == 'true'
-        run: rm -f "${RUNNER_TEMP}/kubeconfig"
-
       - name: Write artifact manifest
         id: manifest
         if: always()
         env:
           RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
-          OUTPUT_PATH: ${{ inputs.output-path }}
-          ENVIRONMENT_NAME: ${{ inputs.environment-name }}
         run: |
           mkdir -p artifacts
           cat > artifacts/artifact-manifest.json <<JSON
@@ -253,17 +191,17 @@ jobs:
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-deploy-k8s-aspire",
+              "workflow": "wf-verify-deploy-k8s-aspire",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
-              "job": "deploy"
+              "job": "verify"
             },
             "artifacts": [
               {
-                "name": "${GITHUB_REPOSITORY#*/}-k8s-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "name": "${GITHUB_REPOSITORY#*/}-k8s-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
                 "kind": "deploy-report",
-                "paths": ["${OUTPUT_PATH}/${ENVIRONMENT_NAME}", "artifacts/artifact-manifest.json"],
+                "paths": ["artifacts/artifact-manifest.json"],
                 "retention_days": ${RETENTION_DAYS}
               }
             ]
@@ -274,30 +212,26 @@ jobs:
       - name: Publish summary
         if: always()
         env:
-          ENVIRONMENT_NAME: ${{ inputs.environment-name }}
           ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
           KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
         run: |
           {
-            echo "# Aspire Kubernetes deployment"
+            echo "# Aspire Kubernetes deployment verification"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
-            echo "| Environment | \`${ENVIRONMENT_NAME}\` |"
             echo "| Aspire environment | \`${ASPIRE_ENVIRONMENT}\` |"
             echo "| Namespace | \`${KUBERNETES_NAMESPACE}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload deployment artifacts
+      - name: Upload deployment verification artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ inputs.output-path }}/${{ inputs.environment-name }}
-            artifacts/artifact-manifest.json
+          name: ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/artifact-manifest.json
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

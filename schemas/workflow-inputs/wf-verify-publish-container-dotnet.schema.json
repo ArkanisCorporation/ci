@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-publish-container-dotnet/v1/schema.json",
-  "title": "wf-publish-container-dotnet inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-verify-publish-container-dotnet/v1/schema.json",
+  "title": "wf-verify-publish-container-dotnet inputs",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,10 +16,6 @@
     "runs-on-self-hosted": {
       "type": "boolean",
       "default": false
-    },
-    "environment-name": {
-      "type": "string",
-      "default": "container"
     },
     "image": {
       "type": "string"
@@ -53,14 +49,6 @@
       "default": true
     },
     "extra-tags": {
-      "type": "string",
-      "default": ""
-    },
-    "registry": {
-      "type": "string",
-      "default": "ghcr.io"
-    },
-    "registry-username": {
       "type": "string",
       "default": ""
     },
@@ -103,14 +91,6 @@
     "cache-to": {
       "type": "string",
       "default": ""
-    },
-    "sbom": {
-      "type": "string",
-      "default": "true"
-    },
-    "provenance": {
-      "type": "string",
-      "default": "mode=max"
     },
     "labels": {
       "type": "string",
