@@ -55,6 +55,30 @@
       "type": "boolean",
       "default": true
     },
+    "coverage-report": {
+      "type": "boolean",
+      "default": true
+    },
+    "coverage-pr-comment": {
+      "type": "boolean",
+      "default": true
+    },
+    "coverage-reporttypes": {
+      "type": "string",
+      "default": "HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary"
+    },
+    "coverage-assemblyfilters": {
+      "type": "string",
+      "default": "+*;-*.UnitTests;-*.IntegrationTests"
+    },
+    "coverage-report-custom-settings": {
+      "type": "string",
+      "default": ""
+    },
+    "coverage-report-tool-version": {
+      "type": "string",
+      "default": "5.5.10"
+    },
     "artifact-retention-days": {
       "type": "integer",
       "default": 14,

@@ -1,0 +1,82 @@
+# Summary:
+#   Generates ReportGenerator coverage output and optionally comments on pull requests.
+# Remarks:
+#   This action expects Bash, GitHub CLI, .NET 10 SDK, and coverage.cobertura.xml files.
+#   It installs dotnet-reportgenerator-globaltool under RUNNER_TEMP.
+#   It writes reports under targetdir and appends Markdown summary content to GITHUB_STEP_SUMMARY when present.
+#   It can create or update one pull request comment with GitHub CLI when comment-on-pr is true.
+#   Do not pass secrets through report arguments because they can appear in logs.
+
+name: .NET Coverage Report
+description: Generates ReportGenerator output and optionally comments the Markdown summary on pull requests.
+
+inputs:
+  reports:
+    description: Coverage report glob passed to ReportGenerator.
+    required: false
+    default: artifacts/coverage/raw/**/coverage.cobertura.xml
+  targetdir:
+    description: Directory where ReportGenerator writes output.
+    required: false
+    default: artifacts/coverage/report
+  reporttypes:
+    description: Semicolon-delimited ReportGenerator output types.
+    required: false
+    default: HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary
+  assemblyfilters:
+    description: Semicolon-delimited ReportGenerator assembly filters.
+    required: false
+    default: +*;-*.UnitTests;-*.IntegrationTests
+  custom-settings:
+    description: Optional ReportGenerator customSettings value.
+    required: false
+    default: ""
+  tag:
+    description: Optional ReportGenerator tag.
+    required: false
+    default: ""
+  tool-version:
+    description: dotnet-reportgenerator-globaltool package version.
+    required: false
+    default: 5.5.10
+  comment-on-pr:
+    description: Creates or updates a PR comment when true and pr-number is set.
+    required: false
+    default: "true"
+  pr-number:
+    description: Pull request number used for comment-on-pr.
+    required: false
+    default: ""
+  fail-if-no-reports:
+    description: Fails when no coverage reports match the reports glob.
+    required: false
+    default: "true"
+
+outputs:
+  report-directory:
+    description: Absolute report output directory.
+    value: ${{ steps.coverage.outputs.report-directory }}
+  summary-file:
+    description: Absolute Markdown summary file path.
+    value: ${{ steps.coverage.outputs.summary-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Generate coverage report
+      id: coverage
+      run: |
+        cd "$RUNNER_TEMP"
+        dotnet run --file "$GITHUB_ACTION_PATH/run-coverage-report.cs"
+      shell: bash
+      env:
+        ACTION_INPUT_REPORTS: ${{ inputs.reports }}
+        ACTION_INPUT_TARGETDIR: ${{ inputs.targetdir }}
+        ACTION_INPUT_REPORTTYPES: ${{ inputs.reporttypes }}
+        ACTION_INPUT_ASSEMBLYFILTERS: ${{ inputs.assemblyfilters }}
+        ACTION_INPUT_CUSTOM_SETTINGS: ${{ inputs.custom-settings }}
+        ACTION_INPUT_TAG: ${{ inputs.tag }}
+        ACTION_INPUT_TOOL_VERSION: ${{ inputs.tool-version }}
+        ACTION_INPUT_COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
+        ACTION_INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        ACTION_INPUT_FAIL_IF_NO_REPORTS: ${{ inputs.fail-if-no-reports }}

@@ -4,6 +4,7 @@
 #   This workflow runs in the caller repository context.
 #   It checks out caller source, writes artifacts under `artifacts/`, and uploads diagnostics even on failure.
 #   Preconditions include a valid solution or project path, a compatible .NET SDK version or global.json, and lock files when locked restore is enabled.
+#   It can generate ReportGenerator coverage reports and update one pull request comment.
 #   It calls runs-on/cache only when enable-cache is true.
 #   It does not publish packages, images, releases, or deployments.
 
@@ -71,6 +72,36 @@ on:
         type: boolean
         required: false
         default: true
+      coverage-report:
+        description: Generates ReportGenerator coverage output when coverage is true.
+        type: boolean
+        required: false
+        default: true
+      coverage-pr-comment:
+        description: Updates one pull request coverage comment when coverage-report is true.
+        type: boolean
+        required: false
+        default: true
+      coverage-reporttypes:
+        description: Semicolon-delimited ReportGenerator output types.
+        type: string
+        required: false
+        default: HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary
+      coverage-assemblyfilters:
+        description: Semicolon-delimited ReportGenerator assembly filters.
+        type: string
+        required: false
+        default: +*;-*.UnitTests;-*.IntegrationTests
+      coverage-report-custom-settings:
+        description: Optional ReportGenerator customSettings value.
+        type: string
+        required: false
+        default: ""
+      coverage-report-tool-version:
+        description: dotnet-reportgenerator-globaltool package version.
+        type: string
+        required: false
+        default: 5.5.10
       artifact-retention-days:
         description: Diagnostic artifact retention in days.
         type: number
@@ -101,6 +132,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      pull-requests: write
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}
       run-metadata: ${{ steps.metadata.outputs.path }}
@@ -112,6 +144,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Setup .NET action tooling
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
 
       - name: Setup .NET from global.json
         if: inputs.global-json-file != ''
@@ -237,6 +274,54 @@ jobs:
 
           "${test_args[@]}"
 
+      - name: Resolve platform coverage action source
+        id: coverage-platform-source
+        if: inputs.run-tests && inputs.coverage && inputs.coverage-report
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          if [[ -z "$repository" || "$repository" == "$WORKFLOW_REF" ]]; then
+            echo "Could not resolve reusable workflow repository from github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 2
+          fi
+
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout platform coverage action source
+        if: inputs.run-tests && inputs.coverage && inputs.coverage-report
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.coverage-platform-source.outputs.repository }}
+          ref: ${{ steps.coverage-platform-source.outputs.ref }}
+          path: .ci/arkanis-ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/dotnet-coverage-report
+          sparse-checkout-cone-mode: false
+
+      - name: Generate coverage report
+        if: inputs.run-tests && inputs.coverage && inputs.coverage-report
+        uses: ./.ci/arkanis-ci/.github/actions/dotnet-coverage-report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          reports: artifacts/test-results/**/coverage.cobertura.xml
+          targetdir: artifacts/coverage/report
+          reporttypes: ${{ inputs.coverage-reporttypes }}
+          assemblyfilters: ${{ inputs.coverage-assemblyfilters }}
+          custom-settings: ${{ inputs.coverage-report-custom-settings }}
+          tag: ${{ github.run_number }}_${{ github.run_id }}
+          tool-version: ${{ inputs.coverage-report-tool-version }}
+          comment-on-pr: ${{ inputs.coverage-pr-comment }}
+          pr-number: ${{ github.event.number }}
+
+      - name: Remove platform coverage action source
+        if: always() && inputs.run-tests && inputs.coverage && inputs.coverage-report
+        run: rm -rf .ci/arkanis-ci
+
       - name: Write run metadata
         id: metadata
         if: always()
@@ -301,6 +386,8 @@ jobs:
           SOLUTION: ${{ inputs.solution }}
           CONFIGURATION: ${{ inputs.configuration }}
           COVERAGE: ${{ inputs.coverage }}
+          COVERAGE_REPORT: ${{ inputs.coverage-report }}
+          COVERAGE_PR_COMMENT: ${{ inputs.coverage-pr-comment }}
           RUN_FORMAT: ${{ inputs.run-format }}
           RUN_TESTS: ${{ inputs.run-tests }}
         run: |
@@ -316,6 +403,8 @@ jobs:
             echo "| Format | \`${RUN_FORMAT}\` |"
             echo "| Tests | \`${RUN_TESTS}\` |"
             echo "| Coverage | \`${COVERAGE}\` |"
+            echo "| Coverage report | \`${COVERAGE_REPORT}\` |"
+            echo "| Coverage PR comment | \`${COVERAGE_PR_COMMENT}\` |"
             echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
