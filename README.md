@@ -4,6 +4,19 @@ Shared GitHub Actions platform for Arkanis repositories.
 Reusable workflows are the public API.
 Composite actions are optional step bundles for same-repository workflows or explicitly checked-out platform code.
 
+## Quick Navigation
+
+| Area | Use when |
+|---|---|
+| [Platform docs](docs/README.md) | You need workflow contracts, runner rules, artifacts, caching, or security notes. |
+| [Migration guides](docs/migrations/README.md) | You are moving an existing repository onto the shared workflow platform. |
+| [.NET library example](examples/dotnet-library/README.md) | You need a package-style .NET consumer workflow. |
+| [.NET container example](examples/dotnet-webapi-container/README.md) | You need a .NET web API container publish workflow. |
+| [Node pnpm example](examples/node-pnpm/README.md) | You need a Node.js pnpm verification workflow. |
+| [Mixed monorepo example](examples/mixed-monorepo/README.md) | You need coordinated .NET and Node verification. |
+| [Kubernetes deploy example](examples/k8s-helm-deploy/README.md) | You need a Kubernetes or Helm-oriented deployment shape. |
+| [Python Poetry example](examples/python-poetry/README.md) | You need the current Python example scope and limitations. |
+
 ## Public Workflows
 
 | Workflow | Purpose |
