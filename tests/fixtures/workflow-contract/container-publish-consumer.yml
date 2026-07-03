@@ -22,7 +22,10 @@ jobs:
       dockerfile: Dockerfile
       version: 1.2.3
       version-tag: v1.2.3
-      version-channel: latest
+      version-channel: stable
+      channel-latest: true
+      extra-tags: |
+        latest
       dotnet-setversion: true
       push: false
     secrets:

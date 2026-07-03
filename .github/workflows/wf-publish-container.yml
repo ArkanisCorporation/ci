@@ -57,6 +57,21 @@ on:
         type: string
         required: false
         default: ""
+      channel-latest:
+        description: Adds a mutable <version-channel>-latest tag when version-channel is set.
+        type: boolean
+        required: false
+        default: true
+      latest-on-stable:
+        description: Adds the mutable latest tag when version-channel is stable.
+        type: boolean
+        required: false
+        default: false
+      extra-tags:
+        description: Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through.
+        type: string
+        required: false
+        default: ""
       push:
         description: Pushes image to registry when true.
         type: boolean
@@ -304,6 +319,9 @@ jobs:
           IMAGE: ${{ inputs.image }}
           VERSION_TAG: ${{ inputs.version-tag }}
           VERSION_CHANNEL: ${{ inputs.version-channel }}
+          CHANNEL_LATEST: ${{ inputs.channel-latest }}
+          LATEST_ON_STABLE: ${{ inputs.latest-on-stable }}
+          EXTRA_TAGS: ${{ inputs.extra-tags }}
         run: |
           short_sha="${GITHUB_SHA::12}"
           {
@@ -314,7 +332,25 @@ jobs:
             fi
             if [[ -n "$VERSION_CHANNEL" ]]; then
               echo "${IMAGE}:${VERSION_CHANNEL}"
+              if [[ "$CHANNEL_LATEST" == "true" ]]; then
+                echo "${IMAGE}:${VERSION_CHANNEL}-latest"
+              fi
+              if [[ "$LATEST_ON_STABLE" == "true" && "$VERSION_CHANNEL" == "stable" ]]; then
+                echo "${IMAGE}:latest"
+              fi
             fi
+            while IFS= read -r extra_tag; do
+              extra_tag="${extra_tag#"${extra_tag%%[![:space:]]*}"}"
+              extra_tag="${extra_tag%"${extra_tag##*[![:space:]]}"}"
+              if [[ -z "$extra_tag" ]]; then
+                continue
+              fi
+              if [[ "$extra_tag" == *"/"* ]]; then
+                echo "$extra_tag"
+              else
+                echo "${IMAGE}:${extra_tag}"
+              fi
+            done <<< "$EXTRA_TAGS"
             echo "TAGS"
           } >> "$GITHUB_OUTPUT"
 
@@ -401,6 +437,9 @@ jobs:
           PUSH: ${{ inputs.push }}
           DIGEST: ${{ steps.build.outputs.digest }}
           VERSION: ${{ inputs.version }}
+          VERSION_CHANNEL: ${{ inputs.version-channel }}
+          CHANNEL_LATEST: ${{ inputs.channel-latest }}
+          EXTRA_TAGS: ${{ inputs.extra-tags }}
           DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
         run: |
           {
@@ -412,6 +451,9 @@ jobs:
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
             echo "| Image | \`${IMAGE}\` |"
             echo "| Version | \`${VERSION:-none}\` |"
+            echo "| Version channel | \`${VERSION_CHANNEL:-none}\` |"
+            echo "| Channel latest | \`${CHANNEL_LATEST}\` |"
+            echo "| Extra tags | \`${EXTRA_TAGS:-none}\` |"
             echo "| Dotnet setversion | \`${DOTNET_SETVERSION}\` |"
             echo "| Push | \`${PUSH}\` |"
             echo "| Digest | \`${DIGEST:-none}\` |"

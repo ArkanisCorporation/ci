@@ -44,6 +44,18 @@
       "type": "string",
       "default": ""
     },
+    "channel-latest": {
+      "type": "boolean",
+      "default": true
+    },
+    "latest-on-stable": {
+      "type": "boolean",
+      "default": false
+    },
+    "extra-tags": {
+      "type": "string",
+      "default": ""
+    },
     "push": {
       "type": "boolean",
       "default": false
