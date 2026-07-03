@@ -100,18 +100,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Setup Node.js
+      - name: Setup Node.js @ ${{ inputs.node-version }}
         uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -126,7 +126,7 @@ jobs:
             npm --version
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -139,7 +139,7 @@ jobs:
             command -v npm
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Reject semantic-release exec plugin
+      - name: Reject semantic-release exec plugin @ allow=${{ inputs.allow-exec-plugin }}
         if: ${{ !inputs.allow-exec-plugin }}
         env:
           EXTRA_PLUGINS: ${{ inputs.extra-plugins }}
@@ -166,7 +166,7 @@ jobs:
             exit 2
           fi
 
-      - name: Semantic Release
+      - name: Semantic Release @ ${{ inputs.semantic-release-version }} to ${{ inputs.environment-name }}
         id: semantic-release
         uses: cycjimmy/semantic-release-action@v6.0.0
         env:
@@ -177,7 +177,7 @@ jobs:
           semantic_version: ${{ inputs.semantic-release-version }}
           extra_plugins: ${{ inputs.extra-plugins }}
 
-      - name: Write release diagnostics
+      - name: Write release diagnostics @ ${{ steps.semantic-release.outputs.new_release_git_tag || github.ref_name }}
         if: always()
         env:
           OUTCOME: ${{ steps.semantic-release.outcome }}
@@ -227,7 +227,7 @@ jobs:
           }
           JSON
 
-      - name: Upload release diagnostics
+      - name: Upload release diagnostics @ ${{ github.event.repository.name }}-semantic-release-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:

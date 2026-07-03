@@ -9,6 +9,14 @@ Every public workflow records whether it targets self-hosted runners and the req
 Workflows that produce files write an artifact manifest.
 Workflows that perform verification or release work upload diagnostics with `if: always()`.
 
+## Step Timeline Names
+
+Step names should include the highest-signal dynamic value available in scope.
+Prefer outputs from previous steps when they exist, then fall back to workflow inputs or GitHub context values.
+Use the shape `Action detail @ value` for ordinary steps.
+When a step name mentions dry-run behavior, use `Action (Dry Run) @ value`.
+Do not include secrets, kubeconfig content, registry tokens, OIDC tokens, raw build arguments, multiline plugin lists, or long multiline tag lists in step names.
+
 ## Summary Fields
 
 Summaries should include:

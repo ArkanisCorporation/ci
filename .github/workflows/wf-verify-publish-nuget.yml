@@ -115,18 +115,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup .NET
+      - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
 
-      - name: Cache NuGet packages
+      - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache
         uses: runs-on/cache@v5.0.7
         with:
@@ -135,7 +135,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -153,7 +153,7 @@ jobs:
             dotnet --info
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -165,7 +165,7 @@ jobs:
             command -v git
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Validate package inputs
+      - name: Validate package inputs @ ${{ inputs.project }} ${{ inputs.version }}
         env:
           VERSION: ${{ inputs.version }}
           DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
@@ -187,12 +187,12 @@ jobs:
             exit 2
           fi
 
-      - name: Restore package project
+      - name: Restore package project @ ${{ inputs.project }}
         env:
           PROJECT: ${{ inputs.project }}
         run: dotnet restore "$PROJECT" --locked-mode
 
-      - name: Checkout platform action source
+      - name: Checkout platform action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         if: inputs.dotnet-setversion
         uses: actions/checkout@v7
         with:
@@ -205,7 +205,7 @@ jobs:
             .github/actions/dotnet-setversion
           sparse-checkout-cone-mode: false
 
-      - name: Stamp .NET project versions
+      - name: Stamp .NET projects @ ${{ inputs.version }}
         if: inputs.dotnet-setversion
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion
         with:
@@ -217,11 +217,11 @@ jobs:
           project: ${{ inputs.dotnet-setversion-project }}
           tool-version: ${{ inputs.dotnet-setversion-tool-version }}
 
-      - name: Remove platform action source
+      - name: Remove platform action @ .ci/arkanis-ci
         if: always() && inputs.dotnet-setversion
         run: rm -rf .ci/arkanis-ci
 
-      - name: Pack package
+      - name: Pack ${{ inputs.project }} @ ${{ inputs.version }}
         env:
           PROJECT: ${{ inputs.project }}
           VERSION: ${{ inputs.version }}
@@ -249,7 +249,7 @@ jobs:
 
           "${pack_args[@]}"
 
-      - name: Verify package output
+      - name: Verify package output @ artifacts/nuget
         run: |
           shopt -s nullglob
           packages=(artifacts/nuget/*.nupkg)
@@ -259,7 +259,7 @@ jobs:
           fi
           printf '%s\n' "${packages[@]}" | tee artifacts/nuget/package-list.txt
 
-      - name: Write artifact manifest
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
         id: manifest
         if: always()
         env:
@@ -288,7 +288,7 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
         if: always()
         env:
           PROJECT: ${{ inputs.project }}
@@ -312,7 +312,7 @@ jobs:
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload package artifacts
+      - name: Upload package artifacts @ ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:

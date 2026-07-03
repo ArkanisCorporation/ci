@@ -112,29 +112,29 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup .NET action tooling
+      - name: Setup .NET action tooling @ 10.0.x
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
-      - name: Setup .NET from global.json
+      - name: Setup .NET @ ${{ inputs.global-json-file }}
         if: inputs.global-json-file != ''
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: ${{ inputs.global-json-file }}
 
-      - name: Setup .NET from version
+      - name: Setup .NET @ ${{ inputs.dotnet-version }}
         if: inputs.global-json-file == ''
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
-      - name: Cache NuGet packages
+      - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache
         uses: runs-on/cache@v5.0.7
         with:
@@ -143,7 +143,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -159,7 +159,7 @@ jobs:
             dotnet --info
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -172,29 +172,29 @@ jobs:
             command -v git
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Restore local .NET tools
+      - name: Restore local .NET tools @ .config/dotnet-tools.json
         run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
 
-      - name: Restore dependencies with lock file
+      - name: Restore ${{ inputs.solution }} with lock file
         if: inputs.restore-locked-mode
         env:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet restore "$SOLUTION" --locked-mode
 
-      - name: Restore dependencies
+      - name: Restore ${{ inputs.solution }}
         if: ${{ !inputs.restore-locked-mode }}
         env:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet restore "$SOLUTION"
 
-      - name: Build
+      - name: Build ${{ inputs.solution }} @ ${{ inputs.configuration }}
         if: inputs.build-before-commands
         env:
           SOLUTION: ${{ inputs.solution }}
           CONFIGURATION: ${{ inputs.configuration }}
         run: dotnet build "$SOLUTION" --configuration "$CONFIGURATION" --no-restore
 
-      - name: Checkout platform action source
+      - name: Checkout platform action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -206,7 +206,7 @@ jobs:
             .github/actions/dotnet-generated-code-diff
           sparse-checkout-cone-mode: false
 
-      - name: Verify generated code
+      - name: Verify generated code @ parallel=${{ inputs.run-commands-in-parallel }}
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-generated-code-diff
         with:
           commands: ${{ inputs.commands }}
@@ -216,11 +216,11 @@ jobs:
           remediation-message: ${{ inputs.remediation-message }}
           artifacts-path: ${{ github.workspace }}/artifacts/generated-code
 
-      - name: Remove platform action source
+      - name: Remove platform action @ .ci/arkanis-ci
         if: always()
         run: rm -rf .ci/arkanis-ci
 
-      - name: Write artifact manifest
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
         id: manifest
         if: always()
         env:
@@ -250,7 +250,7 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
         if: always()
         run: |
           {
@@ -265,7 +265,7 @@ jobs:
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload diagnostics
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-generated-code-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:

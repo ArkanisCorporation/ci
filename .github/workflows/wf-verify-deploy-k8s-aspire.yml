@@ -100,18 +100,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup .NET
+      - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
 
-      - name: Cache NuGet packages
+      - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache
         uses: runs-on/cache@v5.0.7
         with:
@@ -120,20 +120,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Restore local .NET tools
+      - name: Restore local .NET tools @ .config/dotnet-tools.json
         run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
 
-      - name: Setup kubectl
+      - name: Setup kubectl @ ${{ inputs.kubectl-version }}
         uses: azure/setup-kubectl@v5.1.0
         with:
           version: ${{ inputs.kubectl-version }}
 
-      - name: Setup Helm
+      - name: Setup Helm @ ${{ inputs.helm-version }}
         uses: azure/setup-helm@v5.0.1
         with:
           version: ${{ inputs.helm-version }}
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -151,7 +151,7 @@ jobs:
             helm version --short
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -164,7 +164,7 @@ jobs:
             command -v helm
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Validate deployment inputs
+      - name: Validate deployment inputs (Dry Run) @ ${{ inputs.kubernetes-namespace }}
         env:
           KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
           APPHOST_PROJECT: ${{ inputs.apphost-project }}
@@ -179,7 +179,7 @@ jobs:
             exit 2
           fi
 
-      - name: Write artifact manifest
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
         id: manifest
         if: always()
         env:
@@ -209,7 +209,7 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
         if: always()
         env:
           ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
@@ -227,7 +227,7 @@ jobs:
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload deployment verification artifacts
+      - name: Upload deployment artifacts (Dry Run) @ ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:

@@ -45,18 +45,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Set up Python and pipx
+      - name: Set up Python 3.14 + pipx
         uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           pip-install: "pipx"
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -80,7 +80,7 @@ jobs:
             echo "pipx version: ${pipx_version}"
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -92,10 +92,10 @@ jobs:
             command -v git
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Actionlint
+      - name: Actionlint @ caller workflows
         uses: raven-actions/actionlint@v2
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ github.run_id }}
         if: always()
         run: |
           python_version="$(command -v python >/dev/null 2>&1 && python --version 2>&1 || echo unavailable)"

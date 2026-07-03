@@ -89,17 +89,17 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup .NET action tooling
+      - name: Setup .NET action tooling @ 10.0.x
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -113,7 +113,7 @@ jobs:
             command -v gh
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -126,7 +126,7 @@ jobs:
             command -v gh
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Checkout platform action source
+      - name: Checkout platform action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -138,7 +138,7 @@ jobs:
             .github/actions/release-backpropagation
           sparse-checkout-cone-mode: false
 
-      - name: Backpropagate release branch
+      - name: Backpropagate ${{ inputs.release-ref-name }} -> ${{ inputs.default-branch }} @ ${{ inputs.new-version }}
         id: backpropagation
         uses: ./.ci/arkanis-ci/.github/actions/release-backpropagation
         env:
@@ -153,11 +153,11 @@ jobs:
           merge-method: ${{ inputs.merge-method }}
           approve: ${{ inputs.approve }}
 
-      - name: Remove platform action source
+      - name: Remove platform action @ .ci/arkanis-ci
         if: always()
         run: rm -rf .ci/arkanis-ci
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.backpropagation.outputs.pr-url || inputs.default-branch }}
         if: always()
         run: |
           {

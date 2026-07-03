@@ -151,12 +151,12 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -172,7 +172,7 @@ jobs:
             echo ".NET version stamping: true"
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Validate publish inputs
+      - name: Validate container publish inputs @ ${{ inputs.image }}:${{ inputs.version-tag || inputs.version }}
         env:
           VERSION: ${{ inputs.version }}
           VERSION_PROJECT: ${{ inputs.version-project }}
@@ -193,7 +193,7 @@ jobs:
             exit 2
           fi
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -205,7 +205,7 @@ jobs:
             docker version
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Checkout platform action source
+      - name: Checkout platform action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -217,7 +217,7 @@ jobs:
             .github/actions/dotnet-setversion
           sparse-checkout-cone-mode: false
 
-      - name: Stamp .NET project versions
+      - name: Stamp .NET projects @ ${{ inputs.version }}
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion
         with:
           version: ${{ inputs.version }}
@@ -228,22 +228,22 @@ jobs:
           project: ${{ inputs.version-project }}
           tool-version: ${{ inputs.version-tool-version }}
 
-      - name: Remove platform action source
+      - name: Remove platform action @ .ci/arkanis-ci
         if: always()
         run: rm -rf .ci/arkanis-ci
 
-      - name: Set up Docker Buildx
+      - name: Set up Docker Buildx @ local
         if: inputs.buildkit-endpoint == ''
         uses: docker/setup-buildx-action@v4
 
-      - name: Set up remote Docker Buildx
+      - name: Set up Docker Buildx @ remote
         if: inputs.buildkit-endpoint != ''
         uses: docker/setup-buildx-action@v4
         with:
           driver: remote
           endpoint: ${{ inputs.buildkit-endpoint }}
 
-      - name: Resolve image tags
+      - name: Resolve image tags @ ${{ inputs.image }}:${{ inputs.version-tag || inputs.version }}
         id: tags
         env:
           IMAGE: ${{ inputs.image }}
@@ -280,7 +280,7 @@ jobs:
             echo "TAGS"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Resolve Docker build arguments
+      - name: Resolve Docker build args @ VERSION=${{ inputs.version }}
         id: build-args
         env:
           VERSION: ${{ inputs.version }}
@@ -297,7 +297,7 @@ jobs:
             echo "BUILD_ARGS"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build image
+      - name: Build image (Dry Run) @ ${{ inputs.image }}
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -313,7 +313,7 @@ jobs:
           sbom: false
           provenance: false
 
-      - name: Write image metadata
+      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}
         id: manifest
         if: always()
         env:
@@ -345,7 +345,7 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.build.outputs.digest || inputs.image }}
         if: always()
         env:
           IMAGE: ${{ inputs.image }}
@@ -371,7 +371,7 @@ jobs:
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload container metadata
+      - name: Upload container metadata @ ${{ github.event.repository.name }}-container-verify-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:

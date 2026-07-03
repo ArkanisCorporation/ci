@@ -152,18 +152,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup Node.js
+      - name: Setup Node.js @ ${{ inputs.node-version }}
         id: setup-node
         uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
-      - name: Prepare package manager
+      - name: Prepare ${{ inputs.package-manager }} @ ${{ inputs.package-manager-version || 'package.json' }}
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           PACKAGE_MANAGER_VERSION: ${{ inputs.package-manager-version }}
@@ -199,7 +199,7 @@ jobs:
               ;;
           esac
 
-      - name: Detect package manager context
+      - name: Detect ${{ inputs.package-manager }} context @ ${{ inputs.working-directory }}
         id: node-context
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
@@ -293,7 +293,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Cache package manager store
+      - name: Cache ${{ inputs.package-manager }} store @ ${{ steps.node-context.outputs.lock-hash }}
         if: inputs.enable-cache
         id: node-cache
         uses: runs-on/cache@v5.0.7
@@ -303,7 +303,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-${{ inputs.package-manager }}-
 
-      - name: Record tool versions
+      - name: Record tool versions @ ${{ inputs.package-manager }}
         id: tool-versions
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
@@ -315,7 +315,7 @@ jobs:
           printf '%s\n' "$package_manager_version" > artifacts/meta/package-manager-version.txt
           printf 'tool_versions_json={"node":"%s","%s":"%s"}\n' "$(node --version)" "$PACKAGE_MANAGER" "$package_manager_version" >> "$GITHUB_OUTPUT"
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -334,7 +334,7 @@ jobs:
             echo "Workspace: ${GITHUB_WORKSPACE}"
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
@@ -355,7 +355,7 @@ jobs:
             command -v "$PACKAGE_MANAGER"
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Install dependencies
+      - name: Install ${{ inputs.package-manager }} dependencies @ ${{ inputs.working-directory }}
         if: inputs.run-install
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
@@ -411,7 +411,7 @@ jobs:
 
           run_logged artifacts/node/install.log "$PACKAGE_MANAGER" "${args[@]}"
 
-      - name: Run configured scripts
+      - name: Run scripts @ lint=${{ inputs.run-lint }} test=${{ inputs.run-tests }} build=${{ inputs.run-build }}
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
@@ -470,7 +470,7 @@ jobs:
           run_stage test "$RUN_TESTS" "$TEST_SCRIPT" "$TEST_COMMAND"
           run_stage build "$RUN_BUILD" "$BUILD_SCRIPT" "$BUILD_COMMAND"
 
-      - name: Write run metadata
+      - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
         if: always()
         env:
@@ -506,7 +506,7 @@ jobs:
           JSON
           echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
 
-      - name: Write artifact manifest
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
         id: manifest
         if: always()
         env:
@@ -536,7 +536,7 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
         if: always()
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
@@ -566,7 +566,7 @@ jobs:
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload diagnostics
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-node-setup-${{ github.run_id }}-${{ github.run_attempt }}
         if: ${{ always() && inputs.upload-diagnostics }}
         uses: actions/upload-artifact@v7
         with:

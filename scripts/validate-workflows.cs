@@ -30,6 +30,7 @@ ValidateWorkflowInputSchemas();
 ValidateWorkflows();
 ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
+ValidateStepDisplayNameContract();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
@@ -515,8 +516,8 @@ void ValidatePlatformActionSourceContext()
         }
 
         var reasonCount = Regex.Matches(workflowText, Regex.Escape(ActionlintReason)).Count;
-        var repositoryCount = Regex.Matches(workflowText, Regex.Escape("fromJSON(toJSON(job)).workflow_repository")).Count;
-        var shaCount = Regex.Matches(workflowText, Regex.Escape("fromJSON(toJSON(job)).workflow_sha")).Count;
+        var repositoryCount = Regex.Matches(workflowText, @"(?m)^\s*repository:\s*\$\{\{\s*fromJSON\(toJSON\(job\)\)\.workflow_repository\s*\}\}\s*$").Count;
+        var shaCount = Regex.Matches(workflowText, @"(?m)^\s*ref:\s*\$\{\{\s*fromJSON\(toJSON\(job\)\)\.workflow_sha\s*\}\}\s*$").Count;
         if (reasonCount != repositoryCount || reasonCount != shaCount)
         {
             AddFailure($"{workflowPath}: each platform action source checkout must document the actionlint fromJSON(toJSON(job)) rationale at the checkout site.");
@@ -793,7 +794,7 @@ void ValidateWorkflowLintContract()
             }
         }
 
-        foreach (var requiredReportingToken in new[] { "Set up Python and pipx", "python --version", "pipx --version", "| Python |", "| pipx |" })
+        foreach (var requiredReportingToken in new[] { "Set up Python 3.14 + pipx", "python --version", "pipx --version", "| Python |", "| pipx |" })
         {
             if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
             {
@@ -915,6 +916,93 @@ void ValidateJobDisplayNameContract()
             if (!verifyReleaseText.Contains(expectedNameLine, StringComparison.Ordinal))
             {
                 AddFailure($"{verifyReleaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
+            }
+        }
+    }
+}
+
+void ValidateStepDisplayNameContract()
+{
+    var expectedWorkflowStepNames = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["wf-release-semantic.yml"] =
+        [
+            "      - name: Semantic Release @ ${{ inputs.semantic-release-version }} to ${{ inputs.environment-name }}",
+            "      - name: Write release diagnostics @ ${{ steps.semantic-release.outputs.new_release_git_tag || github.ref_name }}",
+        ],
+        ["wf-verify-release-semantic.yml"] =
+        [
+            "      - name: Semantic Release (Dry Run) @ ${{ inputs.semantic-release-version }}",
+            "      - name: Write release diagnostics @ ${{ steps.semantic-release.outputs.new_release_git_tag || github.ref_name }}",
+        ],
+        ["wf-publish-nuget.yml"] =
+        [
+            "      - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}",
+            "      - name: Publish packages via Trusted Publishing @ ${{ inputs.source }}",
+            "      - name: Publish packages via API key @ ${{ inputs.source }}",
+        ],
+        ["wf-publish-container-dotnet.yml"] =
+        [
+            "      - name: Publish image ${{ inputs.image }} @ ${{ inputs.platforms }}",
+            "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-verify-publish-container-dotnet.yml"] =
+        [
+            "      - name: Build image (Dry Run) @ ${{ inputs.image }}",
+            "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-deploy-k8s-aspire.yml"] =
+        [
+            "      - name: Aspire deploy ${{ inputs.apphost-project }} @ ${{ inputs.aspire-environment }}",
+            "      - name: Upload deployment artifacts @ ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        ],
+        ["wf-verify-deploy-k8s-aspire.yml"] =
+        [
+            "      - name: Validate deployment inputs (Dry Run) @ ${{ inputs.kubernetes-namespace }}",
+            "      - name: Upload deployment artifacts (Dry Run) @ ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}",
+        ],
+        ["wf-setup-node.yml"] =
+        [
+            "      - name: Cache ${{ inputs.package-manager }} store @ ${{ steps.node-context.outputs.lock-hash }}",
+            "      - name: Run scripts @ lint=${{ inputs.run-lint }} test=${{ inputs.run-tests }} build=${{ inputs.run-build }}",
+        ],
+        ["wf-setup-dotnet.yml"] =
+        [
+            "      - name: Test ${{ inputs.solution }} @ ${{ inputs.configuration }} coverage=${{ inputs.coverage }}",
+            "      - name: Generate coverage report @ ${{ inputs.coverage-reporttypes }}",
+        ],
+        ["wf-release-backpropagation.yml"] =
+        [
+            "      - name: Backpropagate ${{ inputs.release-ref-name }} -> ${{ inputs.default-branch }} @ ${{ inputs.new-version }}",
+            "      - name: Publish summary @ ${{ steps.backpropagation.outputs.pr-url || inputs.default-branch }}",
+        ],
+        ["wf-platform-selftest.yml"] =
+        [
+            "      - name: Actionlint @ 1.7.12",
+            "      - name: Validate workflow contracts @ scripts/validate-workflows.cs",
+        ],
+        ["wf-lint-github-actions.yml"] =
+        [
+            "      - name: Set up Python 3.14 + pipx",
+            "      - name: Actionlint @ caller workflows",
+        ],
+    };
+
+    foreach (var (fileName, expectedStepNames) in expectedWorkflowStepNames)
+    {
+        var path = Path.Combine(repoRoot, ".github", "workflows", fileName);
+        if (!File.Exists(path))
+        {
+            AddFailure($"{path}: workflow file is required for step display name contract.");
+            continue;
+        }
+
+        var text = File.ReadAllText(path);
+        foreach (var expectedStepName in expectedStepNames)
+        {
+            if (!text.Contains(expectedStepName, StringComparison.Ordinal))
+            {
+                AddFailure($"{path}: step display name must be '{expectedStepName.Trim()}'.");
             }
         }
     }

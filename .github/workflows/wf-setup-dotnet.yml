@@ -140,31 +140,31 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout caller repository
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup .NET action tooling
+      - name: Setup .NET action tooling @ 10.0.x
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
-      - name: Setup .NET from global.json
+      - name: Setup .NET @ ${{ inputs.global-json-file }}
         if: inputs.global-json-file != ''
         id: setup-dotnet-global-json
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: ${{ inputs.global-json-file }}
 
-      - name: Setup .NET from version
+      - name: Setup .NET @ ${{ inputs.dotnet-version }}
         if: inputs.global-json-file == ''
         id: setup-dotnet-version
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
-      - name: Cache NuGet packages
+      - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache
         uses: runs-on/cache@v5.0.7
         with:
@@ -173,7 +173,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Record tool versions
+      - name: Record tool versions @ dotnet
         id: tool-versions
         run: |
           mkdir -p artifacts/meta
@@ -181,7 +181,7 @@ jobs:
           dotnet_version="$(dotnet --version)"
           printf 'tool_versions_json={"dotnet":"%s"}\n' "$dotnet_version" >> "$GITHUB_OUTPUT"
 
-      - name: Validate runner contract
+      - name: Validate runner contract @ ${{ inputs.runs-on-json }}
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json }}
@@ -196,7 +196,7 @@ jobs:
             echo "Workspace: ${GITHUB_WORKSPACE}"
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Self-hosted runner preflight
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json }}
         if: inputs.runs-on-self-hosted
         run: |
           {
@@ -213,28 +213,28 @@ jobs:
             command -v git
           } | tee artifacts/meta/self-hosted-preflight.txt
 
-      - name: Restore local .NET tools
+      - name: Restore local .NET tools @ .config/dotnet-tools.json
         run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
 
-      - name: Restore dependencies with lock file
+      - name: Restore ${{ inputs.solution }} with lock file
         if: inputs.restore-locked-mode
         env:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet restore "$SOLUTION" --locked-mode
 
-      - name: Restore dependencies
+      - name: Restore ${{ inputs.solution }}
         if: ${{ !inputs.restore-locked-mode }}
         env:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet restore "$SOLUTION"
 
-      - name: Verify formatting
+      - name: Verify formatting @ ${{ inputs.solution }}
         if: inputs.run-format
         env:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet format "$SOLUTION" --verify-no-changes --verbosity diagnostic --no-restore
 
-      - name: Build
+      - name: Build ${{ inputs.solution }} @ ${{ inputs.configuration }}
         env:
           SOLUTION: ${{ inputs.solution }}
           CONFIGURATION: ${{ inputs.configuration }}
@@ -246,7 +246,7 @@ jobs:
             -p:ContinuousIntegrationBuild=true \
             -bl:artifacts/msbuild/build.binlog
 
-      - name: Test
+      - name: Test ${{ inputs.solution }} @ ${{ inputs.configuration }} coverage=${{ inputs.coverage }}
         if: inputs.run-tests
         env:
           SOLUTION: ${{ inputs.solution }}
@@ -274,7 +274,7 @@ jobs:
 
           "${test_args[@]}"
 
-      - name: Checkout platform coverage action source
+      - name: Checkout coverage action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         if: inputs.run-tests && inputs.coverage && inputs.coverage-report
         uses: actions/checkout@v7
         with:
@@ -287,7 +287,7 @@ jobs:
             .github/actions/dotnet-coverage-report
           sparse-checkout-cone-mode: false
 
-      - name: Generate coverage report
+      - name: Generate coverage report @ ${{ inputs.coverage-reporttypes }}
         if: inputs.run-tests && inputs.coverage && inputs.coverage-report
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-coverage-report
         env:
@@ -303,11 +303,11 @@ jobs:
           comment-on-pr: ${{ inputs.coverage-pr-comment }}
           pr-number: ${{ github.event.number }}
 
-      - name: Remove platform coverage action source
+      - name: Remove coverage action @ .ci/arkanis-ci
         if: always() && inputs.run-tests && inputs.coverage && inputs.coverage-report
         run: rm -rf .ci/arkanis-ci
 
-      - name: Write run metadata
+      - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
         if: always()
         env:
@@ -335,7 +335,7 @@ jobs:
           JSON
           echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
 
-      - name: Write artifact manifest
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
         id: manifest
         if: always()
         env:
@@ -365,7 +365,7 @@ jobs:
           JSON
           echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
 
-      - name: Publish summary
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
         if: always()
         env:
           SOLUTION: ${{ inputs.solution }}
@@ -394,7 +394,7 @@ jobs:
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload diagnostics
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-dotnet-setup-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:
