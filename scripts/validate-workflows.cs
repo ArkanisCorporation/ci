@@ -983,6 +983,8 @@ void ValidateReleaseBackpropagationContract()
 
 void ValidateRepositoryPipelineContract()
 {
+    const string majorTagPlugin = "semantic-release-major-tag";
+    const string pinnedMajorTagPlugin = "semantic-release-major-tag@0.3.2";
     var buildWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "build.yml");
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
     var verifyReleaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "verify-release.yml");
@@ -1027,6 +1029,11 @@ void ValidateRepositoryPipelineContract()
         {
             AddFailure($"{releaseWorkflowPath}: semantic release job must depend on selftest.");
         }
+
+        if (!releaseText.Contains(pinnedMajorTagPlugin, StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: release workflow must install {pinnedMajorTagPlugin} for vN tag updates.");
+        }
     }
 
     if (!File.Exists(verifyReleaseWorkflowPath))
@@ -1058,6 +1065,11 @@ void ValidateRepositoryPipelineContract()
         {
             AddFailure($"{verifyReleaseWorkflowPath}: semantic release verification job must depend on selftest.");
         }
+
+        if (!verifyReleaseText.Contains(pinnedMajorTagPlugin, StringComparison.Ordinal))
+        {
+            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must install {pinnedMajorTagPlugin} so dry-runs load the production semantic-release config.");
+        }
     }
 
     if (!File.Exists(releaseConfigPath))
@@ -1080,6 +1092,11 @@ void ValidateRepositoryPipelineContract()
         if (!releaseConfigText.Contains("@semantic-release/github", StringComparison.Ordinal))
         {
             AddFailure($"{releaseConfigPath}: semantic-release config must publish GitHub release metadata.");
+        }
+
+        if (!releaseConfigText.Contains(majorTagPlugin, StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseConfigPath}: semantic-release config must create/update vN major version tags with {majorTagPlugin}.");
         }
     }
 }

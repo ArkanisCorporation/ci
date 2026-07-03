@@ -47,7 +47,7 @@ Audience: consumers and platform maintainers.
 | Workflow | Purpose | Permissions |
 |---|---|---|
 | `verify-release.yml` | Run platform selftests and read-only semantic-release verification. | `contents: read` |
-| `release.yml` | Run platform selftests and environment-gated release publication. | Selftest uses `contents: read`.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
+| `release.yml` | Run platform selftests and environment-gated release publication, including mutable major tag updates. | Selftest uses `contents: read`.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
 ## Common Inputs
 
@@ -826,6 +826,7 @@ jobs:
 `wf-verify-release-semantic.yml` runs semantic-release with Node 24 in dry-run mode.
 It rejects `@semantic-release/exec` unless `allow-exec-plugin` is explicitly true.
 It uses read-only repository permissions and does not bind a GitHub environment.
+Callers that use production-only semantic-release plugins should pass the same pinned plugins through `extra-plugins` so dry-runs validate the production release configuration.
 
 Flow:
 
@@ -876,6 +877,7 @@ Side effects:
 `wf-release-semantic.yml` runs semantic-release with Node 24 by default.
 It rejects `@semantic-release/exec` unless `allow-exec-plugin` is explicitly true.
 It binds the release job to `environment-name`.
+Callers can pass pinned semantic-release plugins through `extra-plugins`, for example `semantic-release-major-tag@0.3.2` when repository config updates mutable major version tags such as `v1`.
 
 Flow:
 
@@ -919,7 +921,7 @@ Preconditions:
 
 Side effects:
 
-- May create tags, releases, changelog commits, comments, or release notes depending on repository semantic-release config.
+- May create tags, mutable major tags, releases, changelog commits, comments, or release notes depending on repository semantic-release config.
 - Uploads release diagnostics.
 
 ## Release Backpropagation Workflow

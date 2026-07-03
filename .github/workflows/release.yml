@@ -2,7 +2,7 @@
 #   Runs this repository's validation and release automation after platform workflow self-tests pass.
 # Remarks:
 #   Pull requests exercise platform selftest and semantic-release verification through verify-release.yml.
-#   This workflow publishes GitHub release metadata only.
+#   This workflow publishes GitHub release metadata and updates mutable major version tags such as v1.
 #   It does not publish NuGet packages, OCI images, deployments, or run semantic-release exec hooks.
 
 name: release
@@ -36,4 +36,5 @@ jobs:
       runs-on-json: '["ubuntu-latest"]'
       runs-on-self-hosted: false
       environment-name: release
-      extra-plugins: ""
+      extra-plugins: |
+        semantic-release-major-tag@0.3.2

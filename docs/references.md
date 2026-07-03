@@ -28,7 +28,9 @@ Last verified: 2026-07-03.
 - ReportGenerator: https://github.com/danielpalme/ReportGenerator
 - GitHub CLI pull request commands: https://cli.github.com/manual/gh_pr
 - semantic-release configuration: https://semantic-release.gitbook.io/semantic-release/usage/configuration
+- semantic-release plugins: https://semantic-release.gitbook.io/semantic-release/extending/plugins-list
 - semantic-release GitHub plugin: https://github.com/semantic-release/github
+- semantic-release-major-tag plugin: https://github.com/doteric/semantic-release-major-tag
 - Node.js Corepack: https://nodejs.org/api/corepack.html
 - GitHub local reusable workflow reference changelog: https://github.blog/changelog/2022-01-25-github-actions-reusable-workflows-can-be-referenced-locally/
 - NuGet Trusted Publishing: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
@@ -51,3 +53,4 @@ Last verified: 2026-07-03.
 - Composite actions inside external reusable workflows need explicit repository references or checked-out platform code: https://github.com/orgs/community/discussions/18601
 - Local composite actions resolve against the checked-out caller workspace: https://github.com/actions/runner/issues/1348
 - NuGet Trusted Publishing with shared workflows can require careful policy ownership: https://github.com/NuGet/login/issues/6
+- semantic-release major tag update request: https://github.com/semantic-release/semantic-release/issues/1515

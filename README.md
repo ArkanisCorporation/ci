@@ -116,8 +116,9 @@ Use `extra-tags` for additional mutable tags such as `latest`.
 This repository dogfoods its platform workflows.
 [verify-release.yml](.github/workflows/verify-release.yml) runs `wf-platform-selftest.yml` before read-only release verification on pull requests and manual dispatches.
 [release.yml](.github/workflows/release.yml) runs `wf-platform-selftest.yml` before environment-gated release publication on main pushes and manual dispatches.
-[release.config.cjs](release.config.cjs) publishes GitHub release metadata only.
+[release.config.cjs](release.config.cjs) publishes GitHub release metadata and updates mutable major version tags such as `v1`.
 It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
+The repository release and release-verification workflows both install `semantic-release-major-tag@0.3.2` so dry-runs load the same semantic-release configuration as production.
 
 ## Local Validation
 

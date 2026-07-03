@@ -12,7 +12,8 @@ Start each workflow from `AGENTS.md` contract, then add schema in `schemas/workf
 It runs `wf-platform-selftest.yml` before read-only release verification.
 `release.yml` is this repository's main push and manual release publication pipeline.
 It runs `wf-platform-selftest.yml` before calling `wf-release-semantic.yml` for trusted publication paths.
-It publishes GitHub release metadata only.
+It publishes GitHub release metadata and updates mutable major version tags such as `v1`.
+`verify-release.yml` installs the same semantic-release major-tag plugin as production so dry-runs load the same configuration.
 
 ## Verification Workflows
 

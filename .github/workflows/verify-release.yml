@@ -3,6 +3,7 @@
 # Remarks:
 #   This workflow does not publish tags or GitHub releases.
 #   It does not bind GitHub environments or request write permissions.
+#   It installs production semantic-release plugins so dry-runs load the same release configuration.
 
 name: verify-release
 
@@ -31,4 +32,5 @@ jobs:
     with:
       runs-on-json: '["ubuntu-latest"]'
       runs-on-self-hosted: false
-      extra-plugins: ""
+      extra-plugins: |
+        semantic-release-major-tag@0.3.2

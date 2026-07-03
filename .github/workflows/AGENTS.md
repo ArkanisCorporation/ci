@@ -65,8 +65,8 @@ Recommended order:
 
 ## Repository Workflows
 
-- `verify-release.yml` runs platform selftest before semantic-release verification on pull requests and manual dispatch.
-- `release.yml` runs platform selftest before environment-gated semantic-release publication on main pushes and manual dispatch.
+- `verify-release.yml` runs platform selftest before semantic-release verification on pull requests and manual dispatch, with production semantic-release plugins installed for config parity.
+- `release.yml` runs platform selftest before environment-gated semantic-release publication and mutable major tag updates on main pushes and manual dispatch.
 
 ## Security Rules
 
