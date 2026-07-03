@@ -100,7 +100,7 @@ env:
 
 jobs:
   deploy:
-    name: Aspire deploy
+    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ ${{ inputs.environment-name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     environment: ${{ inputs.environment-name }}

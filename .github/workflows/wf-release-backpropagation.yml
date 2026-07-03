@@ -76,7 +76,7 @@ permissions: {}
 
 jobs:
   backpropagate:
-    name: Release backpropagation
+    name: ${{ inputs.new-version }} @ ${{ inputs.default-branch }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

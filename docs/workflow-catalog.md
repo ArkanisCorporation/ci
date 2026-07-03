@@ -209,7 +209,7 @@ Example:
 ```yaml
 jobs:
   cleanup:
-    name: .NET JetBrains CleanupCode
+    name: CitizenId.slnx @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-jetbrains.yml@v1
     permissions:
       contents: read
@@ -296,7 +296,7 @@ Example:
 ```yaml
 jobs:
   wolverine:
-    name: Wolverine generated handlers
+    name: CitizenId.slnx @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-generated-code.yml@v1
     permissions:
       contents: read
@@ -419,7 +419,7 @@ Example:
 ```yaml
 jobs:
   lint_workflows:
-    name: GitHub Actions lint
+    name: workflows @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-lint-github-actions.yml@v1
     permissions:
       contents: read
@@ -539,7 +539,7 @@ Example:
 ```yaml
 jobs:
   release_backpropagation:
-    name: Release backpropagation
+    name: ${{ needs.release.outputs.new-version }} @ ${{ github.event.repository.default_branch }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-release-backpropagation.yml@v1
     permissions:
       contents: write
@@ -711,7 +711,7 @@ Example:
 ```yaml
 jobs:
   publish_web:
-    name: Publish web image
+    name: ${{ needs.release.outputs.new-tag || needs.release.outputs.new-version }} @ ghcr.io
     uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
     permissions:
       contents: read
@@ -844,7 +844,7 @@ Example:
 ```yaml
 jobs:
   selftest:
-    name: Platform selftest
+    name: platform @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-platform-selftest.yml@v1
     permissions:
       contents: read

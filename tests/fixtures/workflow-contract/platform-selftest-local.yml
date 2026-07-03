@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   selftest:
-    name: Platform selftest
+    name: platform @ ${{ github.head_ref || github.ref_name }}
     uses: ./.github/workflows/wf-platform-selftest.yml
     permissions:
       contents: read

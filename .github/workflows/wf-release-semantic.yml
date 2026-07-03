@@ -80,7 +80,7 @@ permissions: {}
 
 jobs:
   release:
-    name: Semantic release
+    name: ${{ github.head_ref || github.ref_name }} @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   lint:
-    name: GitHub Actions lint
+    name: workflows @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-lint-github-actions.yml@v1
     permissions:
       contents: read

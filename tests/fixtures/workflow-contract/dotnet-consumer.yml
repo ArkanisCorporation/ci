@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   dotnet:
-    name: .NET verification
+    name: Example.slnx @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet.yml@v1
     permissions:
       contents: read

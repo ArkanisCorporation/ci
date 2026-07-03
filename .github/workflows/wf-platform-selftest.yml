@@ -25,7 +25,7 @@ permissions: {}
 
 jobs:
   validate:
-    name: Validate workflow contracts
+    name: contracts @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     permissions:

@@ -142,7 +142,7 @@ env:
 
 jobs:
   publish:
-    name: NuGet publish
+    name: ${{ inputs.version }} @ ${{ inputs.environment-name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     environment: ${{ inputs.environment-name }}

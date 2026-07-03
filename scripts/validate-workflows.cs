@@ -26,6 +26,7 @@ var failures = new List<string>();
 
 ValidateWorkflowInputSchemas();
 ValidateWorkflows();
+ValidateJobDisplayNameContract();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
@@ -561,6 +562,59 @@ void ValidateWorkflowLintContract()
     if (!File.Exists(schemaPath))
     {
         AddFailure($"{schemaPath}: GitHub Actions lint workflow schema is required.");
+    }
+}
+
+void ValidateJobDisplayNameContract()
+{
+    var expectedWorkflowJobNames = new[]
+    {
+        ("wf-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }} @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}"),
+        ("wf-release-backpropagation.yml", "    name: ${{ inputs.new-version }} @ ${{ inputs.default-branch }}"),
+        ("wf-publish-nuget.yml", "    name: ${{ inputs.version }} @ ${{ inputs.environment-name }}"),
+        ("wf-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ ${{ inputs.push && inputs.registry || github.ref_name }}"),
+        ("wf-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ ${{ inputs.environment-name }}"),
+        ("wf-setup-node.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-setup-dotnet.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-setup-dotnet-jetbrains.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-setup-dotnet-generated-code.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-lint-github-actions.yml", "    name: workflows @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-platform-selftest.yml", "    name: contracts @ ${{ github.head_ref || github.ref_name }}"),
+    };
+
+    foreach (var (fileName, expectedNameLine) in expectedWorkflowJobNames)
+    {
+        var path = Path.Combine(repoRoot, ".github", "workflows", fileName);
+        if (!File.Exists(path))
+        {
+            AddFailure($"{path}: workflow file is required for job display name contract.");
+            continue;
+        }
+
+        if (!File.ReadAllText(path).Contains(expectedNameLine, StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: job display name must be '{expectedNameLine.Trim()}'.");
+        }
+    }
+
+    var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+    if (!File.Exists(releaseWorkflowPath))
+    {
+        AddFailure($"{releaseWorkflowPath}: release workflow is required for caller display name contract.");
+        return;
+    }
+
+    var releaseText = File.ReadAllText(releaseWorkflowPath);
+    foreach (var expectedNameLine in new[]
+             {
+                 "    name: platform @ ${{ github.head_ref || github.ref_name }}",
+                 "    name: repo @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}",
+             })
+    {
+        if (!releaseText.Contains(expectedNameLine, StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
+        }
     }
 }
 

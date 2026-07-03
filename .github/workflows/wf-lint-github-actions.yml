@@ -36,7 +36,7 @@ permissions: {}
 
 jobs:
   lint:
-    name: GitHub Actions lint
+    name: workflows @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

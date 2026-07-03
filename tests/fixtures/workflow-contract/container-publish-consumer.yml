@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   publish:
-    name: .NET container publish
+    name: v1.2.3 @ ghcr.io
     uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
     permissions:
       contents: read

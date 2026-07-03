@@ -175,7 +175,7 @@ permissions: {}
 
 jobs:
   publish:
-    name: .NET container publish
+    name: ${{ inputs.version-tag || inputs.version }} @ ${{ inputs.push && inputs.registry || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

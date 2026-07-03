@@ -23,7 +23,7 @@ permissions: {}
 
 jobs:
   selftest:
-    name: Platform selftest
+    name: platform @ ${{ github.head_ref || github.ref_name }}
     uses: ./.github/workflows/wf-platform-selftest.yml
     permissions:
       contents: read
@@ -32,7 +32,7 @@ jobs:
       runs-on-self-hosted: false
 
   release:
-    name: Semantic release
+    name: repo @ ${{ inputs.dry-run && 'dry-run' || 'publish' }}
     needs: selftest
     uses: ./.github/workflows/wf-release-semantic.yml
     permissions:

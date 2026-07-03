@@ -140,7 +140,7 @@ permissions: {}
 
 jobs:
   verify:
-    name: Node verification
+    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

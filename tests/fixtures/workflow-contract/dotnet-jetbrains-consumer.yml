@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   cleanup:
-    name: .NET JetBrains CleanupCode
+    name: CitizenId.slnx @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-jetbrains.yml@v1
     permissions:
       contents: read

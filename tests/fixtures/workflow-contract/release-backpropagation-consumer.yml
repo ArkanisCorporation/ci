@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   backpropagate:
-    name: Release backpropagation
+    name: 1.2.3 @ main
     uses: ArkanisCorporation/ci/.github/workflows/wf-release-backpropagation.yml@v1
     permissions:
       contents: write
