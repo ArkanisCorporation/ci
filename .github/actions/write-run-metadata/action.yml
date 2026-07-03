@@ -1,0 +1,60 @@
+# Summary:
+#   Writes a run-metadata/v1 JSON file for workflow observability.
+# Remarks:
+#   This action requires Bash.
+#   The tool-versions-json input must be valid JSON because the action embeds it without escaping.
+#   The action creates parent directories for output-path.
+
+name: Write Run Metadata
+description: Writes run metadata JSON containing repository, workflow, runner, event, SHA, and tool versions.
+
+inputs:
+  workflow-name:
+    description: Stable producer workflow name.
+    required: true
+  output-path:
+    description: Path to write the run metadata JSON file.
+    required: false
+    default: artifacts/meta/run-metadata.json
+  runner-labels-json:
+    description: JSON array describing the requested runner labels.
+    required: false
+    default: '[]'
+  tool-versions-json:
+    description: JSON object mapping tool names to resolved versions.
+    required: false
+    default: '{}'
+
+outputs:
+  path:
+    description: Path to the generated run metadata file.
+    value: ${{ steps.write.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Write run metadata
+      id: write
+      run: |
+        output_path="${{ inputs.output-path }}"
+        mkdir -p "$(dirname "$output_path")"
+        cat > "$output_path" <<JSON
+        {
+          "schema": "run-metadata/v1",
+          "repository": "${GITHUB_REPOSITORY}",
+          "workflow": "${{ inputs.workflow-name }}",
+          "sha": "${GITHUB_SHA}",
+          "ref": "${GITHUB_REF}",
+          "event_name": "${GITHUB_EVENT_NAME}",
+          "run_id": "${GITHUB_RUN_ID}",
+          "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+          "runner": {
+            "os": "${RUNNER_OS}",
+            "arch": "${RUNNER_ARCH}",
+            "labels": ${{ inputs.runner-labels-json }}
+          },
+          "tool_versions": ${{ inputs.tool-versions-json }}
+        }
+        JSON
+        echo "path=$output_path" >> "$GITHUB_OUTPUT"
+      shell: bash

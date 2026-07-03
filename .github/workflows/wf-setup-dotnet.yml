@@ -1,0 +1,330 @@
+# Summary:
+#   Reusable .NET verification workflow for restore, formatting, build, tests, coverage collection, metadata, and diagnostics.
+# Remarks:
+#   This workflow runs in the caller repository context.
+#   It checks out caller source, writes artifacts under `artifacts/`, and uploads diagnostics even on failure.
+#   Preconditions include a valid solution or project path, a compatible .NET SDK version or global.json, and lock files when locked restore is enabled.
+#   It calls runs-on/cache only when enable-cache is true.
+#   It does not publish packages, images, releases, or deployments.
+
+name: wf-setup-dotnet
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      dotnet-version:
+        description: .NET SDK version range used when global-json-file is empty.
+        type: string
+        required: false
+        default: 10.0.x
+      global-json-file:
+        description: Optional global.json path used by actions/setup-dotnet.
+        type: string
+        required: false
+        default: ""
+      solution:
+        description: Solution or project path to restore, build, format, and test.
+        type: string
+        required: true
+      configuration:
+        description: Build configuration.
+        type: string
+        required: false
+        default: Release
+      restore-locked-mode:
+        description: Runs dotnet restore with --locked-mode.
+        type: boolean
+        required: false
+        default: true
+      enable-cache:
+        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-restore validation or runners without cache service access.
+        type: boolean
+        required: false
+        default: true
+      run-format:
+        description: Runs dotnet format verification.
+        type: boolean
+        required: false
+        default: true
+      run-tests:
+        description: Runs dotnet test after build.
+        type: boolean
+        required: false
+        default: true
+      test-filter:
+        description: Optional dotnet test filter expression.
+        type: string
+        required: false
+        default: ""
+      coverage:
+        description: Collects XPlat Code Coverage during tests.
+        type: boolean
+        required: false
+        default: true
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+      timeout-minutes:
+        description: Verification job timeout.
+        type: number
+        required: false
+        default: 30
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.verify.outputs.artifact-manifest }}
+      run-metadata:
+        description: Path to the generated run metadata.
+        value: ${{ jobs.verify.outputs.run-metadata }}
+
+permissions: {}
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  verify:
+    name: .NET verification
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+      run-metadata: ${{ steps.metadata.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET from global.json
+        if: inputs.global-json-file != ''
+        id: setup-dotnet-global-json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: ${{ inputs.global-json-file }}
+
+      - name: Setup .NET from version
+        if: inputs.global-json-file == ''
+        id: setup-dotnet-version
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Cache NuGet packages
+        if: inputs.enable-cache
+        uses: runs-on/cache@v5.0.7
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Record tool versions
+        id: tool-versions
+        run: |
+          mkdir -p artifacts/meta
+          dotnet --info | tee artifacts/meta/dotnet-info.txt
+          dotnet_version="$(dotnet --version)"
+          printf 'tool_versions_json={"dotnet":"%s"}\n' "$dotnet_version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+        run: |
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "NuGet cache enabled: ${ENABLE_CACHE}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Workspace: ${GITHUB_WORKSPACE}"
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            echo "Disk:"
+            df -h .
+            echo
+            echo "Temp:"
+            printf '%s\n' "${RUNNER_TEMP:-unset}"
+            echo
+            echo "Required tools:"
+            command -v dotnet
+            command -v git
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Restore local .NET tools
+        run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+
+      - name: Restore dependencies with lock file
+        if: inputs.restore-locked-mode
+        env:
+          SOLUTION: ${{ inputs.solution }}
+        run: dotnet restore "$SOLUTION" --locked-mode
+
+      - name: Restore dependencies
+        if: ${{ !inputs.restore-locked-mode }}
+        env:
+          SOLUTION: ${{ inputs.solution }}
+        run: dotnet restore "$SOLUTION"
+
+      - name: Verify formatting
+        if: inputs.run-format
+        env:
+          SOLUTION: ${{ inputs.solution }}
+        run: dotnet format "$SOLUTION" --verify-no-changes --verbosity diagnostic --no-restore
+
+      - name: Build
+        env:
+          SOLUTION: ${{ inputs.solution }}
+          CONFIGURATION: ${{ inputs.configuration }}
+        run: |
+          mkdir -p artifacts/msbuild
+          dotnet build "$SOLUTION" \
+            --configuration "$CONFIGURATION" \
+            --no-restore \
+            -p:ContinuousIntegrationBuild=true \
+            -bl:artifacts/msbuild/build.binlog
+
+      - name: Test
+        if: inputs.run-tests
+        env:
+          SOLUTION: ${{ inputs.solution }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          TEST_FILTER: ${{ inputs.test-filter }}
+          COVERAGE: ${{ inputs.coverage }}
+        run: |
+          mkdir -p artifacts/test-results
+          test_args=(
+            dotnet test "$SOLUTION"
+            --configuration "$CONFIGURATION"
+            --no-build
+            --verbosity normal
+            --logger "trx;LogFilePrefix=test-results"
+            --results-directory artifacts/test-results
+          )
+
+          if [[ -n "$TEST_FILTER" ]]; then
+            test_args+=(--filter "$TEST_FILTER")
+          fi
+
+          if [[ "$COVERAGE" == "true" ]]; then
+            test_args+=('--collect:XPlat Code Coverage')
+          fi
+
+          "${test_args[@]}"
+
+      - name: Write run metadata
+        id: metadata
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          TOOL_VERSIONS_JSON: ${{ steps.tool-versions.outputs.tool_versions_json || '{}' }}
+        run: |
+          mkdir -p artifacts/meta
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-setup-dotnet",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${RUNS_ON_JSON}
+            },
+            "tool_versions": ${TOOL_VERSIONS_JSON}
+          }
+          JSON
+          echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
+
+      - name: Write artifact manifest
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-setup-dotnet",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "verify"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-dotnet-setup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary
+        if: always()
+        env:
+          SOLUTION: ${{ inputs.solution }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          COVERAGE: ${{ inputs.coverage }}
+          RUN_FORMAT: ${{ inputs.run-format }}
+          RUN_TESTS: ${{ inputs.run-tests }}
+        run: |
+          {
+            echo "# .NET setup verification"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Solution | \`${SOLUTION}\` |"
+            echo "| Configuration | \`${CONFIGURATION}\` |"
+            echo "| Format | \`${RUN_FORMAT}\` |"
+            echo "| Tests | \`${RUN_TESTS}\` |"
+            echo "| Coverage | \`${COVERAGE}\` |"
+            echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
+            echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-dotnet-setup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

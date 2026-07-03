@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-release-semantic/v1/schema.json",
+  "title": "wf-release-semantic inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs-on-json": {
+      "type": "string",
+      "default": "[\"ubuntu-latest\"]"
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "dry-run": {
+      "type": "boolean",
+      "default": false
+    },
+    "node-version": {
+      "type": "string",
+      "default": "24.x"
+    },
+    "semantic-release-version": {
+      "type": "string",
+      "default": "25.0.5"
+    },
+    "extra-plugins": {
+      "type": "string",
+      "default": "@semantic-release/changelog@6.0.3"
+    },
+    "allow-exec-plugin": {
+      "type": "boolean",
+      "default": false
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 14,
+      "minimum": 1,
+      "maximum": 90
+    }
+  }
+}

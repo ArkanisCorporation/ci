@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/ci-artifact-manifest/v1/schema.json",
+  "title": "CI Artifact Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "producer",
+    "artifacts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ci-artifact-manifest/v1"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workflow",
+        "run_id",
+        "run_attempt",
+        "sha"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "workflow": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "run_attempt": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "job": {
+          "type": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "kind",
+          "paths",
+          "retention_days"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "artifact_id": {
+            "type": "string"
+          },
+          "artifact_url": {
+            "type": "string"
+          },
+          "artifact_digest": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "retention_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90
+          }
+        }
+      }
+    }
+  }
+}

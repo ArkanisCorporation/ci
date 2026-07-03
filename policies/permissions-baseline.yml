@@ -1,0 +1,32 @@
+default: {}
+jobs:
+  ci:
+    contents: read
+  annotations:
+    contents: read
+    checks: write
+    pull-requests: write
+  codeql:
+    contents: read
+    security-events: write
+  attest:
+    contents: read
+    id-token: write
+    attestations: write
+  container-publish:
+    contents: read
+    packages: write
+    id-token: write
+    attestations: write
+  nuget-publish:
+    contents: read
+    id-token: write
+  release:
+    contents: write
+    pull-requests: write
+  deploy:
+    contents: read
+    id-token: write
+forbidden:
+  - write-all
+  - read-all

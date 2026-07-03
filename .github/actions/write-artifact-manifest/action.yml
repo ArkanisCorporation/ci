@@ -1,0 +1,74 @@
+# Summary:
+#   Writes a ci-artifact-manifest/v1 JSON file for one artifact group.
+# Remarks:
+#   This action requires Bash.
+#   The artifact-paths input is a newline-delimited path list.
+#   The action creates parent directories for output-path.
+#   Upload actions may later add artifact IDs, URLs, and digests that this minimal manifest does not know yet.
+
+name: Write Artifact Manifest
+description: Writes an artifact manifest JSON file for a produced artifact group.
+
+inputs:
+  workflow-name:
+    description: Stable producer workflow name.
+    required: true
+  artifact-name:
+    description: Artifact name used by upload-artifact or release upload.
+    required: true
+  artifact-kind:
+    description: Contractual artifact kind such as diagnostics, package, image-metadata, or deploy-report.
+    required: true
+  artifact-paths:
+    description: Newline-delimited artifact paths.
+    required: true
+  retention-days:
+    description: Artifact retention period in days.
+    required: false
+    default: "14"
+  output-path:
+    description: Path to write the artifact manifest JSON file.
+    required: false
+    default: artifacts/artifact-manifest.json
+
+outputs:
+  path:
+    description: Path to the generated artifact manifest file.
+    value: ${{ steps.write.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Write artifact manifest
+      id: write
+      run: |
+        output_path="${{ inputs.output-path }}"
+        mkdir -p "$(dirname "$output_path")"
+        paths_json="$(
+          printf '%s\n' "${{ inputs.artifact-paths }}" |
+            sed '/^[[:space:]]*$/d' |
+            sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/' |
+            paste -sd ',' -
+        )"
+        cat > "$output_path" <<JSON
+        {
+          "schema": "ci-artifact-manifest/v1",
+          "producer": {
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "${{ inputs.workflow-name }}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "sha": "${GITHUB_SHA}"
+          },
+          "artifacts": [
+            {
+              "name": "${{ inputs.artifact-name }}",
+              "kind": "${{ inputs.artifact-kind }}",
+              "paths": [$paths_json],
+              "retention_days": ${{ inputs.retention-days }}
+            }
+          ]
+        }
+        JSON
+        echo "path=$output_path" >> "$GITHUB_OUTPUT"
+      shell: bash

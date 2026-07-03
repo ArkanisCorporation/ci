@@ -1,0 +1,22 @@
+labels:
+  hosted_linux:
+    runs_on: [ubuntu-latest]
+    capabilities: [bash, git]
+  self_hosted_linux:
+    runs_on: [self-hosted, linux, x64]
+    capabilities: [bash, git]
+  arc_dotnet:
+    runs_on: [self-hosted, linux, x64, arc, dotnet]
+    capabilities: [bash, git, dotnet]
+  arc_node:
+    runs_on: [self-hosted, linux, x64, arc, node]
+    capabilities: [bash, git, node]
+  arc_python:
+    runs_on: [self-hosted, linux, x64, arc, python]
+    capabilities: [bash, git, python]
+  arc_docker:
+    runs_on: [self-hosted, linux, x64, arc, docker]
+    capabilities: [bash, git, docker, buildx]
+  arc_k8s:
+    runs_on: [self-hosted, linux, x64, arc, k8s]
+    capabilities: [bash, git, kubectl, helm]

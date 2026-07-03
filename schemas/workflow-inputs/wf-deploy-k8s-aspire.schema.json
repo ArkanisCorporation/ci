@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-deploy-k8s-aspire/v1/schema.json",
+  "title": "wf-deploy-k8s-aspire inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment-name",
+    "aspire-environment",
+    "kubernetes-namespace"
+  ],
+  "properties": {
+    "runs-on-json": {
+      "type": "string",
+      "default": "[\"ubuntu-latest\"]"
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "environment-name": {
+      "type": "string"
+    },
+    "aspire-environment": {
+      "type": "string"
+    },
+    "kubernetes-namespace": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "apphost-project": {
+      "type": "string",
+      "default": "src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj"
+    },
+    "output-path": {
+      "type": "string",
+      "default": "artifacts/k8s"
+    },
+    "image-tag": {
+      "type": "string",
+      "default": ""
+    },
+    "dotnet-version": {
+      "type": "string",
+      "default": "10.0.x"
+    },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true
+    },
+    "kubectl-version": {
+      "type": "string",
+      "default": "v1.36.2"
+    },
+    "helm-version": {
+      "type": "string",
+      "default": "v4.2.2"
+    },
+    "dry-run": {
+      "type": "boolean",
+      "default": false
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 45,
+      "minimum": 1
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 90
+    }
+  }
+}

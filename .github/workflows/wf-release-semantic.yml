@@ -1,0 +1,237 @@
+# Summary:
+#   Reusable semantic-release workflow for version, changelog, tag, and GitHub release metadata.
+# Remarks:
+#   This workflow intentionally does not run @semantic-release/exec verification or publishing scripts.
+#   Verification, package creation, image creation, package publishing, and deployment should be separate jobs.
+#   The release job writes diagnostics and exposes semantic-release outputs for downstream publish jobs.
+
+name: wf-release-semantic
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      dry-run:
+        description: Runs semantic-release without publishing.
+        type: boolean
+        required: false
+        default: false
+      node-version:
+        description: Node.js version used for semantic-release.
+        type: string
+        required: false
+        default: 24.x
+      semantic-release-version:
+        description: semantic-release package version.
+        type: string
+        required: false
+        default: 25.0.5
+      extra-plugins:
+        description: Newline-delimited semantic-release plugins installed by cycjimmy/semantic-release-action.
+        type: string
+        required: false
+        default: |
+          @semantic-release/changelog@6.0.3
+      allow-exec-plugin:
+        description: Allows @semantic-release/exec in configuration or extra plugins.
+        type: boolean
+        required: false
+        default: false
+      timeout-minutes:
+        description: Release job timeout.
+        type: number
+        required: false
+        default: 30
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+    outputs:
+      new-version:
+        description: Newly published version.
+        value: ${{ jobs.release.outputs.new-version }}
+      new-tag:
+        description: Newly published Git tag.
+        value: ${{ jobs.release.outputs.new-tag }}
+      new-channel:
+        description: Newly published release channel.
+        value: ${{ jobs.release.outputs.new-channel }}
+      last-version:
+        description: Previous release version.
+        value: ${{ jobs.release.outputs.last-version }}
+      last-tag:
+        description: Previous release tag.
+        value: ${{ jobs.release.outputs.last-tag }}
+      release-published:
+        description: Whether semantic-release published a new release.
+        value: ${{ jobs.release.outputs.release-published }}
+
+permissions: {}
+
+jobs:
+  release:
+    name: Semantic release
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      new-version: ${{ steps.semantic-release.outputs.new_release_version }}
+      new-tag: ${{ steps.semantic-release.outputs.new_release_git_tag }}
+      new-channel: ${{ steps.semantic-release.outputs.new_release_channel }}
+      last-version: ${{ steps.semantic-release.outputs.last_release_version }}
+      last-tag: ${{ steps.semantic-release.outputs.last_release_git_tag }}
+      release-published: ${{ steps.semantic-release.outputs.new_release_published }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+        run: |
+          mkdir -p artifacts/meta
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            node --version
+            npm --version
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            command -v git
+            command -v node
+            command -v npm
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Reject semantic-release exec plugin
+        if: ${{ !inputs.allow-exec-plugin }}
+        env:
+          EXTRA_PLUGINS: ${{ inputs.extra-plugins }}
+        run: |
+          if [[ "$EXTRA_PLUGINS" == *"@semantic-release/exec"* ]]; then
+            echo "@semantic-release/exec is disabled by this platform workflow." >&2
+            exit 2
+          fi
+
+          mapfile -t release_config_files < <(
+            find . -maxdepth 2 -type f \
+              \( -name 'release.config.*' -o -name '.releaserc*' -o -name 'package.json' \) \
+              -not -path './node_modules/*' \
+              -print
+          )
+
+          if [[ "${#release_config_files[@]}" -eq 0 ]]; then
+            exit 0
+          fi
+
+          if grep -n --fixed-strings '@semantic-release/exec' "${release_config_files[@]}"; then
+            echo "@semantic-release/exec was found in release configuration." >&2
+            echo "Move verification and publishing into standalone workflow jobs." >&2
+            exit 2
+          fi
+
+      - name: Semantic Release
+        id: semantic-release
+        uses: cycjimmy/semantic-release-action@v6.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEBUG: ${{ inputs.dry-run && '*' || '' }}
+        with:
+          ci: ${{ !inputs.dry-run }}
+          dry_run: ${{ inputs.dry-run }}
+          semantic_version: ${{ inputs.semantic-release-version }}
+          extra_plugins: ${{ inputs.extra-plugins }}
+
+      - name: Write release diagnostics
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          OUTCOME: ${{ steps.semantic-release.outcome }}
+          PUBLISHED: ${{ steps.semantic-release.outputs.new_release_published }}
+          NEW_VERSION: ${{ steps.semantic-release.outputs.new_release_version }}
+          NEW_TAG: ${{ steps.semantic-release.outputs.new_release_git_tag }}
+          NEW_CHANNEL: ${{ steps.semantic-release.outputs.new_release_channel }}
+          LAST_VERSION: ${{ steps.semantic-release.outputs.last_release_version }}
+          LAST_TAG: ${{ steps.semantic-release.outputs.last_release_git_tag }}
+        run: |
+          mkdir -p artifacts/release artifacts/meta
+          {
+            echo "# Semantic release"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Outcome | \`${OUTCOME:-unknown}\` |"
+            echo "| Dry run | \`${DRY_RUN}\` |"
+            echo "| New release published | \`${PUBLISHED:-false}\` |"
+            echo "| New version | \`${NEW_VERSION:-none}\` |"
+            echo "| New tag | \`${NEW_TAG:-none}\` |"
+            echo "| New channel | \`${NEW_CHANNEL:-none}\` |"
+            echo "| Previous version | \`${LAST_VERSION:-none}\` |"
+            echo "| Previous tag | \`${LAST_TAG:-none}\` |"
+          } | tee artifacts/release/semantic-release-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-release-semantic",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${{ inputs.runs-on-json }}
+            },
+            "tool_versions": {
+              "node": "$(node --version)"
+            }
+          }
+          JSON
+
+      - name: Upload release diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-semantic-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

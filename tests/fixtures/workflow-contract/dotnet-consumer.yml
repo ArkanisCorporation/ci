@@ -1,0 +1,19 @@
+name: Dotnet consumer fixture
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  dotnet:
+    name: .NET verification
+    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: Example.slnx
+      coverage: true

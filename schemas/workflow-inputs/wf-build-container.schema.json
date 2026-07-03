@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-build-container/v1/schema.json",
+  "title": "wf-build-container inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image"
+  ],
+  "properties": {
+    "runs-on-json": {
+      "type": "string",
+      "default": "[\"ubuntu-latest\"]"
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "image": {
+      "type": "string"
+    },
+    "context": {
+      "type": "string",
+      "default": "."
+    },
+    "dockerfile": {
+      "type": "string",
+      "default": "Dockerfile"
+    },
+    "platforms": {
+      "type": "string",
+      "default": "linux/amd64"
+    },
+    "version-tag": {
+      "type": "string",
+      "default": ""
+    },
+    "version-channel": {
+      "type": "string",
+      "default": ""
+    },
+    "push": {
+      "type": "boolean",
+      "default": false
+    },
+    "registry": {
+      "type": "string",
+      "default": "ghcr.io"
+    },
+    "registry-username": {
+      "type": "string",
+      "default": ""
+    },
+    "buildkit-endpoint": {
+      "type": "string",
+      "default": ""
+    },
+    "cache-from": {
+      "type": "string",
+      "default": ""
+    },
+    "cache-to": {
+      "type": "string",
+      "default": ""
+    },
+    "sbom": {
+      "type": "string",
+      "default": "true"
+    },
+    "provenance": {
+      "type": "string",
+      "default": "mode=max"
+    },
+    "labels": {
+      "type": "string",
+      "default": ""
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 45,
+      "minimum": 1
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 90
+    }
+  }
+}

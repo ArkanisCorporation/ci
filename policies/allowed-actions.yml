@@ -1,0 +1,28 @@
+# Policy input; adapt to org enforcement.
+require_full_length_sha: true
+allow:
+  - actions/checkout
+  - actions/setup-dotnet
+  - actions/setup-node
+  - actions/setup-python
+  - actions/cache
+  - actions/upload-artifact
+  - actions/download-artifact
+  - actions/attest-build-provenance
+  - github/codeql-action
+  - actions/dependency-review-action
+  - docker/setup-buildx-action
+  - docker/login-action
+  - docker/build-push-action
+  - docker/metadata-action
+  - googleapis/release-please-action
+  - NuGet/login
+  - helm/chart-releaser-action
+  - step-security/harden-runner
+review_required:
+  - dorny/paths-filter
+blocked_patterns:
+  - "*/changed-files"
+notes:
+  - "Prefer internal change detector or audited path filter."
+  - "No branch/tag pins in production workflows."

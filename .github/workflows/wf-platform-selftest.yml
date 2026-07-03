@@ -1,0 +1,48 @@
+# Summary:
+#   Validates platform workflow contract files.
+# Remarks:
+#   This workflow is callable for dogfooding and runnable directly for local act smoke tests.
+#   It does not publish, deploy, or request secrets.
+
+name: wf-platform-selftest
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate workflow contracts
+    runs-on: ${{ fromJSON(inputs.runs-on-json || '["ubuntu-latest"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout platform repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate workflow contracts
+        run: dotnet run --file scripts/validate-workflows.cs

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/run-metadata/v1/schema.json",
+  "title": "Run Metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "workflow",
+    "sha",
+    "runner",
+    "tool_versions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "run-metadata/v1"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "workflow": {
+      "type": "string"
+    },
+    "sha": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    },
+    "event_name": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "run_attempt": {
+      "type": "string"
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "arch",
+        "labels"
+      ],
+      "properties": {
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "tool_versions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

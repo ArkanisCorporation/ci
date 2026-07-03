@@ -1,0 +1,16 @@
+name: Platform selftest local fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  selftest:
+    name: Platform selftest
+    uses: ./.github/workflows/wf-platform-selftest.yml
+    permissions:
+      contents: read
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false

@@ -1,0 +1,16 @@
+{
+  "pull_request": {
+    "head": {
+      "ref": "feature/fixture"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "number": 1
+  },
+  "repository": {
+    "default_branch": "main",
+    "name": "fixture-consumer",
+    "full_name": "ArkanisCorporation/fixture-consumer"
+  }
+}

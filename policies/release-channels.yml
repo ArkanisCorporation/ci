@@ -1,0 +1,17 @@
+channels:
+  main:
+    purpose: dogfood
+    consumers: platform_selftest_only
+  v1:
+    purpose: stable_major
+    consumers: production_allowed
+  v2:
+    purpose: stable_major
+    consumers: production_allowed
+  canary:
+    purpose: pre_release_validation
+    consumers: opted_in_only
+pinning:
+  production_consumers: full_sha
+  docs_examples: full_sha_placeholder
+  platform_internal: branch_allowed_only_for_dogfood

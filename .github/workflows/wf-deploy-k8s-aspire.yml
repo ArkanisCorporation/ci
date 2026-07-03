@@ -1,0 +1,303 @@
+# Summary:
+#   Reusable Aspire Kubernetes deployment workflow.
+# Remarks:
+#   This workflow runs in the caller repository context.
+#   It assumes the runner already has cluster network access and either a current kube context or a KUBE_CONFIG secret.
+#   It creates the target namespace when missing and then runs `dotnet tool run aspire -- deploy`.
+#   Deployment side effects are real cluster changes unless dry-run is true.
+#   It calls runs-on/cache only when enable-cache is true.
+
+name: wf-deploy-k8s-aspire
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      environment-name:
+        description: GitHub environment guarding deployment.
+        type: string
+        required: true
+      aspire-environment:
+        description: Aspire deployment environment.
+        type: string
+        required: true
+      kubernetes-namespace:
+        description: Kubernetes namespace receiving the deployment.
+        type: string
+        required: true
+      apphost-project:
+        description: Aspire AppHost project path.
+        type: string
+        required: false
+        default: src/CitizenId.Host.Aspire/CitizenId.Host.Aspire.csproj
+      output-path:
+        description: Aspire deploy output path.
+        type: string
+        required: false
+        default: artifacts/k8s
+      image-tag:
+        description: Optional Kubernetes:Images:Tag override.
+        type: string
+        required: false
+        default: ""
+      dotnet-version:
+        description: .NET SDK version range.
+        type: string
+        required: false
+        default: 10.0.x
+      enable-cache:
+        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-deploy validation or runners without cache service access.
+        type: boolean
+        required: false
+        default: true
+      kubectl-version:
+        description: kubectl version installed before deployment.
+        type: string
+        required: false
+        default: v1.36.2
+      helm-version:
+        description: Helm version installed before deployment.
+        type: string
+        required: false
+        default: v4.2.2
+      dry-run:
+        description: Runs preflight, namespace validation, and summary without calling Aspire deploy.
+        type: boolean
+        required: false
+        default: false
+      timeout-minutes:
+        description: Deployment job timeout.
+        type: number
+        required: false
+        default: 45
+      artifact-retention-days:
+        description: Deployment artifact retention in days.
+        type: number
+        required: false
+        default: 30
+    secrets:
+      KUBE_CONFIG:
+        description: Optional kubeconfig content written to RUNNER_TEMP.
+        required: false
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.deploy.outputs.artifact-manifest }}
+
+permissions: {}
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  deploy:
+    name: Aspire deploy
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment-name }}
+    concurrency:
+      group: deploy-k8s-${{ inputs.environment-name }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      HAS_KUBE_CONFIG: ${{ secrets.KUBE_CONFIG != '' }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Cache NuGet packages
+        if: inputs.enable-cache
+        uses: runs-on/cache@v5.0.7
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore local .NET tools
+        run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v5.1.0
+        with:
+          version: ${{ inputs.kubectl-version }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5.0.1
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+        run: |
+          mkdir -p artifacts/meta
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "NuGet cache enabled: ${ENABLE_CACHE}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            dotnet --version
+            kubectl version --client=true
+            helm version --short
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            command -v dotnet
+            command -v kubectl
+            command -v helm
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Configure kubeconfig
+        if: env.HAS_KUBE_CONFIG == 'true'
+        env:
+          KUBE_CONFIG_SECRET: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          kubeconfig_path="${RUNNER_TEMP}/kubeconfig"
+          printf '%s' "$KUBE_CONFIG_SECRET" > "$kubeconfig_path"
+          chmod 600 "$kubeconfig_path"
+          echo "KUBECONFIG=$kubeconfig_path" >> "$GITHUB_ENV"
+
+      - name: Validate deployment inputs
+        env:
+          KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
+          APPHOST_PROJECT: ${{ inputs.apphost-project }}
+        run: |
+          if [[ ! "$KUBERNETES_NAMESPACE" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+            echo "Invalid Kubernetes namespace: ${KUBERNETES_NAMESPACE}" >&2
+            exit 2
+          fi
+
+          if [[ ! -f "$APPHOST_PROJECT" ]]; then
+            echo "Aspire AppHost project was not found: ${APPHOST_PROJECT}" >&2
+            exit 2
+          fi
+
+      - name: Ensure Kubernetes namespace exists
+        if: ${{ !inputs.dry-run }}
+        env:
+          KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
+        run: |
+          kubectl create namespace "$KUBERNETES_NAMESPACE" --dry-run=client -o yaml > namespace.yaml
+          kubectl apply -f namespace.yaml
+
+      - name: Aspire deploy
+        if: ${{ !inputs.dry-run }}
+        env:
+          ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
+          APPHOST_PROJECT: ${{ inputs.apphost-project }}
+          OUTPUT_PATH: ${{ inputs.output-path }}
+          ENVIRONMENT_NAME: ${{ inputs.environment-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          mkdir -p "${OUTPUT_PATH}/${ENVIRONMENT_NAME}"
+          if [[ -n "$IMAGE_TAG" ]]; then
+            export Kubernetes__Images__Tag="$IMAGE_TAG"
+          fi
+
+          dotnet tool run aspire -- deploy \
+            --apphost "$APPHOST_PROJECT" \
+            --output-path "${OUTPUT_PATH}/${ENVIRONMENT_NAME}" \
+            --environment "$ASPIRE_ENVIRONMENT" \
+            --non-interactive \
+            --pipeline-log-level debug \
+            --include-exception-details \
+            --debug
+
+      - name: Write artifact manifest
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+          OUTPUT_PATH: ${{ inputs.output-path }}
+          ENVIRONMENT_NAME: ${{ inputs.environment-name }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-deploy-k8s-aspire",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "deploy"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-k8s-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "deploy-report",
+                "paths": ["${OUTPUT_PATH}/${ENVIRONMENT_NAME}", "artifacts/artifact-manifest.json"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary
+        if: always()
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment-name }}
+          ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
+          KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          {
+            echo "# Aspire Kubernetes deployment"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Environment | \`${ENVIRONMENT_NAME}\` |"
+            echo "| Aspire environment | \`${ASPIRE_ENVIRONMENT}\` |"
+            echo "| Namespace | \`${KUBERNETES_NAMESPACE}\` |"
+            echo "| Dry run | \`${DRY_RUN}\` |"
+            echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ inputs.output-path }}/${{ inputs.environment-name }}
+            artifacts/artifact-manifest.json
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

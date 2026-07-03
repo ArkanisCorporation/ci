@@ -1,0 +1,82 @@
+# Summary:
+#   Sets up a .NET SDK, optional NuGet dependency cache, and optional local tool restore.
+# Remarks:
+#   This composite action expects Bash and actions/setup-dotnet.
+#   It writes NUGET_PACKAGES to GITHUB_ENV when nuget-packages is not empty.
+#   It calls runs-on/cache only when enable-cache is true.
+#   It does not run repository restore or build commands.
+#   Reusable workflows from this repository should not call it by relative path when consumed externally unless the platform repository has been checked out into that path first.
+
+name: Setup .NET
+description: Sets up .NET, optional NuGet package cache location, and optional local tools for CI jobs.
+
+inputs:
+  dotnet-version:
+    description: .NET SDK version range to install when global-json-file is not authoritative.
+    required: false
+    default: 10.0.x
+  global-json-file:
+    description: Optional global.json path.
+    required: false
+    default: ""
+  cache-dependency-path:
+    description: Glob used by runs-on/cache for dependency cache invalidation.
+    required: false
+    default: "**/packages.lock.json"
+  enable-cache:
+    description: Runs runs-on/cache for NuGet packages when true. Set false for cold-restore validation or runners without cache service access.
+    required: false
+    default: "true"
+  nuget-packages:
+    description: Optional NUGET_PACKAGES path written to GITHUB_ENV before setup.
+    required: false
+    default: ${{ github.workspace }}/.nuget/packages
+  restore-tools:
+    description: Restores local .NET tools with one retry for first-use SDK home races.
+    required: false
+    default: "true"
+
+outputs:
+  dotnet-version:
+    description: The SDK version selected by actions/setup-dotnet.
+    value: ${{ steps.setup-dotnet.outputs.dotnet-version }}
+  cache-hit:
+    description: Whether dependency cache restored an exact match.
+    value: ${{ steps.nuget-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure NuGet package cache path
+      if: inputs.nuget-packages != ''
+      run: echo "NUGET_PACKAGES=${{ inputs.nuget-packages }}" >> "$GITHUB_ENV"
+      shell: bash
+
+    - name: Setup .NET
+      id: setup-dotnet
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        global-json-file: ${{ inputs.global-json-file }}
+
+    - name: Cache NuGet packages
+      if: inputs.enable-cache == 'true'
+      id: nuget-cache
+      uses: runs-on/cache@v5.0.7
+      with:
+        path: ${{ inputs.nuget-packages }}
+        key: ${{ runner.os }}-nuget-${{ hashFiles(inputs.cache-dependency-path, '.config/dotnet-tools.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Report .NET setup
+      run: |
+        echo "Using .NET ${{ steps.setup-dotnet.outputs.dotnet-version }}"
+        echo "NuGet cache enabled: ${{ inputs.enable-cache }}"
+        echo "NuGet cache hit: ${{ steps.nuget-cache.outputs.cache-hit || 'false' }}"
+      shell: bash
+
+    - name: Restore local .NET tools
+      if: inputs.restore-tools == 'true'
+      run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+      shell: bash

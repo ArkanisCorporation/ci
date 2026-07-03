@@ -1,0 +1,326 @@
+# Summary:
+#   Reusable step-driven NuGet pack and publish workflow.
+# Remarks:
+#   This workflow builds packages from a project path, then publishes them.
+#   It supports NuGet Trusted Publishing through NuGet/login or long-lived API-key fallback for legacy feeds.
+#   Trusted Publishing requires the nuget.org policy to match the workflow that requests the OIDC token.
+#   The job requests id-token: write because Trusted Publishing exchanges the GitHub OIDC token for a short-lived NuGet API key.
+#   It calls runs-on/cache only when enable-cache is true.
+
+name: wf-publish-nuget
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      environment-name:
+        description: GitHub environment guarding package publication.
+        type: string
+        required: false
+        default: nuget
+      project:
+        description: Project path passed to dotnet restore and dotnet pack.
+        type: string
+        required: true
+      version:
+        description: PackageVersion value passed to dotnet pack.
+        type: string
+        required: true
+      configuration:
+        description: Build configuration.
+        type: string
+        required: false
+        default: Release
+      enable-cache:
+        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-pack validation or runners without cache service access.
+        type: boolean
+        required: false
+        default: true
+      source:
+        description: NuGet package source.
+        type: string
+        required: false
+        default: https://api.nuget.org/v3/index.json
+      trusted-publishing:
+        description: Uses NuGet/login OIDC flow instead of NUGET_API_KEY.
+        type: boolean
+        required: false
+        default: true
+      nuget-user:
+        description: NuGet profile or organization name used by NuGet/login.
+        type: string
+        required: false
+        default: ""
+      skip-duplicate:
+        description: Adds --skip-duplicate to dotnet nuget push.
+        type: boolean
+        required: false
+        default: true
+      include-symbols:
+        description: Creates a .snupkg with dotnet pack --include-symbols --symbol-package-format snupkg.
+        type: boolean
+        required: false
+        default: true
+      dry-run:
+        description: Builds the package but skips publication.
+        type: boolean
+        required: false
+        default: false
+      timeout-minutes:
+        description: Publish job timeout.
+        type: number
+        required: false
+        default: 30
+      artifact-retention-days:
+        description: Package artifact retention in days.
+        type: number
+        required: false
+        default: 30
+    secrets:
+      NUGET_API_KEY:
+        description: Long-lived NuGet API key used only when trusted-publishing is false.
+        required: false
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.publish.outputs.artifact-manifest }}
+
+permissions: {}
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  publish:
+    name: NuGet publish
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment-name }}
+    concurrency:
+      group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        id: setup-dotnet
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        if: inputs.enable-cache
+        uses: runs-on/cache@v5.0.7
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+        run: |
+          mkdir -p artifacts/meta
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "NuGet cache enabled: ${ENABLE_CACHE}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            dotnet --info
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            command -v dotnet
+            command -v git
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Validate publish inputs
+        env:
+          TRUSTED_PUBLISHING: ${{ inputs.trusted-publishing }}
+          NUGET_USER: ${{ inputs.nuget-user }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            exit 0
+          fi
+
+          if [[ "$TRUSTED_PUBLISHING" == "true" && -z "$NUGET_USER" ]]; then
+            echo "nuget-user is required when trusted-publishing is true." >&2
+            exit 2
+          fi
+
+          if [[ "$TRUSTED_PUBLISHING" != "true" && -z "$NUGET_API_KEY" ]]; then
+            echo "NUGET_API_KEY secret is required when trusted-publishing is false." >&2
+            exit 2
+          fi
+
+      - name: Restore package project
+        env:
+          PROJECT: ${{ inputs.project }}
+        run: dotnet restore "$PROJECT" --locked-mode
+
+      - name: Pack package
+        env:
+          PROJECT: ${{ inputs.project }}
+          VERSION: ${{ inputs.version }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
+        run: |
+          mkdir -p artifacts/nuget
+          pack_args=(
+            dotnet pack "$PROJECT"
+            --configuration "$CONFIGURATION"
+            --no-restore
+            --output artifacts/nuget
+            -p:PackageVersion="$VERSION"
+            -p:ContinuousIntegrationBuild=true
+          )
+
+          if [[ "$INCLUDE_SYMBOLS" == "true" ]]; then
+            pack_args+=(--include-symbols --symbol-package-format snupkg)
+          fi
+
+          "${pack_args[@]}"
+
+      - name: Verify package output
+        run: |
+          shopt -s nullglob
+          packages=(artifacts/nuget/*.nupkg)
+          if [[ "${#packages[@]}" -eq 0 ]]; then
+            echo "dotnet pack produced no .nupkg files." >&2
+            exit 1
+          fi
+          printf '%s\n' "${packages[@]}" | tee artifacts/nuget/package-list.txt
+
+      - name: NuGet Trusted Publishing login
+        if: ${{ inputs.trusted-publishing && !inputs.dry-run }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ inputs.nuget-user }}
+
+      - name: Publish packages with trusted publishing
+        if: ${{ inputs.trusted-publishing && !inputs.dry-run }}
+        env:
+          API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          SOURCE: ${{ inputs.source }}
+          SKIP_DUPLICATE: ${{ inputs.skip-duplicate }}
+        run: |
+          shopt -s nullglob
+          push_args=()
+          if [[ "$SKIP_DUPLICATE" == "true" ]]; then
+            push_args+=(--skip-duplicate)
+          fi
+          for package in artifacts/nuget/*.nupkg; do
+            dotnet nuget push "$package" --api-key "$API_KEY" --source "$SOURCE" "${push_args[@]}"
+          done
+
+      - name: Publish packages with API key
+        if: ${{ !inputs.trusted-publishing && !inputs.dry-run }}
+        env:
+          API_KEY: ${{ secrets.NUGET_API_KEY }}
+          SOURCE: ${{ inputs.source }}
+          SKIP_DUPLICATE: ${{ inputs.skip-duplicate }}
+        run: |
+          shopt -s nullglob
+          push_args=()
+          if [[ "$SKIP_DUPLICATE" == "true" ]]; then
+            push_args+=(--skip-duplicate)
+          fi
+          for package in artifacts/nuget/*.nupkg; do
+            dotnet nuget push "$package" --api-key "$API_KEY" --source "$SOURCE" "${push_args[@]}"
+          done
+
+      - name: Write artifact manifest
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-publish-nuget",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "publish"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-nuget-${{ inputs.version }}",
+                "kind": "package",
+                "paths": ["artifacts/nuget"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary
+        if: always()
+        env:
+          PROJECT: ${{ inputs.project }}
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          TRUSTED_PUBLISHING: ${{ inputs.trusted-publishing }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          {
+            echo "# NuGet publishing"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Project | \`${PROJECT}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Dry run | \`${DRY_RUN}\` |"
+            echo "| Trusted publishing | \`${TRUSTED_PUBLISHING}\` |"
+            echo "| Source | \`${SOURCE}\` |"
+            echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload package artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-nuget-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}

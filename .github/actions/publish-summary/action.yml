@@ -1,0 +1,49 @@
+# Summary:
+#   Appends a bounded Markdown summary to GITHUB_STEP_SUMMARY.
+# Remarks:
+#   This action requires Bash.
+#   It writes only when GITHUB_STEP_SUMMARY exists.
+#   It can append an optional body file and optional literal Markdown details.
+
+name: Publish Summary
+description: Appends a title, optional body file, and optional details to the GitHub step summary.
+
+inputs:
+  title:
+    description: Markdown heading text without the leading hash.
+    required: true
+  body-file:
+    description: Optional Markdown file appended after the title.
+    required: false
+    default: ""
+  details:
+    description: Optional literal Markdown appended after the body file.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Append step summary
+      run: |
+        if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+          echo "GITHUB_STEP_SUMMARY is not available; skipping summary."
+          exit 0
+        fi
+
+        {
+          echo "# ${{ inputs.title }}"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [[ -n "${{ inputs.body-file }}" && -f "${{ inputs.body-file }}" ]]; then
+          cat "${{ inputs.body-file }}" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        if [[ -n "${{ inputs.details }}" ]]; then
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY_DETAILS'
+        ${{ inputs.details }}
+        SUMMARY_DETAILS
+        fi
+      shell: bash

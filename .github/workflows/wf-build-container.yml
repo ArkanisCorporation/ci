@@ -1,0 +1,291 @@
+# Summary:
+#   Reusable Docker Buildx workflow for building and optionally pushing OCI images.
+# Remarks:
+#   This workflow runs in the caller repository context.
+#   It can use a remote BuildKit endpoint on self-hosted runners.
+#   If push is true, it logs into the configured registry and may create or overwrite mutable tags.
+#   Consumers should deploy image digests from the digest output instead of mutable tags.
+
+name: wf-build-container
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      image:
+        description: Fully-qualified image name without tag.
+        type: string
+        required: true
+      context:
+        description: Docker build context.
+        type: string
+        required: false
+        default: .
+      dockerfile:
+        description: Dockerfile path.
+        type: string
+        required: false
+        default: Dockerfile
+      platforms:
+        description: Comma-delimited target platforms.
+        type: string
+        required: false
+        default: linux/amd64
+      version-tag:
+        description: Optional release version tag to apply.
+        type: string
+        required: false
+        default: ""
+      version-channel:
+        description: Optional channel tag to apply.
+        type: string
+        required: false
+        default: ""
+      push:
+        description: Pushes image to registry when true.
+        type: boolean
+        required: false
+        default: false
+      registry:
+        description: Registry host used for docker/login-action.
+        type: string
+        required: false
+        default: ghcr.io
+      registry-username:
+        description: Registry username; defaults to github.actor when empty.
+        type: string
+        required: false
+        default: ""
+      buildkit-endpoint:
+        description: Optional remote BuildKit endpoint for self-hosted runners.
+        type: string
+        required: false
+        default: ""
+      cache-from:
+        description: Optional Docker Buildx cache-from value.
+        type: string
+        required: false
+        default: ""
+      cache-to:
+        description: Optional Docker Buildx cache-to value.
+        type: string
+        required: false
+        default: ""
+      sbom:
+        description: Docker Buildx sbom input.
+        type: string
+        required: false
+        default: "true"
+      provenance:
+        description: Docker Buildx provenance input.
+        type: string
+        required: false
+        default: mode=max
+      labels:
+        description: Optional newline-delimited OCI labels.
+        type: string
+        required: false
+        default: ""
+      timeout-minutes:
+        description: Build job timeout.
+        type: number
+        required: false
+        default: 45
+      artifact-retention-days:
+        description: Metadata artifact retention in days.
+        type: number
+        required: false
+        default: 30
+    secrets:
+      REGISTRY_TOKEN:
+        description: Registry token; defaults to github.token when omitted.
+        required: false
+    outputs:
+      digest:
+        description: Image digest produced by docker/build-push-action.
+        value: ${{ jobs.build.outputs.digest }}
+      metadata:
+        description: Build metadata JSON produced by docker/build-push-action.
+        value: ${{ jobs.build.outputs.metadata }}
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.build.outputs.artifact-manifest }}
+
+permissions: {}
+
+jobs:
+  build:
+    name: Container build
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      metadata: ${{ steps.build.outputs.metadata }}
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+          BUILDKIT_ENDPOINT: ${{ inputs.buildkit-endpoint }}
+        run: |
+          mkdir -p artifacts/container artifacts/meta
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Remote BuildKit endpoint configured: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            command -v docker
+            docker version
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Set up Docker Buildx
+        if: inputs.buildkit-endpoint == ''
+        uses: docker/setup-buildx-action@v4
+
+      - name: Set up remote Docker Buildx
+        if: inputs.buildkit-endpoint != ''
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: remote
+          endpoint: ${{ inputs.buildkit-endpoint }}
+
+      - name: Resolve image tags
+        id: tags
+        env:
+          IMAGE: ${{ inputs.image }}
+          VERSION_TAG: ${{ inputs.version-tag }}
+          VERSION_CHANNEL: ${{ inputs.version-channel }}
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          {
+            echo "tags<<TAGS"
+            echo "${IMAGE}:sha-${short_sha}"
+            if [[ -n "$VERSION_TAG" ]]; then
+              echo "${IMAGE}:${VERSION_TAG}"
+            fi
+            if [[ -n "$VERSION_CHANNEL" ]]; then
+              echo "${IMAGE}:${VERSION_CHANNEL}"
+            fi
+            echo "TAGS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login to registry
+        if: inputs.push
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ inputs.registry-username || github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN || github.token }}
+          logout: true
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ inputs.labels }}
+          cache-from: ${{ inputs.cache-from }}
+          cache-to: ${{ inputs.cache-to }}
+          sbom: ${{ inputs.sbom }}
+          provenance: ${{ inputs.provenance }}
+
+      - name: Write image metadata
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          METADATA: ${{ steps.build.outputs.metadata }}
+        run: |
+          mkdir -p artifacts/container
+          printf '%s\n' "$DIGEST" > artifacts/container/digest.txt
+          printf '%s\n' "$METADATA" > artifacts/container/build-metadata.json
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-build-container",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "build"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-container-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "image-metadata",
+                "paths": ["artifacts/container"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary
+        if: always()
+        env:
+          IMAGE: ${{ inputs.image }}
+          PUSH: ${{ inputs.push }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "# Container build"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Image | \`${IMAGE}\` |"
+            echo "| Push | \`${PUSH}\` |"
+            echo "| Digest | \`${DIGEST:-none}\` |"
+            echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload container metadata
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-container-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}
