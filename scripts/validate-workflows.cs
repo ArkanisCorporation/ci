@@ -792,6 +792,14 @@ void ValidateWorkflowLintContract()
                 AddFailure($"{workflowPath}: GitHub Actions lint workflow must contain {requiredToken}.");
             }
         }
+
+        foreach (var requiredReportingToken in new[] { "Set up Python and pipx", "python --version", "pipx --version", "| Python |", "| pipx |" })
+        {
+            if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: GitHub Actions lint workflow must report {requiredReportingToken} after setting up Python and pipx.");
+            }
+        }
     }
 
     if (!File.Exists(schemaPath))

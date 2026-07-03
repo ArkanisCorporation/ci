@@ -766,7 +766,7 @@ Side effects:
 
 ## GitHub Actions Lint Workflow
 
-`wf-lint-github-actions.yml` checks out the caller repository and runs actionlint.
+`wf-lint-github-actions.yml` checks out the caller repository, sets up Python with pipx, records toolchain versions, and runs actionlint.
 Use it to replace repository-local workflow lint jobs during migration.
 
 Flow:
@@ -774,7 +774,8 @@ Flow:
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> validate[[Validate runner contract]]
+  checkout --> python[[Set up Python and pipx]]
+  python --> validate[[Validate runner contract]]
   validate --> preflight{self-hosted?}
   preflight -->|yes| sh[[Self-hosted preflight]]
   preflight -->|no| lint[[raven-actions/actionlint]]
@@ -788,7 +789,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
-  class checkout,validate,sh,lint action
+  class checkout,python,validate,sh,lint action
   class preflight decision
   class summary artifact
   class outputs output
@@ -797,11 +798,13 @@ flowchart TD
 Preconditions:
 
 - Caller workflows live under `.github/workflows`.
+- The selected runner can run `actions/setup-python@v6` and install pipx.
 - The selected runner can run `raven-actions/actionlint@v2`.
 
 Side effects:
 
 - Reads workflow YAML files.
+- Records Python and pipx versions in diagnostics and the step summary.
 - Writes a short step summary.
 
 Example:

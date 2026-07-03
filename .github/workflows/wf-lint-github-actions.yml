@@ -50,6 +50,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Python and pipx
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          pip-install: "pipx"
+
       - name: Validate runner contract
         env:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
@@ -57,12 +63,21 @@ jobs:
           ENABLE_CACHE: ${{ inputs.enable-cache }}
         run: |
           mkdir -p artifacts/meta
+          python_path="$(command -v python || true)"
+          pipx_path="$(command -v pipx || true)"
+          python_version="$([[ -n "$python_path" ]] && python --version 2>&1 || echo unavailable)"
+          pipx_version="$([[ -n "$pipx_path" ]] && pipx --version 2>&1 || echo unavailable)"
+
           {
             echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
             echo "Requested runner labels: ${RUNS_ON_JSON}"
             echo "Cache enabled: ${ENABLE_CACHE}"
             echo "Runner OS: ${RUNNER_OS}"
             echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Python path: ${python_path:-unavailable}"
+            echo "Python version: ${python_version}"
+            echo "pipx path: ${pipx_path:-unavailable}"
+            echo "pipx version: ${pipx_version}"
           } | tee artifacts/meta/runner-contract.txt
 
       - name: Self-hosted runner preflight
@@ -83,6 +98,9 @@ jobs:
       - name: Publish summary
         if: always()
         run: |
+          python_version="$(command -v python >/dev/null 2>&1 && python --version 2>&1 || echo unavailable)"
+          pipx_version="$(command -v pipx >/dev/null 2>&1 && pipx --version 2>&1 || echo unavailable)"
+
           {
             echo "# GitHub Actions lint"
             echo
@@ -90,4 +108,6 @@ jobs:
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Python | \`${python_version}\` |"
+            echo "| pipx | \`${pipx_version}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
