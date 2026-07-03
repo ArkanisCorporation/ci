@@ -664,6 +664,11 @@ void ValidatePlatformActionSourceContext()
         {
             AddFailure($"{workflowPath}: each platform action source checkout must document the actionlint fromJSON(toJSON(job)) rationale at the checkout site.");
         }
+
+        if (workflowText.Contains("rm -rf .ci/arkanis-ci", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: platform action checkout must remain available for GitHub Actions post-job cleanup; do not remove .ci/arkanis-ci during the job.");
+        }
     }
 }
 

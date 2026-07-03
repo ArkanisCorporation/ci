@@ -71,6 +71,7 @@ Reusable workflows that need this platform repository's composite actions check 
 Those checkouts read `workflow_repository` and `workflow_sha` from the `job` context through `fromJSON(toJSON(job))` so GitHub receives the called workflow metadata.
 `fromJSON(toJSON(job))` is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
 Do not use `github.workflow_ref` or `github.workflow_sha` for that source resolution because the `github` context is scoped to the caller repository in reusable workflows.
+Keep `.ci/arkanis-ci` in place for the rest of the job so local composite actions remain available when GitHub Actions runs post-job cleanup.
 
 ## Schema-Backed Workflow Inputs
 

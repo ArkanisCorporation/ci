@@ -275,10 +275,6 @@ jobs:
           project: ${{ inputs.version-project }}
           tool-version: ${{ inputs.version-tool-version }}
 
-      - name: Remove platform action @ .ci/arkanis-ci
-        if: always()
-        run: rm -rf .ci/arkanis-ci
-
       - name: Set up Docker Buildx @ local
         if: inputs.buildkit-endpoint == ''
         uses: docker/setup-buildx-action@v4

@@ -221,10 +221,6 @@ jobs:
           remediation-message: ${{ inputs.remediation-message }}
           artifacts-path: ${{ github.workspace }}/artifacts/generated-code
 
-      - name: Remove platform action @ .ci/arkanis-ci
-        if: always()
-        run: rm -rf .ci/arkanis-ci
-
       - name: Write artifact manifest @ artifacts/artifact-manifest.json
         id: manifest
         if: always()

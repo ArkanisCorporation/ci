@@ -158,10 +158,6 @@ jobs:
           merge-method: ${{ inputs.merge-method }}
           approve: ${{ inputs.approve }}
 
-      - name: Remove platform action @ .ci/arkanis-ci
-        if: always()
-        run: rm -rf .ci/arkanis-ci
-
       - name: Publish summary @ ${{ steps.backpropagation.outputs.pr-url || inputs.default-branch }}
         if: always()
         run: |

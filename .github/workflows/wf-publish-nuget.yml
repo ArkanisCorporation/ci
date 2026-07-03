@@ -257,10 +257,6 @@ jobs:
           project: ${{ inputs.dotnet-setversion-project }}
           tool-version: ${{ inputs.dotnet-setversion-tool-version }}
 
-      - name: Remove platform action @ .ci/arkanis-ci
-        if: always() && inputs.dotnet-setversion
-        run: rm -rf .ci/arkanis-ci
-
       - name: Pack ${{ inputs.project }} @ ${{ inputs.version }}
         env:
           PROJECT: ${{ inputs.project }}

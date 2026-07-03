@@ -308,10 +308,6 @@ jobs:
           comment-on-pr: ${{ inputs.coverage-pr-comment }}
           pr-number: ${{ github.event.number }}
 
-      - name: Remove coverage action @ .ci/arkanis-ci
-        if: always() && inputs.run-tests && inputs.coverage && inputs.coverage-report
-        run: rm -rf .ci/arkanis-ci
-
       - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
         if: always()
