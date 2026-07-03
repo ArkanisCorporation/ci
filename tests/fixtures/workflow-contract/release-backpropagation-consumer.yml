@@ -1,0 +1,23 @@
+name: Release backpropagation consumer fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  backpropagate:
+    name: Release backpropagation
+    uses: ArkanisCorporation/ci/.github/workflows/wf-release-backpropagation.yml@v1
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      runs-on-json: '["ubuntu-latest"]'
+      runs-on-self-hosted: false
+      new-version: 1.2.3
+      release-ref-name: release/stable
+      default-branch: main
+      auto-merge: true
+    secrets:
+      PR_AUTOMATION_PAT: ${{ secrets.PR_AUTOMATION_PAT }}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-release-backpropagation/v1/schema.json",
+  "title": "wf-release-backpropagation inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "new-version",
+    "release-ref-name",
+    "default-branch"
+  ],
+  "properties": {
+    "runs-on-json": {
+      "type": "string",
+      "default": "[\"ubuntu-latest\"]"
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "new-version": {
+      "type": "string"
+    },
+    "release-ref-name": {
+      "type": "string"
+    },
+    "default-branch": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "string",
+      "default": "ci\nautomated\n"
+    },
+    "auto-merge": {
+      "type": "boolean",
+      "default": true
+    },
+    "merge-method": {
+      "type": "string",
+      "default": "merge",
+      "enum": [
+        "merge",
+        "squash",
+        "rebase"
+      ]
+    },
+    "approve": {
+      "type": "boolean",
+      "default": true
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 10,
+      "minimum": 1
+    }
+  }
+}

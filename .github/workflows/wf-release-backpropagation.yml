@@ -1,0 +1,188 @@
+# Summary:
+#   Reusable release branch backpropagation workflow.
+# Remarks:
+#   This workflow creates a pull request from a release branch back to the default branch.
+#   It can approve the PR with PR_AUTOMATION_PAT and enable auto-merge with GitHub CLI.
+#   It runs only in trusted release contexts because it can write repository contents and pull requests.
+#   It delegates GitHub CLI operations to a .NET file script with CliWrap.
+
+name: wf-release-backpropagation
+
+on:
+  workflow_call:
+    inputs:
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      runs-on-self-hosted:
+        description: True when runs-on-json targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      new-version:
+        description: Version that was published by semantic-release.
+        type: string
+        required: true
+      release-ref-name:
+        description: Release branch name that should be merged back.
+        type: string
+        required: true
+      default-branch:
+        description: Repository default branch that should receive the release version.
+        type: string
+        required: true
+      labels:
+        description: Newline-delimited labels applied to a newly created PR.
+        type: string
+        required: false
+        default: |
+          ci
+          automated
+      auto-merge:
+        description: Enables auto-merge for the PR when true.
+        type: boolean
+        required: false
+        default: true
+      merge-method:
+        description: Merge method passed to gh pr merge. Use merge, squash, or rebase.
+        type: string
+        required: false
+        default: merge
+      approve:
+        description: Approves the PR with PR_AUTOMATION_PAT when true.
+        type: boolean
+        required: false
+        default: true
+      timeout-minutes:
+        description: Backpropagation job timeout.
+        type: number
+        required: false
+        default: 10
+    secrets:
+      PR_AUTOMATION_PAT:
+        description: Token used to approve the backpropagation PR when approve is true.
+        required: false
+    outputs:
+      pr-url:
+        description: Backpropagation pull request URL.
+        value: ${{ jobs.backpropagate.outputs.pr-url }}
+      pr-number:
+        description: Backpropagation pull request number.
+        value: ${{ jobs.backpropagate.outputs.pr-number }}
+
+permissions: {}
+
+jobs:
+  backpropagate:
+    name: Release backpropagation
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr-url: ${{ steps.backpropagation.outputs.pr-url }}
+      pr-number: ${{ steps.backpropagation.outputs.pr-number }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET action tooling
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate runner contract
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+        run: |
+          mkdir -p artifacts/meta
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            command -v gh
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted runner preflight
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            command -v bash
+            command -v git
+            command -v gh
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Resolve platform action source
+        id: platform-source
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          if [[ -z "$repository" || "$repository" == "$WORKFLOW_REF" ]]; then
+            echo "Could not resolve reusable workflow repository from github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 2
+          fi
+
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout platform action source
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.platform-source.outputs.repository }}
+          ref: ${{ steps.platform-source.outputs.ref }}
+          path: .ci/arkanis-ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/release-backpropagation
+          sparse-checkout-cone-mode: false
+
+      - name: Backpropagate release branch
+        id: backpropagation
+        uses: ./.ci/arkanis-ci/.github/actions/release-backpropagation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_AUTOMATION_PAT: ${{ secrets.PR_AUTOMATION_PAT }}
+        with:
+          new-version: ${{ inputs.new-version }}
+          release-ref-name: ${{ inputs.release-ref-name }}
+          default-branch: ${{ inputs.default-branch }}
+          labels: ${{ inputs.labels }}
+          auto-merge: ${{ inputs.auto-merge }}
+          merge-method: ${{ inputs.merge-method }}
+          approve: ${{ inputs.approve }}
+
+      - name: Remove platform action source
+        if: always()
+        run: rm -rf .ci/arkanis-ci
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "# Release backpropagation"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json }}\` |"
+            echo "| Version | \`${{ inputs.new-version }}\` |"
+            echo "| Source branch | \`${{ inputs.release-ref-name }}\` |"
+            echo "| Target branch | \`${{ inputs.default-branch }}\` |"
+            echo "| Pull request | \`${{ steps.backpropagation.outputs.pr-url }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
