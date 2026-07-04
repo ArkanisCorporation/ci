@@ -1711,7 +1711,8 @@ Flow:
 ```mermaid
 flowchart TD
   platform[("CI platform repository")] --> checkout[[Checkout platform]]
-  checkout --> actionlint[[actionlint 1.7.12]]
+  checkout --> node[[Set up Node.js and npm]]
+  node --> actionlint[[actionlint 1.7.12]]
   actionlint --> dotnet[[Setup .NET 10]]
   dotnet --> validator[[scripts/validate-workflows.cs]]
   validator --> docs[[Generated docs check]]
@@ -1724,7 +1725,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class platform repo
-  class checkout,actionlint,dotnet,validator,docs action
+  class checkout,node,actionlint,dotnet,validator,docs action
   class summary artifact
   class outputs output
 ```
@@ -1733,12 +1734,14 @@ Preconditions:
 
 - The repository contains `.github/workflows`, `.github/actions`, `schemas/workflow-inputs`, policy files, fixtures, and docs.
 - The selected runner can install or run .NET 10.
+- The selected runner can run `actions/setup-node@v6` or has Node.js 24 in the Actions tool cache.
 - The selected runner can run `raven-actions/actionlint@v2` with actionlint `1.7.12`.
 - Local validator runs still use a system `actionlint` when available.
 
 Side effects:
 
 - Reads workflow, action, schema, fixture, policy, and doc files.
+- Records Node.js and npm versions in the step summary.
 - Writes a step summary.
 - Does not publish, deploy, or request secrets.
 

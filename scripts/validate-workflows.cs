@@ -1118,12 +1118,25 @@ void ValidatePlatformSelftestContract()
     }
 
     var workflowText = File.ReadAllText(workflowPath);
+    var setupNodeIndex = workflowText.IndexOf("uses: actions/setup-node@v6", StringComparison.Ordinal);
     var actionlintIndex = workflowText.IndexOf("uses: raven-actions/actionlint@v2", StringComparison.Ordinal);
     var validatorIndex = workflowText.IndexOf("dotnet run --file scripts/validate-workflows.cs", StringComparison.Ordinal);
+
+    foreach (var requiredToken in new[] { "actions/setup-node@v6", "node-version: \"24.x\"", "package-manager-cache: false", "node --version", "npm --version", "- Node: \\`", "- npm: \\`" })
+    {
+        if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: platform selftest workflow must contain {requiredToken}.");
+        }
+    }
 
     if (actionlintIndex < 0)
     {
         AddFailure($"{workflowPath}: platform selftest must run raven-actions/actionlint@v2 before the contract validator.");
+    }
+    else if (setupNodeIndex < 0 || setupNodeIndex > actionlintIndex)
+    {
+        AddFailure($"{workflowPath}: platform selftest must set up Node.js before raven-actions/actionlint.");
     }
     else if (validatorIndex >= 0 && actionlintIndex > validatorIndex)
     {

@@ -44,6 +44,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js 24 + npm
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          package-manager-cache: false
+
       - name: Actionlint @ 1.7.12
         uses: raven-actions/actionlint@v2
         with:
@@ -64,10 +70,15 @@ jobs:
           RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted || false }}
         run: |
+          node_version="$(command -v node >/dev/null 2>&1 && node --version 2>&1 || echo unavailable)"
+          npm_version="$(command -v npm >/dev/null 2>&1 && npm --version 2>&1 || echo unavailable)"
+
           {
             echo "## Platform selftest"
             echo ""
             echo "- Actionlint: \`1.7.12\`"
+            echo "- Node: \`${node_version}\`"
+            echo "- npm: \`${npm_version}\`"
             echo "- Validator: \`scripts/validate-workflows.cs\`"
             echo "- Runner labels: \`$RUNS_ON_JSON\`"
             echo "- Self-hosted: \`$RUNS_ON_SELF_HOSTED\`"
