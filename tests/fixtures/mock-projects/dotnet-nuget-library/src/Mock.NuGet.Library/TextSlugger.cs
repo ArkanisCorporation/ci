@@ -1,6 +1,6 @@
-using System.Text;
-
 namespace Mock.NuGet.Library;
+
+using System.Text;
 
 public static class TextSlugger
 {

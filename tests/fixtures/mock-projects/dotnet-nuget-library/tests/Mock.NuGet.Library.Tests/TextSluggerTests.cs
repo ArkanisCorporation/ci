@@ -1,6 +1,6 @@
-using Mock.NuGet.Library;
-
 namespace Mock.NuGet.Library.Tests;
+
+using Mock.NuGet.Library;
 
 public sealed class TextSluggerTests
 {
