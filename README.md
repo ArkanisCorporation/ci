@@ -22,10 +22,15 @@ Composite actions are optional step bundles for same-repository workflows or exp
 
 | Workflow | Purpose |
 |---|---|
-| `wf-setup-dotnet.yml` | Restore, format, build, test, coverage, metadata, and diagnostics for .NET repositories. |
+| `wf-setup-dotnet.yml` | Restore .NET dependencies with shared setup, metadata, and diagnostics. |
+| `wf-dotnet-format.yml` | Verify `dotnet format` without running tests. |
+| `wf-dotnet-test.yml` | Build, test, collect coverage, metadata, and diagnostics for .NET repositories. |
 | `wf-setup-dotnet-generated-code.yml` | Verify generated .NET source stays committed after codegen commands. |
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
-| `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
+| `wf-setup-node.yml` | Install Node dependencies with shared setup, metadata, and diagnostics. |
+| `wf-node-lint.yml` | Run one Node lint script or command. |
+| `wf-node-test.yml` | Run one Node test script or command. |
+| `wf-node-build.yml` | Run one Node build script or command. |
 | `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows with actionlint. |
 | `wf-verify-release-semantic.yml` | Verify semantic-release in dry-run mode, including tag push authorization. |
 | `wf-release-semantic.yml` | Publish semantic-release metadata without `@semantic-release/exec` verification or publishing scripts. |
@@ -64,7 +69,7 @@ on:
 permissions: {}
 
 jobs:
-  dotnet:
+  dotnet-setup:
     name: .NET setup
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet.yml@v1
     permissions:
@@ -75,6 +80,32 @@ jobs:
       enable-cache: true
       global-json-file: global.json
       solution: CitizenId.slnx
+
+  dotnet-format:
+    name: .NET format
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      enable-cache: true
+      global-json-file: global.json
+      solution: CitizenId.slnx
+
+  dotnet-test:
+    name: .NET test
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      enable-cache: true
+      global-json-file: global.json
+      solution: CitizenId.slnx
+      coverage-pr-comment: true
 ```
 
 Node projects use the same runner model.
@@ -90,9 +121,51 @@ on:
 permissions: {}
 
 jobs:
-  node:
+  node-setup:
     name: Node setup
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-node.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: .
+      enable-cache: true
+
+  node-lint:
+    name: Node lint
+    uses: ArkanisCorporation/ci/.github/workflows/wf-node-lint.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: .
+      enable-cache: true
+
+  node-test:
+    name: Node test
+    uses: ArkanisCorporation/ci/.github/workflows/wf-node-test.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: .
+      enable-cache: true
+
+  node-build:
+    name: Node build
+    uses: ArkanisCorporation/ci/.github/workflows/wf-node-build.yml@v1
     permissions:
       contents: read
     with:
@@ -176,7 +249,7 @@ dotnet run --file scripts/generate-docs.cs -- --check
 dotnet run --file scripts/validate-workflows.cs
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 act workflow_dispatch -W .github/workflows/wf-platform-selftest.yml -j validate -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
-act workflow_dispatch -W tests/fixtures/workflow-contract/typescript-pnpm-local.yml -j node -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
+act workflow_dispatch -W tests/fixtures/workflow-contract/typescript-pnpm-local.yml -j node-test -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
 ```
 
 The validation script requires version tags for external actions.

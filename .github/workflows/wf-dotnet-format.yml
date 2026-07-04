@@ -1,11 +1,10 @@
 # Summary:
-#   Reusable .NET setup workflow for SDK setup, NuGet cache, tool restore, dependency restore, metadata, and diagnostics.
+#   Reusable .NET formatting verification workflow.
 # Remarks:
-#   This workflow runs in the caller repository context.
-#   It checks out caller source, checks out this platform repository for the shared setup action, writes artifacts under `artifacts/`, and uploads diagnostics even on failure.
-#   It does not format, build, test, publish, or deploy.
+#   This workflow restores dependencies and runs dotnet format verification only.
+#   It does not build, test, publish, or deploy.
 
-name: wf-setup-dotnet
+name: wf-dotnet-format
 
 on:
   workflow_call:
@@ -36,7 +35,7 @@ on:
         required: false
         default: ""
       solution:
-        description: Solution or project path to restore.
+        description: Solution or project path to restore and format.
         type: string
         required: true
       restore-locked-mode:
@@ -45,7 +44,7 @@ on:
         required: false
         default: true
       enable-cache:
-        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-restore validation or runners without cache service access.
+        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-format validation or runners without cache service access.
         type: boolean
         required: false
         default: true
@@ -55,17 +54,17 @@ on:
         required: false
         default: 14
       timeout-minutes:
-        description: Setup job timeout.
+        description: Format job timeout.
         type: number
         required: false
         default: 20
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
-        value: ${{ jobs.setup.outputs.artifact-manifest }}
+        value: ${{ jobs.format.outputs.artifact-manifest }}
       run-metadata:
         description: Path to the generated run metadata.
-        value: ${{ jobs.setup.outputs.run-metadata }}
+        value: ${{ jobs.format.outputs.run-metadata }}
 
 permissions: {}
 
@@ -73,7 +72,7 @@ env:
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
 jobs:
-  setup:
+  format:
     name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -143,13 +142,8 @@ jobs:
           {
             echo "## Self-hosted runner preflight"
             echo
-            echo "Disk:"
             df -h .
             echo
-            echo "Temp:"
-            printf '%s\n' "${RUNNER_TEMP:-unset}"
-            echo
-            echo "Required tools:"
             command -v dotnet
             command -v git
           } | tee artifacts/meta/self-hosted-preflight.txt
@@ -166,6 +160,11 @@ jobs:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet restore "$SOLUTION"
 
+      - name: Verify formatting @ ${{ inputs.solution }}
+        env:
+          SOLUTION: ${{ inputs.solution }}
+        run: dotnet format "$SOLUTION" --verify-no-changes --verbosity diagnostic --no-restore
+
       - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
         if: always()
@@ -178,7 +177,7 @@ jobs:
           {
             "schema": "run-metadata/v1",
             "repository": "${GITHUB_REPOSITORY}",
-            "workflow": "wf-setup-dotnet",
+            "workflow": "wf-dotnet-format",
             "sha": "${GITHUB_SHA}",
             "ref": "${GITHUB_REF}",
             "event_name": "${GITHUB_EVENT_NAME}",
@@ -206,15 +205,15 @@ jobs:
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-setup-dotnet",
+              "workflow": "wf-dotnet-format",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
-              "job": "setup"
+              "job": "format"
             },
             "artifacts": [
               {
-                "name": "${GITHUB_REPOSITORY#*/}-dotnet-setup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "name": "${GITHUB_REPOSITORY#*/}-dotnet-format-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
                 "kind": "diagnostics",
                 "paths": ["artifacts"],
                 "retention_days": ${RETENTION_DAYS}
@@ -228,10 +227,9 @@ jobs:
         if: always()
         env:
           SOLUTION: ${{ inputs.solution }}
-          CACHE_HIT: ${{ steps.setup-dotnet.outputs.cache-hit || 'false' }}
         run: |
           {
-            echo "# .NET setup"
+            echo "# .NET format"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
@@ -240,16 +238,15 @@ jobs:
             echo "| Solution | \`${SOLUTION}\` |"
             echo "| Restore locked mode | \`${{ inputs.restore-locked-mode }}\` |"
             echo "| Cache enabled | \`${{ inputs.enable-cache }}\` |"
-            echo "| Cache hit | \`${CACHE_HIT}\` |"
             echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload diagnostics @ ${{ github.event.repository.name }}-dotnet-setup-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-dotnet-format-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-dotnet-setup-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event.repository.name }}-dotnet-format-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

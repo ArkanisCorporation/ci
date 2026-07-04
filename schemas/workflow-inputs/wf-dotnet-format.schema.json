@@ -1,9 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-setup-node/v2/schema.json",
-  "title": "wf-setup-node inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-dotnet-format/v1/schema.json",
+  "title": "wf-dotnet-format inputs",
   "type": "object",
   "additionalProperties": false,
+  "required": [
+    "solution"
+  ],
   "properties": {
     "runs-on": {
       "type": "string",
@@ -17,56 +20,30 @@
       "type": "boolean",
       "default": false
     },
-    "node-version": {
+    "dotnet-version": {
       "type": "string",
-      "default": "24.x"
+      "default": "10.0.x"
     },
-    "package-manager": {
-      "type": "string",
-      "enum": [
-        "npm",
-        "pnpm",
-        "yarn"
-      ],
-      "default": "pnpm"
-    },
-    "package-manager-version": {
+    "global-json-file": {
       "type": "string",
       "default": ""
     },
-    "working-directory": {
-      "type": "string",
-      "default": "."
+    "solution": {
+      "type": "string"
     },
-    "cache-dependency-path": {
-      "type": "string",
-      "default": ""
+    "restore-locked-mode": {
+      "type": "boolean",
+      "default": true
     },
     "enable-cache": {
       "type": "boolean",
       "default": true
-    },
-    "run-install": {
-      "type": "boolean",
-      "default": true
-    },
-    "install-command": {
-      "type": "string",
-      "default": ""
-    },
-    "allow-lifecycle-scripts": {
-      "type": "boolean",
-      "default": false
     },
     "artifact-retention-days": {
       "type": "integer",
       "default": 14,
       "minimum": 1,
       "maximum": 90
-    },
-    "upload-diagnostics": {
-      "type": "boolean",
-      "default": true
     },
     "timeout-minutes": {
       "type": "integer",

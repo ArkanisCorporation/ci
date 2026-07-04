@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-setup-node/v2/schema.json",
-  "title": "wf-setup-node inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-node-lint/v1/schema.json",
+  "title": "wf-node-lint inputs",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -57,6 +57,14 @@
     "allow-lifecycle-scripts": {
       "type": "boolean",
       "default": false
+    },
+    "lint-script": {
+      "type": "string",
+      "default": "lint"
+    },
+    "lint-command": {
+      "type": "string",
+      "default": ""
     },
     "artifact-retention-days": {
       "type": "integer",

@@ -1,0 +1,25 @@
+name: setup-node action fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  setup-node:
+    # Expected: success.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-node
+        with:
+          node-version: 24.x
+          package-manager: pnpm
+          package-manager-version: "10"
+          working-directory: tests/fixtures/mock-projects/typescript-pnpm
+          enable-cache: "false"

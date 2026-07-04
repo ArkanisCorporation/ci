@@ -1,0 +1,300 @@
+# Summary:
+#   Sets up Node.js, npm/pnpm/yarn, package-manager cache, and optional strict dependency install.
+# Remarks:
+#   This composite action expects Bash, package.json, a lockfile, and actions/setup-node.
+#   It calls runs-on/cache only when enable-cache is true.
+#   It does not run lint, test, or build scripts.
+
+name: Setup Node.js
+description: Sets up Node.js, package-manager tooling, dependency cache, and optional strict install.
+
+inputs:
+  node-version:
+    description: Node.js version range installed by actions/setup-node.
+    required: false
+    default: 24.x
+  package-manager:
+    description: Package manager used for cache detection and install. Supported values are npm, pnpm, and yarn.
+    required: false
+    default: pnpm
+  package-manager-version:
+    description: Optional pnpm or yarn version installed by Corepack. Required for pnpm/yarn when package.json lacks packageManager.
+    required: false
+    default: ""
+  working-directory:
+    description: Directory containing package.json and the selected lockfile.
+    required: false
+    default: .
+  cache-dependency-path:
+    description: Optional newline-delimited lockfile glob list relative to the repository root. Defaults to selected package-manager lockfile in working-directory.
+    required: false
+    default: ""
+  enable-cache:
+    description: Runs runs-on/cache for package-manager store when true.
+    required: false
+    default: "true"
+  run-install:
+    description: Runs dependency installation when true.
+    required: false
+    default: "true"
+  install-command:
+    description: Optional install command run from working-directory instead of generated strict install command.
+    required: false
+    default: ""
+  allow-lifecycle-scripts:
+    description: Allows dependency lifecycle scripts during generated install command.
+    required: false
+    default: "false"
+
+outputs:
+  node-version:
+    description: The Node.js version selected by setup.
+    value: ${{ steps.tool-versions.outputs.node-version }}
+  package-manager-version:
+    description: The package-manager version selected by setup.
+    value: ${{ steps.tool-versions.outputs.package-manager-version }}
+  cache-path:
+    description: Package-manager cache path.
+    value: ${{ steps.node-context.outputs.cache-path }}
+  cache-key:
+    description: Package-manager cache key.
+    value: ${{ steps.node-context.outputs.cache-key }}
+  cache-hit:
+    description: Whether dependency cache restored an exact match.
+    value: ${{ steps.node-cache.outputs.cache-hit }}
+  lock-hash:
+    description: Hash of selected lockfiles.
+    value: ${{ steps.node-context.outputs.lock-hash }}
+  lockfiles:
+    description: Newline-delimited selected lockfiles.
+    value: ${{ steps.node-context.outputs.lockfiles }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      id: setup-node
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Prepare ${{ inputs.package-manager }}
+      env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        PACKAGE_MANAGER_VERSION: ${{ inputs.package-manager-version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+        export COREPACK_HOME="${RUNNER_TEMP}/corepack-home"
+        echo "COREPACK_HOME=${COREPACK_HOME}" >> "$GITHUB_ENV"
+        mkdir -p "$GITHUB_WORKSPACE/artifacts/meta" "${RUNNER_TEMP}/corepack-bin" "${COREPACK_HOME}"
+
+        case "$PACKAGE_MANAGER" in
+          npm)
+            npm --version | tee "$GITHUB_WORKSPACE/artifacts/meta/package-manager-version.txt"
+            ;;
+          pnpm|yarn)
+            corepack enable --install-directory "${RUNNER_TEMP}/corepack-bin"
+            echo "${RUNNER_TEMP}/corepack-bin" >> "$GITHUB_PATH"
+            export PATH="${RUNNER_TEMP}/corepack-bin:${PATH}"
+
+            if [[ -n "$PACKAGE_MANAGER_VERSION" ]]; then
+              corepack install --global "${PACKAGE_MANAGER}@${PACKAGE_MANAGER_VERSION}"
+            else
+              node -e 'const fs = require("fs"); const manager = process.argv[1]; const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); if (!pkg.packageManager || !pkg.packageManager.startsWith(manager + "@")) { console.error("package-manager-version is required when package.json lacks packageManager for " + manager + "."); process.exit(2); }' "$PACKAGE_MANAGER"
+              corepack install
+            fi
+
+            "$PACKAGE_MANAGER" --version | tee "$GITHUB_WORKSPACE/artifacts/meta/package-manager-version.txt"
+            ;;
+          *)
+            echo "Unsupported package-manager: ${PACKAGE_MANAGER}" >&2
+            exit 2
+            ;;
+        esac
+      shell: bash
+
+    - name: Detect ${{ inputs.package-manager }} context
+      id: node-context
+      env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        NODE_VERSION: ${{ inputs.node-version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        CACHE_DEPENDENCY_PATH: ${{ inputs.cache-dependency-path }}
+      run: |
+        set -euo pipefail
+        shopt -s globstar nullglob
+
+        if [[ ! -d "$WORKING_DIRECTORY" ]]; then
+          echo "working-directory does not exist: ${WORKING_DIRECTORY}" >&2
+          exit 2
+        fi
+
+        cd "$WORKING_DIRECTORY"
+        if [[ ! -f package.json ]]; then
+          echo "package.json is missing in ${WORKING_DIRECTORY}" >&2
+          exit 2
+        fi
+
+        case "$PACKAGE_MANAGER" in
+          npm)
+            cache_path="$(npm config get cache)"
+            lockfile_candidates=(package-lock.json npm-shrinkwrap.json)
+            ;;
+          pnpm)
+            cache_path="$(pnpm store path --silent)"
+            lockfile_candidates=(pnpm-lock.yaml)
+            ;;
+          yarn)
+            cache_path="$(yarn config get cacheFolder 2>/dev/null || true)"
+            if [[ -z "$cache_path" || "$cache_path" == "undefined" ]]; then
+              cache_path="$(yarn cache dir)"
+            fi
+            lockfile_candidates=(yarn.lock)
+            ;;
+          *)
+            echo "Unsupported package-manager: ${PACKAGE_MANAGER}" >&2
+            exit 2
+            ;;
+        esac
+
+        lockfiles=()
+        cd "$GITHUB_WORKSPACE"
+        if [[ -n "$CACHE_DEPENDENCY_PATH" ]]; then
+          while IFS= read -r pattern; do
+            [[ -z "$pattern" ]] && continue
+            while IFS= read -r match; do
+              [[ -f "$match" ]] && lockfiles+=("$match")
+            done < <(compgen -G "$pattern" || true)
+          done <<< "$CACHE_DEPENDENCY_PATH"
+        else
+          for candidate in "${lockfile_candidates[@]}"; do
+            if [[ -f "${WORKING_DIRECTORY}/${candidate}" ]]; then
+              lockfiles+=("${WORKING_DIRECTORY}/${candidate}")
+            fi
+          done
+        fi
+
+        if [[ "${#lockfiles[@]}" -eq 0 ]]; then
+          echo "No lockfile found for ${PACKAGE_MANAGER}." >&2
+          echo "Set cache-dependency-path or add the package-manager lockfile under ${WORKING_DIRECTORY}." >&2
+          exit 2
+        fi
+
+        if [[ "$cache_path" != /* ]]; then
+          cache_path="${GITHUB_WORKSPACE}/${WORKING_DIRECTORY}/${cache_path}"
+        fi
+
+        mapfile -d '' sorted_lockfiles < <(printf '%s\0' "${lockfiles[@]}" | sort -z)
+        lock_hash="$(sha256sum "${sorted_lockfiles[@]}" | sha256sum | cut -d ' ' -f 1)"
+        cache_key="${RUNNER_OS}-${RUNNER_ARCH}-node-${NODE_VERSION}-${PACKAGE_MANAGER}-${lock_hash}"
+
+        mkdir -p artifacts/meta
+        {
+          echo "Package manager: ${PACKAGE_MANAGER}"
+          echo "Cache path: ${cache_path}"
+          echo "Cache key: ${cache_key}"
+          echo "Lockfiles:"
+          printf '%s\n' "${sorted_lockfiles[@]}"
+        } | tee artifacts/meta/node-cache-context.txt
+
+        {
+          echo "cache-path<<EOF"
+          printf '%s\n' "$cache_path"
+          echo "EOF"
+          echo "cache-key=${cache_key}"
+          echo "lock-hash=${lock_hash}"
+          echo "lockfiles<<EOF"
+          printf '%s\n' "${sorted_lockfiles[@]}"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Cache ${{ inputs.package-manager }} store
+      if: inputs.enable-cache == 'true'
+      id: node-cache
+      uses: runs-on/cache@v5.0.7
+      with:
+        path: ${{ steps.node-context.outputs.cache-path }}
+        key: ${{ steps.node-context.outputs.cache-key }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-${{ inputs.package-manager }}-
+
+    - name: Record tool versions
+      id: tool-versions
+      env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+      run: |
+        set -euo pipefail
+        mkdir -p artifacts/meta
+        node_version="$(node --version)"
+        package_manager_version="$("${PACKAGE_MANAGER}" --version)"
+        printf '%s\n' "$node_version" | tee artifacts/meta/node-version.txt
+        printf '%s\n' "$package_manager_version" > artifacts/meta/package-manager-version.txt
+        {
+          echo "node-version=${node_version}"
+          echo "package-manager-version=${package_manager_version}"
+        } >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Install ${{ inputs.package-manager }} dependencies
+      if: inputs.run-install == 'true'
+      env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+        ALLOW_LIFECYCLE_SCRIPTS: ${{ inputs.allow-lifecycle-scripts }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+        mkdir -p "$GITHUB_WORKSPACE/artifacts/node"
+
+        run_logged() {
+          local log_file="$1"
+          shift
+          "$@" 2>&1 | tee "$GITHUB_WORKSPACE/$log_file"
+          local status="${PIPESTATUS[0]}"
+          return "$status"
+        }
+
+        if [[ -n "$INSTALL_COMMAND" ]]; then
+          run_logged artifacts/node/install.log bash -lc "$INSTALL_COMMAND"
+          exit $?
+        fi
+
+        case "$PACKAGE_MANAGER" in
+          npm)
+            args=(ci)
+            if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+              args+=(--ignore-scripts)
+            fi
+            ;;
+          pnpm)
+            args=(install --frozen-lockfile)
+            if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+              args+=(--ignore-scripts)
+            fi
+            ;;
+          yarn)
+            yarn_version="$(yarn --version)"
+            if [[ "$yarn_version" == 1.* ]]; then
+              args=(install --frozen-lockfile)
+              if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+                args+=(--ignore-scripts)
+              fi
+            else
+              args=(install --immutable)
+              if [[ "$ALLOW_LIFECYCLE_SCRIPTS" != "true" ]]; then
+                args+=(--mode=skip-builds)
+              fi
+            fi
+            ;;
+          *)
+            echo "Unsupported package-manager: ${PACKAGE_MANAGER}" >&2
+            exit 2
+            ;;
+        esac
+
+        run_logged artifacts/node/install.log "$PACKAGE_MANAGER" "${args[@]}"
+      shell: bash

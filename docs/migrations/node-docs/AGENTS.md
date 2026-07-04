@@ -7,7 +7,7 @@ Known examples are CitizenId-docs and CitizenId-medusa-store.
 
 ## Goal
 
-Move install, lint, test, and build setup into `wf-setup-node.yml`.
+Move install, lint, test, and build into split Node workflows.
 Keep Pages deployment, release creation, service orchestration, and package-manager compatibility matrices explicit.
 
 ## Inspection Order
@@ -18,7 +18,8 @@ Keep Pages deployment, release creation, service orchestration, and package-mana
 
 ## Target Shape
 
-- Use `wf-setup-node.yml` for standard install, lint, test, and build.
+- Use `wf-setup-node.yml` for standard install.
+- Use `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` for expensive script lanes.
 - Use `package-manager-version` or package.json `packageManager` for pnpm and yarn.
 - Keep Pages deployment in a separate deploy job.
 - Keep service integration tests in repo-specific jobs that depend on setup verification.
@@ -35,6 +36,7 @@ Keep Pages deployment, release creation, service orchestration, and package-mana
 ## Verification
 
 - Run `wf-setup-node.yml` with `enable-cache: false` once for cold-install confidence.
+- Run lint, test, and build workflows independently when the repository has those scripts.
 - Run app-specific service tests separately.
 - Verify Pages or release deploy jobs require appropriate permissions and protected refs.
 - Verify package-manager matrix jobs use explicit versions.

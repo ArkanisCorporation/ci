@@ -1,7 +1,7 @@
 # Summary:
 #   Runs this repository's validation, fixture dogfood checks, and release automation.
 # Remarks:
-#   Pull requests exercise platform selftest, fixture workflow calls, and semantic-release verification.
+#   Pull requests exercise platform selftest, split fixture workflow calls, and semantic-release verification.
 #   Main pushes and manual dispatches publish GitHub release metadata and update mutable major version tags such as v1.
 #   It does not publish NuGet packages, OCI images, deployments, or run semantic-release exec hooks.
 
@@ -25,8 +25,8 @@ jobs:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
 
-  typescript-pnpm:
-    name: typescript-pnpm @ ${{ github.head_ref || github.ref_name }}
+  typescript-pnpm-setup:
+    name: typescript-pnpm setup @ ${{ github.head_ref || github.ref_name }}
     uses: ./.github/workflows/wf-setup-node.yml
     permissions:
       contents: read
@@ -39,9 +39,77 @@ jobs:
       working-directory: tests/fixtures/mock-projects/typescript-pnpm
       enable-cache: false
 
-  dotnet-library:
-    name: dotnet-nuget-library @ ${{ github.head_ref || github.ref_name }}
+  typescript-pnpm-lint:
+    name: typescript-pnpm lint @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-node-lint.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: tests/fixtures/mock-projects/typescript-pnpm
+      enable-cache: false
+
+  typescript-pnpm-test:
+    name: typescript-pnpm test @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-node-test.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: tests/fixtures/mock-projects/typescript-pnpm
+      enable-cache: false
+
+  typescript-pnpm-build:
+    name: typescript-pnpm build @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-node-build.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      node-version: 24.x
+      package-manager: pnpm
+      package-manager-version: "10"
+      working-directory: tests/fixtures/mock-projects/typescript-pnpm
+      enable-cache: false
+
+  dotnet-library-setup:
+    name: dotnet-nuget-library setup @ ${{ github.head_ref || github.ref_name }}
     uses: ./.github/workflows/wf-setup-dotnet.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
+      restore-locked-mode: true
+      enable-cache: false
+
+  dotnet-library-format:
+    name: dotnet-nuget-library format @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-dotnet-format.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
+      restore-locked-mode: true
+      enable-cache: false
+
+  dotnet-library-test:
+    name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}
+    uses: ./.github/workflows/wf-dotnet-test.yml
     permissions:
       contents: read
       pull-requests: write
@@ -95,8 +163,13 @@ jobs:
     name: repo @ verify
     needs:
       - selftest
-      - typescript-pnpm
-      - dotnet-library
+      - typescript-pnpm-setup
+      - typescript-pnpm-lint
+      - typescript-pnpm-test
+      - typescript-pnpm-build
+      - dotnet-library-setup
+      - dotnet-library-format
+      - dotnet-library-test
       - dotnet-nuget
       - dotnet-container
     uses: ./.github/workflows/wf-verify-release-semantic.yml
@@ -113,8 +186,13 @@ jobs:
     name: repo @ publish
     needs:
       - selftest
-      - typescript-pnpm
-      - dotnet-library
+      - typescript-pnpm-setup
+      - typescript-pnpm-lint
+      - typescript-pnpm-test
+      - typescript-pnpm-build
+      - dotnet-library-setup
+      - dotnet-library-format
+      - dotnet-library-test
       - dotnet-nuget
       - dotnet-container
     uses: ./.github/workflows/wf-release-semantic.yml

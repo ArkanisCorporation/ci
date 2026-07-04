@@ -10,13 +10,15 @@ CitizenId-medusa-store has npm, pnpm, and yarn CLI smoke jobs with older setup-n
 ## Target
 
 The target is a split Node pipeline.
-Setup workflow handles install, lint, test, build, cache, metadata, and diagnostics.
+Setup workflow handles install, cache, metadata, and diagnostics.
+Lint, test, and build workflows run independently.
 Deploy and release jobs remain separate.
 Service-backed CLI checks remain explicit integration jobs.
 
 ## Checklist
 
-- Replace setup/install/lint/test/build with `wf-setup-node.yml`.
+- Replace setup/install with `wf-setup-node.yml`.
+- Replace lint, test, and build jobs with `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml`.
 - Use `package-manager: pnpm`, `npm`, or `yarn`.
 - Provide `package-manager-version` when needed.
 - Remove manual lockfile creation or deletion from CI.

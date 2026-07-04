@@ -9,7 +9,7 @@ Start each workflow from `AGENTS.md` contract, then add schema in `schemas/workf
 ## Repository workflows
 
 `release.yml` is this repository's default release pipeline for pull requests, main pushes, and manual dispatches.
-On pull requests, it runs `wf-platform-selftest.yml`, the TypeScript pnpm fixture, the .NET NuGet fixture, and the .NET container fixture before calling `wf-verify-release-semantic.yml`.
+On pull requests, it runs `wf-platform-selftest.yml`, split TypeScript pnpm setup/lint/test/build fixtures, split .NET setup/format/test fixtures, the .NET NuGet fixture, and the .NET container fixture before calling `wf-verify-release-semantic.yml`.
 On main pushes and manual dispatches, it runs the same fixture dogfood series before calling `wf-release-semantic.yml` for trusted publication paths.
 It publishes GitHub release metadata and updates mutable major version tags such as `v1`.
 
@@ -37,6 +37,17 @@ It installs .NET 10 action tooling so the composite action can run its `CliWrap`
 
 `wf-setup-dotnet-generated-code.yml` is the reusable generated-source diff gate.
 It supports CitizenId-style Wolverine generated handler checks by building once, running host codegen commands, and failing when generated paths change.
+
+## .NET Setup, Format, And Test
+
+`wf-setup-dotnet.yml` restores .NET dependencies only.
+`wf-dotnet-format.yml` runs `dotnet format --verify-no-changes`.
+`wf-dotnet-test.yml` builds, tests, and handles coverage output.
+
+## Node Setup, Lint, Test, And Build
+
+`wf-setup-node.yml` installs Node dependencies only.
+`wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` run the expensive script lanes independently.
 
 ## GitHub Actions Lint
 

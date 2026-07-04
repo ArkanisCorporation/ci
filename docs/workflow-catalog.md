@@ -6,10 +6,15 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Purpose | Trust zone |
 |---|---|---|
-| `wf-setup-dotnet.yml` | .NET restore, format, build, test, coverage, metadata, and diagnostics. | untrusted or trusted-build |
+| `wf-setup-dotnet.yml` | .NET SDK setup, NuGet cache, tool restore, dependency restore, metadata, and diagnostics. | untrusted or trusted-build |
+| `wf-dotnet-format.yml` | Verify `dotnet format` without running tests. | untrusted or trusted-build |
+| `wf-dotnet-test.yml` | Build, test, collect coverage, metadata, and diagnostics for .NET repositories. | untrusted or trusted-build |
 | `wf-setup-dotnet-generated-code.yml` | Verify committed .NET generated source. | untrusted or trusted-build |
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode creates no diff. | untrusted or trusted-build |
-| `wf-setup-node.yml` | Node install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build |
+| `wf-setup-node.yml` | Node package-manager setup, install, cache, metadata, and diagnostics. | untrusted or trusted-build |
+| `wf-node-lint.yml` | Run one Node lint script or command. | untrusted or trusted-build |
+| `wf-node-test.yml` | Run one Node test script or command. | untrusted or trusted-build |
+| `wf-node-build.yml` | Run one Node build script or command. | untrusted or trusted-build |
 | `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows. | untrusted or trusted-build |
 | `wf-verify-release-semantic.yml` | Verify semantic-release metadata without publishing. | trusted-build |
 | `wf-release-semantic.yml` | Publish semantic-release metadata without `@semantic-release/exec`. | publish |
@@ -26,10 +31,15 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Minimum caller permissions | Main outputs |
 |---|---|---|
-| `wf-setup-dotnet.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
+| `wf-setup-dotnet.yml` | `contents: read` | restore diagnostics, metadata, manifest |
+| `wf-dotnet-format.yml` | `contents: read` | format diagnostics, metadata, manifest |
+| `wf-dotnet-test.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
 | `wf-setup-dotnet-generated-code.yml` | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
 | `wf-setup-dotnet-jetbrains.yml` | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
-| `wf-setup-node.yml` | `contents: read` | install, lint, test, build logs, metadata, manifest |
+| `wf-setup-node.yml` | `contents: read` | install logs, metadata, manifest |
+| `wf-node-lint.yml` | `contents: read` | install and lint logs, metadata, manifest |
+| `wf-node-test.yml` | `contents: read` | install and test logs, metadata, manifest |
+| `wf-node-build.yml` | `contents: read` | install and build logs, metadata, manifest |
 | `wf-lint-github-actions.yml` | `contents: read` | step summary |
 | `wf-verify-release-semantic.yml` | `contents: write` | release diagnostics and predicted release outputs |
 | `wf-release-semantic.yml` | `contents: write`<br>`issues: write`<br>`pull-requests: write` | release diagnostics and release outputs |
@@ -103,6 +113,53 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 
 Outputs: schema does not define workflow outputs.
 
+### wf-dotnet-format.yml
+
+Schema: `schemas/workflow-inputs/wf-dotnet-format.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `solution` | string | yes | none | n/a |
+| `restore-locked-mode` | boolean | no | `true` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-dotnet-test.yml
+
+Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `dotnet-version` | string | no | `"10.0.x"` | n/a |
+| `global-json-file` | string | no | `""` | n/a |
+| `solution` | string | yes | none | n/a |
+| `configuration` | string | no | `"Release"` | n/a |
+| `restore-locked-mode` | boolean | no | `true` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `test-filter` | string | no | `""` | n/a |
+| `coverage` | boolean | no | `true` | n/a |
+| `coverage-report` | boolean | no | `true` | n/a |
+| `coverage-pr-comment` | boolean | no | `true` | n/a |
+| `coverage-reporttypes` | string | no | `"HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary"` | n/a |
+| `coverage-assemblyfilters` | string | no | `"+*;-*.UnitTests;-*.IntegrationTests"` | n/a |
+| `coverage-report-custom-settings` | string | no | `""` | n/a |
+| `coverage-report-tool-version` | string | no | `"5.5.10"` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
 ### wf-lint-github-actions.yml
 
 Schema: `schemas/workflow-inputs/wf-lint-github-actions.schema.json`.
@@ -114,6 +171,84 @@ Schema: `schemas/workflow-inputs/wf-lint-github-actions.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `10` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-node-build.yml
+
+Schema: `schemas/workflow-inputs/wf-node-build.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `node-version` | string | no | `"24.x"` | n/a |
+| `package-manager` | string | no | `"pnpm"` | Allowed: "npm", "pnpm", "yarn" |
+| `package-manager-version` | string | no | `""` | n/a |
+| `working-directory` | string | no | `"."` | n/a |
+| `cache-dependency-path` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `run-install` | boolean | no | `true` | n/a |
+| `install-command` | string | no | `""` | n/a |
+| `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
+| `build-script` | string | no | `"build"` | n/a |
+| `build-command` | string | no | `""` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-node-lint.yml
+
+Schema: `schemas/workflow-inputs/wf-node-lint.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `node-version` | string | no | `"24.x"` | n/a |
+| `package-manager` | string | no | `"pnpm"` | Allowed: "npm", "pnpm", "yarn" |
+| `package-manager-version` | string | no | `""` | n/a |
+| `working-directory` | string | no | `"."` | n/a |
+| `cache-dependency-path` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `run-install` | boolean | no | `true` | n/a |
+| `install-command` | string | no | `""` | n/a |
+| `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
+| `lint-script` | string | no | `"lint"` | n/a |
+| `lint-command` | string | no | `""` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-node-test.yml
+
+Schema: `schemas/workflow-inputs/wf-node-test.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `node-version` | string | no | `"24.x"` | n/a |
+| `package-manager` | string | no | `"pnpm"` | Allowed: "npm", "pnpm", "yarn" |
+| `package-manager-version` | string | no | `""` | n/a |
+| `working-directory` | string | no | `"."` | n/a |
+| `cache-dependency-path` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | n/a |
+| `run-install` | boolean | no | `true` | n/a |
+| `install-command` | string | no | `""` | n/a |
+| `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
+| `test-script` | string | no | `"test"` | n/a |
+| `test-command` | string | no | `""` | n/a |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
 
@@ -306,21 +441,10 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet.schema.json`.
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
 | `solution` | string | yes | none | n/a |
-| `configuration` | string | no | `"Release"` | n/a |
 | `restore-locked-mode` | boolean | no | `true` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
-| `run-format` | boolean | no | `true` | n/a |
-| `run-tests` | boolean | no | `true` | n/a |
-| `test-filter` | string | no | `""` | n/a |
-| `coverage` | boolean | no | `true` | n/a |
-| `coverage-report` | boolean | no | `true` | n/a |
-| `coverage-pr-comment` | boolean | no | `true` | n/a |
-| `coverage-reporttypes` | string | no | `"HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary"` | n/a |
-| `coverage-assemblyfilters` | string | no | `"+*;-*.UnitTests;-*.IntegrationTests"` | n/a |
-| `coverage-report-custom-settings` | string | no | `""` | n/a |
-| `coverage-report-tool-version` | string | no | `"5.5.10"` | n/a |
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
-| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
 
@@ -342,18 +466,9 @@ Schema: `schemas/workflow-inputs/wf-setup-node.schema.json`.
 | `run-install` | boolean | no | `true` | n/a |
 | `install-command` | string | no | `""` | n/a |
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
-| `run-lint` | boolean | no | `true` | n/a |
-| `lint-script` | string | no | `"lint"` | n/a |
-| `lint-command` | string | no | `""` | n/a |
-| `run-tests` | boolean | no | `true` | n/a |
-| `test-script` | string | no | `"test"` | n/a |
-| `test-command` | string | no | `""` | n/a |
-| `run-build` | boolean | no | `true` | n/a |
-| `build-script` | string | no | `"build"` | n/a |
-| `build-command` | string | no | `""` | n/a |
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
-| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
 
@@ -474,9 +589,116 @@ External services and caches are gray dashed nodes.
 ## .NET Setup Workflow
 
 `wf-setup-dotnet.yml` checks out the caller repository.
-It sets up .NET, restores local tools, restores dependencies, optionally verifies formatting, builds with a binlog, optionally runs tests, optionally collects coverage, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It checks out this CI platform repository for the shared `setup-dotnet` action.
+It sets up .NET, restores local tools, restores dependencies, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It does not format, build, test, collect coverage, publish, or deploy.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> platform[("CI platform checkout")]
+  platform --> setup[[setup-dotnet action]]
+  setup --> cache[("NuGet cache")]
+  cache --> versions[[Record tool versions]]
+  versions --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| restore[[Restore dependencies]]
+  sh --> restore
+  restore --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,setup,versions,validate,sh,restore action
+  class preflight decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class cache external
+```
+
+Preconditions:
+
+- `solution` points to a solution or project in the caller repository.
+- Lock files exist when `restore-locked-mode` is true.
+- The selected runner can install or run the requested .NET SDK.
+
+Side effects:
+
+- Writes under `artifacts/`.
+- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Uploads diagnostics with `if: always()`.
+- Runs `dotnet tool restore` when local tools exist.
+
+## .NET Format Workflow
+
+`wf-dotnet-format.yml` checks out the caller repository.
+It checks out this CI platform repository for the shared `setup-dotnet` action.
+It sets up .NET, restores dependencies, runs `dotnet format --verify-no-changes`, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It does not build, test, collect coverage, publish, or deploy.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> platform[("CI platform checkout")]
+  platform --> setup[[setup-dotnet action]]
+  setup --> cache[("NuGet cache")]
+  cache --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| restore[[Restore dependencies]]
+  sh --> restore
+  restore --> format[[dotnet format --verify-no-changes]]
+  format --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,setup,validate,sh,restore,format action
+  class preflight decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class cache external
+```
+
+Preconditions:
+
+- `solution` points to a solution or project in the caller repository.
+- Lock files exist when `restore-locked-mode` is true.
+- The selected runner can install or run the requested .NET SDK.
+
+Side effects:
+
+- Writes under `artifacts/`.
+- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Uploads diagnostics with `if: always()`.
+- Runs `dotnet tool restore` when local tools exist.
+
+## .NET Test Workflow
+
+`wf-dotnet-test.yml` checks out the caller repository.
+It installs .NET 10 action tooling for coverage report file scripts, checks out this CI platform repository for shared actions, sets up the project SDK, restores dependencies, builds with a binlog, runs tests, optionally collects coverage, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
 When `coverage-report` is true, it generates ReportGenerator HTML, Cobertura, Markdown, and text output from collected coverage.
 When `coverage-pr-comment` is true on pull requests, it updates one coverage comment with the Markdown summary.
+It does not run formatting, publish, or deploy.
 
 Flow:
 
@@ -484,27 +706,18 @@ Flow:
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
   checkout --> tooling[[Setup .NET action tooling]]
-  tooling --> sdk{global.json?}
-  sdk -->|yes| global[[Setup .NET from global.json]]
-  sdk -->|no| version[[Setup .NET from dotnet-version]]
-  global --> cache[("NuGet cache")]
-  version --> cache
+  tooling --> platform[("CI platform checkout")]
+  platform --> setup[[setup-dotnet action]]
+  setup --> cache[("NuGet cache")]
   cache --> validate[[Validate runner contract]]
   validate --> preflight{self-hosted?}
   preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| restoreTools[[Restore local .NET tools]]
-  sh --> restoreTools
-  restoreTools --> restore[[Restore dependencies]]
-  restore --> format{verify format?}
-  format -->|yes| fmt[[dotnet format]]
-  format -->|no| build[[Build with binlog]]
-  fmt --> build
-  build --> tests{run tests?}
-  tests -->|yes| test[[Test and collect coverage]]
-  tests -->|no| coverage{coverage report?}
-  test --> coverage
-  coverage -->|yes| platform[("CI platform checkout")]
-  platform --> report[[dotnet-coverage-report action]]
+  preflight -->|no| restore[[Restore dependencies]]
+  sh --> restore
+  restore --> build[[Build with binlog]]
+  build --> test[[Test and collect coverage]]
+  test --> coverage{coverage report?}
+  coverage -->|yes| report[[dotnet-coverage-report action]]
   coverage -->|no| metadata[/run-metadata.json/]
   report --> metadata
   metadata --> manifest[/artifact-manifest.json/]
@@ -518,8 +731,8 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,tooling,global,version,validate,sh,restoreTools,restore,fmt,build,test,report action
-  class sdk,preflight,format,tests,coverage decision
+  class checkout,tooling,setup,validate,sh,restore,build,test,report action
+  class preflight,coverage decision
   class metadata,manifest,summary,diagnostics artifact
   class outputs output
   class cache external
@@ -545,7 +758,7 @@ Side effects:
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
-- Checks out this CI platform repository under `.ci/arkanis-ci` when `coverage-report` is true, then removes that checkout after report generation.
+- Checks out this CI platform repository under `.ci/arkanis-ci`.
 - May create or update one pull request comment when `coverage-pr-comment` is true.
 
 ## .NET JetBrains CleanupCode Workflow
@@ -724,31 +937,26 @@ jobs:
 ## Node Setup Workflow
 
 `wf-setup-node.yml` checks out the caller repository.
-It sets up Node.js, prepares npm/pnpm/yarn, restores package-manager cache when enabled, installs dependencies with strict lockfile behavior, optionally runs lint/test/build scripts, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It checks out this CI platform repository for the shared `setup-node` action.
+It sets up Node.js, prepares npm/pnpm/yarn, restores package-manager cache when enabled, installs dependencies with strict lockfile behavior, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It does not run lint, test, build, publish, or deploy commands.
 
 Flow:
 
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> node[[Setup Node.js]]
-  node --> manager[[Prepare package manager]]
-  manager --> detect[[Detect package-manager context]]
-  detect --> cache{enable cache?}
-  cache -->|yes| store[("Package-manager cache")]
-  cache -->|no| versions[[Record tool versions]]
-  store --> versions
-  versions --> validate[[Validate runner contract]]
+  checkout --> platform[("CI platform checkout")]
+  platform --> setup[[setup-node action]]
+  setup --> store[("Package-manager cache")]
+  store --> install{run install?}
+  install -->|yes| deps[[Install dependencies]]
+  install -->|no| validate[[Validate runner contract]]
+  deps --> validate
   validate --> preflight{self-hosted?}
   preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| install{run install?}
-  sh --> install
-  install -->|yes| deps[[Install dependencies]]
-  install -->|no| scripts{run scripts?}
-  deps --> scripts
-  scripts -->|lint/test/build| runScripts[[Run configured scripts]]
-  scripts -->|none| metadata[/run-metadata.json/]
-  runScripts --> metadata
+  preflight -->|no| metadata[/run-metadata.json/]
+  sh --> metadata
   metadata --> manifest[/artifact-manifest.json/]
   manifest --> summary>Step summary]
   summary --> diagnostics[/Diagnostics artifact/]
@@ -759,9 +967,9 @@ flowchart TD
   classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
-  class caller repo
-  class checkout,node,manager,detect,versions,validate,sh,deps,runScripts action
-  class cache,preflight,install,scripts decision
+  class caller,platform repo
+  class checkout,setup,validate,sh,deps action
+  class preflight,install decision
   class metadata,manifest,summary,diagnostics artifact
   class outputs output
   class store external
@@ -780,6 +988,123 @@ Side effects:
 - Writes Corepack shims and package-manager downloads under `RUNNER_TEMP`.
 - Reads and writes package-manager cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()` when `upload-diagnostics` is true.
+
+## Node Lint Workflow
+
+`wf-node-lint.yml` checks out the caller repository.
+It checks out this CI platform repository for the shared `setup-node` action.
+It installs dependencies, runs one lint command, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It fails when `lint-command` is empty and the selected `lint-script` is missing.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> platform[("CI platform checkout")]
+  platform --> setup[[setup-node action]]
+  setup --> store[("Package-manager cache")]
+  store --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| lint[[Run lint]]
+  sh --> lint
+  lint --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,setup,validate,sh,lint action
+  class preflight decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class store external
+```
+
+## Node Test Workflow
+
+`wf-node-test.yml` checks out the caller repository.
+It checks out this CI platform repository for the shared `setup-node` action.
+It installs dependencies, runs one test command, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It fails when `test-command` is empty and the selected `test-script` is missing.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> platform[("CI platform checkout")]
+  platform --> setup[[setup-node action]]
+  setup --> store[("Package-manager cache")]
+  store --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| test[[Run tests]]
+  sh --> test
+  test --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,setup,validate,sh,test action
+  class preflight decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class store external
+```
+
+## Node Build Workflow
+
+`wf-node-build.yml` checks out the caller repository.
+It checks out this CI platform repository for the shared `setup-node` action.
+It installs dependencies, runs one build command, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It fails when `build-command` is empty and the selected `build-script` is missing.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> platform[("CI platform checkout")]
+  platform --> setup[[setup-node action]]
+  setup --> store[("Package-manager cache")]
+  store --> validate[[Validate runner contract]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| build[[Run build]]
+  sh --> build
+  build --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller,platform repo
+  class checkout,setup,validate,sh,build action
+  class preflight decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class store external
+```
 
 ## GitHub Actions Lint Workflow
 

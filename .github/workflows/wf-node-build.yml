@@ -1,11 +1,10 @@
 # Summary:
-#   Reusable Node.js setup workflow for Node.js, package-manager setup, cache, strict install, metadata, and diagnostics.
+#   Reusable Node.js build workflow.
 # Remarks:
-#   This workflow runs in the caller repository context.
-#   It checks out caller source, checks out this platform repository for the shared setup action, writes artifacts under `artifacts/`, and uploads diagnostics even on failure.
-#   It does not run lint, test, build, publish, or deploy commands.
+#   This workflow installs dependencies through the shared setup action and runs one build command.
+#   It does not lint, test, publish, or deploy.
 
-name: wf-setup-node
+name: wf-node-build
 
 on:
   workflow_call:
@@ -31,7 +30,7 @@ on:
         required: false
         default: 24.x
       package-manager:
-        description: Package manager used for cache detection and install. Supported values are npm, pnpm, and yarn.
+        description: Package manager used for cache detection, install, and scripts. Supported values are npm, pnpm, and yarn.
         type: string
         required: false
         default: pnpm
@@ -51,7 +50,7 @@ on:
         required: false
         default: ""
       enable-cache:
-        description: Restores and saves package-manager cache with runs-on/cache when true. Set false for cold-install validation or runners without cache service access.
+        description: Restores and saves package-manager cache with runs-on/cache when true. Set false for cold-build validation or runners without cache service access.
         type: boolean
         required: false
         default: true
@@ -70,6 +69,16 @@ on:
         type: boolean
         required: false
         default: false
+      build-script:
+        description: package.json script name used for build when build-command is empty.
+        type: string
+        required: false
+        default: build
+      build-command:
+        description: Optional build command run from working-directory.
+        type: string
+        required: false
+        default: ""
       artifact-retention-days:
         description: Diagnostic artifact retention in days.
         type: number
@@ -81,22 +90,22 @@ on:
         required: false
         default: true
       timeout-minutes:
-        description: Setup job timeout.
+        description: Build job timeout.
         type: number
         required: false
         default: 20
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
-        value: ${{ jobs.setup.outputs.artifact-manifest }}
+        value: ${{ jobs.build.outputs.artifact-manifest }}
       run-metadata:
         description: Path to the generated run metadata.
-        value: ${{ jobs.setup.outputs.run-metadata }}
+        value: ${{ jobs.build.outputs.run-metadata }}
 
 permissions: {}
 
 jobs:
-  setup:
+  build:
     name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -168,18 +177,44 @@ jobs:
           {
             echo "## Self-hosted runner preflight"
             echo
-            echo "Disk:"
             df -h .
             echo
-            echo "Temp:"
-            printf '%s\n' "${RUNNER_TEMP:-unset}"
-            echo
-            echo "Required tools:"
             command -v git
             command -v node
             command -v npm
             command -v "$PACKAGE_MANAGER"
           } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Build ${{ inputs.working-directory }} @ ${{ inputs.build-script }}
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: |
+          set -euo pipefail
+          cd "$WORKING_DIRECTORY"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/node"
+
+          run_logged() {
+            local log_file="$1"
+            shift
+            "$@" 2>&1 | tee "$GITHUB_WORKSPACE/$log_file"
+            local status="${PIPESTATUS[0]}"
+            return "$status"
+          }
+
+          if [[ -n "$BUILD_COMMAND" ]]; then
+            run_logged artifacts/node/build.log bash -lc "$BUILD_COMMAND"
+            exit $?
+          fi
+
+          if ! node -e 'const fs = require("fs"); const script = process.argv[1]; const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); process.exit(pkg.scripts && Object.prototype.hasOwnProperty.call(pkg.scripts, script) ? 0 : 1);' "$BUILD_SCRIPT"; then
+            echo "package.json script '${BUILD_SCRIPT}' not found." >&2
+            exit 2
+          fi
+
+          run_logged artifacts/node/build.log "$PACKAGE_MANAGER" run "$BUILD_SCRIPT"
 
       - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
@@ -189,16 +224,13 @@ jobs:
           NODE_VERSION: ${{ steps.setup-node.outputs.node-version }}
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           PACKAGE_MANAGER_VERSION: ${{ steps.setup-node.outputs.package-manager-version }}
-          CACHE_ENABLED: ${{ inputs.enable-cache }}
-          CACHE_KEY: ${{ steps.setup-node.outputs.cache-key }}
-          CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit || 'false' }}
         run: |
           mkdir -p artifacts/meta
           cat > artifacts/meta/run-metadata.json <<JSON
           {
             "schema": "run-metadata/v1",
             "repository": "${GITHUB_REPOSITORY}",
-            "workflow": "wf-setup-node",
+            "workflow": "wf-node-build",
             "sha": "${GITHUB_SHA}",
             "ref": "${GITHUB_REF}",
             "event_name": "${GITHUB_EVENT_NAME}",
@@ -212,11 +244,6 @@ jobs:
             "tool_versions": {
               "node": "${NODE_VERSION}",
               "${PACKAGE_MANAGER}": "${PACKAGE_MANAGER_VERSION}"
-            },
-            "cache": {
-              "enabled": "${CACHE_ENABLED}",
-              "key": "${CACHE_KEY}",
-              "hit": "${CACHE_HIT}"
             }
           }
           JSON
@@ -234,15 +261,15 @@ jobs:
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-setup-node",
+              "workflow": "wf-node-build",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
-              "job": "setup"
+              "job": "build"
             },
             "artifacts": [
               {
-                "name": "${GITHUB_REPOSITORY#*/}-node-setup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "name": "${GITHUB_REPOSITORY#*/}-node-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
                 "kind": "diagnostics",
                 "paths": ["artifacts"],
                 "retention_days": ${RETENTION_DAYS}
@@ -257,10 +284,9 @@ jobs:
         env:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
-          CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit || 'false' }}
         run: |
           {
-            echo "# Node setup"
+            echo "# Node build"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
@@ -269,18 +295,16 @@ jobs:
             echo "| Node version | \`${{ inputs.node-version }}\` |"
             echo "| Package manager | \`${PACKAGE_MANAGER}\` |"
             echo "| Working directory | \`${WORKING_DIRECTORY}\` |"
-            echo "| Install | \`${{ inputs.run-install }}\` |"
-            echo "| Cache enabled | \`${{ inputs.enable-cache }}\` |"
-            echo "| Cache hit | \`${CACHE_HIT}\` |"
+            echo "| Build script | \`${{ inputs.build-script }}\` |"
             echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload diagnostics @ ${{ github.event.repository.name }}-node-setup-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-node-build-${{ github.run_id }}-${{ github.run_attempt }}
         if: ${{ always() && inputs.upload-diagnostics }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-node-setup-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event.repository.name }}-node-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

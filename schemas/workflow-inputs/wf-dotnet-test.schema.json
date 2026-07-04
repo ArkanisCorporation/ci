@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-setup-dotnet/v2/schema.json",
-  "title": "wf-setup-dotnet inputs",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-dotnet-test/v1/schema.json",
+  "title": "wf-dotnet-test inputs",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -31,6 +31,10 @@
     "solution": {
       "type": "string"
     },
+    "configuration": {
+      "type": "string",
+      "default": "Release"
+    },
     "restore-locked-mode": {
       "type": "boolean",
       "default": true
@@ -38,6 +42,38 @@
     "enable-cache": {
       "type": "boolean",
       "default": true
+    },
+    "test-filter": {
+      "type": "string",
+      "default": ""
+    },
+    "coverage": {
+      "type": "boolean",
+      "default": true
+    },
+    "coverage-report": {
+      "type": "boolean",
+      "default": true
+    },
+    "coverage-pr-comment": {
+      "type": "boolean",
+      "default": true
+    },
+    "coverage-reporttypes": {
+      "type": "string",
+      "default": "HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary"
+    },
+    "coverage-assemblyfilters": {
+      "type": "string",
+      "default": "+*;-*.UnitTests;-*.IntegrationTests"
+    },
+    "coverage-report-custom-settings": {
+      "type": "string",
+      "default": ""
+    },
+    "coverage-report-tool-version": {
+      "type": "string",
+      "default": "5.5.10"
     },
     "artifact-retention-days": {
       "type": "integer",
@@ -47,7 +83,7 @@
     },
     "timeout-minutes": {
       "type": "integer",
-      "default": 20,
+      "default": 30,
       "minimum": 1
     }
   }

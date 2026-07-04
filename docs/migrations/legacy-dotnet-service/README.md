@@ -17,7 +17,7 @@ Deployment consumes an image tag or digest.
 
 ## Checklist
 
-- Replace old checkout/setup-dotnet majors with `wf-setup-dotnet.yml`.
+- Replace old checkout/setup-dotnet majors with `wf-setup-dotnet.yml`, `wf-dotnet-format.yml`, and `wf-dotnet-test.yml`.
 - Replace Docker setup, login, and build-push steps with `wf-publish-container-dotnet.yml`.
 - Pass semantic-release `new-version` to `version`.
 - Pass semantic-release `new-tag` to `version-tag`.

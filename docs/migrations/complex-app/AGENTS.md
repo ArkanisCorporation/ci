@@ -18,7 +18,7 @@ Extract common verification, release metadata, package publishing, image publish
 
 ## Target Shape
 
-- Use `wf-setup-dotnet.yml` and `wf-setup-node.yml` for verification lanes.
+- Use `wf-setup-dotnet.yml`, `wf-dotnet-format.yml`, `wf-dotnet-test.yml`, `wf-setup-node.yml`, `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` for verification lanes.
 - Use `wf-setup-dotnet-jetbrains.yml` when a repository already gates JetBrains CleanupCode or Rider/ReSharper cleanup conventions.
 - Use `wf-release-semantic.yml` only for release metadata.
 - Use `wf-publish-nuget.yml` and `wf-publish-container-dotnet.yml` for .NET publish lanes.

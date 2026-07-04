@@ -33,7 +33,7 @@ Repositories that want exact repeatability should prefer local tool manifests or
 Replace repo-local CleanupCode workflow steps with `wf-setup-dotnet-jetbrains.yml`.
 Pass the solution path through `solution`.
 Use the default profile and exclude filter for CitizenId-compatible behavior.
-Keep `wf-setup-dotnet.yml` for restore, build, test, and coverage verification.
+Keep `wf-setup-dotnet.yml`, `wf-dotnet-format.yml`, and `wf-dotnet-test.yml` for restore, ordinary format, build, test, and coverage verification.
 Run both workflows as separate jobs when both `dotnet format` and JetBrains CleanupCode are required.
 
 ## References

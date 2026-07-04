@@ -6,12 +6,41 @@ on:
 permissions: {}
 
 jobs:
-  dotnet:
+  dotnet-setup:
     # Expected: success.
-    name: dotnet-nuget-library @ local
+    name: dotnet-nuget-library setup @ local
     uses: ./.github/workflows/wf-setup-dotnet.yml
     permissions:
       contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
+      restore-locked-mode: true
+      enable-cache: false
+
+  dotnet-format:
+    # Expected: success.
+    name: dotnet-nuget-library format @ local
+    uses: ./.github/workflows/wf-dotnet-format.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
+      restore-locked-mode: true
+      enable-cache: false
+
+  dotnet-test:
+    # Expected: success.
+    name: dotnet-nuget-library test @ local
+    uses: ./.github/workflows/wf-dotnet-test.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false

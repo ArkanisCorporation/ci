@@ -1,11 +1,11 @@
 # Summary:
-#   Reusable .NET setup workflow for SDK setup, NuGet cache, tool restore, dependency restore, metadata, and diagnostics.
+#   Reusable .NET unit test workflow for restore, build, tests, coverage, metadata, and diagnostics.
 # Remarks:
 #   This workflow runs in the caller repository context.
-#   It checks out caller source, checks out this platform repository for the shared setup action, writes artifacts under `artifacts/`, and uploads diagnostics even on failure.
-#   It does not format, build, test, publish, or deploy.
+#   It can generate ReportGenerator coverage reports and update one pull request comment.
+#   It does not run formatting, publish packages, publish images, releases, or deployments.
 
-name: wf-setup-dotnet
+name: wf-dotnet-test
 
 on:
   workflow_call:
@@ -36,36 +36,81 @@ on:
         required: false
         default: ""
       solution:
-        description: Solution or project path to restore.
+        description: Solution or project path to restore, build, and test.
         type: string
         required: true
+      configuration:
+        description: Build configuration.
+        type: string
+        required: false
+        default: Release
       restore-locked-mode:
         description: Runs dotnet restore with --locked-mode.
         type: boolean
         required: false
         default: true
       enable-cache:
-        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-restore validation or runners without cache service access.
+        description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-test validation or runners without cache service access.
         type: boolean
         required: false
         default: true
+      test-filter:
+        description: Optional dotnet test filter expression.
+        type: string
+        required: false
+        default: ""
+      coverage:
+        description: Collects XPlat Code Coverage during tests.
+        type: boolean
+        required: false
+        default: true
+      coverage-report:
+        description: Generates ReportGenerator coverage output when coverage is true.
+        type: boolean
+        required: false
+        default: true
+      coverage-pr-comment:
+        description: Updates one pull request coverage comment when coverage-report is true.
+        type: boolean
+        required: false
+        default: true
+      coverage-reporttypes:
+        description: Semicolon-delimited ReportGenerator output types.
+        type: string
+        required: false
+        default: HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary
+      coverage-assemblyfilters:
+        description: Semicolon-delimited ReportGenerator assembly filters.
+        type: string
+        required: false
+        default: +*;-*.UnitTests;-*.IntegrationTests
+      coverage-report-custom-settings:
+        description: Optional ReportGenerator customSettings value.
+        type: string
+        required: false
+        default: ""
+      coverage-report-tool-version:
+        description: dotnet-reportgenerator-globaltool package version.
+        type: string
+        required: false
+        default: 5.5.10
       artifact-retention-days:
         description: Diagnostic artifact retention in days.
         type: number
         required: false
         default: 14
       timeout-minutes:
-        description: Setup job timeout.
+        description: Test job timeout.
         type: number
         required: false
-        default: 20
+        default: 30
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
-        value: ${{ jobs.setup.outputs.artifact-manifest }}
+        value: ${{ jobs.test.outputs.artifact-manifest }}
       run-metadata:
         description: Path to the generated run metadata.
-        value: ${{ jobs.setup.outputs.run-metadata }}
+        value: ${{ jobs.test.outputs.run-metadata }}
 
 permissions: {}
 
@@ -73,12 +118,13 @@ env:
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
 jobs:
-  setup:
+  test:
     name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      pull-requests: write
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}
       run-metadata: ${{ steps.metadata.outputs.path }}
@@ -91,7 +137,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout setup action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
+      - name: Setup .NET action tooling @ 10.0.x
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Checkout platform actions @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -101,6 +152,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/setup-dotnet
+            .github/actions/dotnet-coverage-report
           sparse-checkout-cone-mode: false
 
       - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
@@ -166,6 +218,61 @@ jobs:
           SOLUTION: ${{ inputs.solution }}
         run: dotnet restore "$SOLUTION"
 
+      - name: Build ${{ inputs.solution }} @ ${{ inputs.configuration }}
+        env:
+          SOLUTION: ${{ inputs.solution }}
+          CONFIGURATION: ${{ inputs.configuration }}
+        run: |
+          mkdir -p artifacts/msbuild
+          dotnet build "$SOLUTION" \
+            --configuration "$CONFIGURATION" \
+            --no-restore \
+            -p:ContinuousIntegrationBuild=true \
+            -bl:artifacts/msbuild/build.binlog
+
+      - name: Test ${{ inputs.solution }} @ ${{ inputs.configuration }} coverage=${{ inputs.coverage }}
+        env:
+          SOLUTION: ${{ inputs.solution }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          TEST_FILTER: ${{ inputs.test-filter }}
+          COVERAGE: ${{ inputs.coverage }}
+        run: |
+          mkdir -p artifacts/test-results
+          test_args=(
+            dotnet test "$SOLUTION"
+            --configuration "$CONFIGURATION"
+            --no-build
+            --verbosity normal
+            --logger "trx;LogFilePrefix=test-results"
+            --results-directory artifacts/test-results
+          )
+
+          if [[ -n "$TEST_FILTER" ]]; then
+            test_args+=(--filter "$TEST_FILTER")
+          fi
+
+          if [[ "$COVERAGE" == "true" ]]; then
+            test_args+=('--collect:XPlat Code Coverage')
+          fi
+
+          "${test_args[@]}"
+
+      - name: Generate coverage report @ ${{ inputs.coverage-reporttypes }}
+        if: inputs.coverage && inputs.coverage-report
+        uses: ./.ci/arkanis-ci/.github/actions/dotnet-coverage-report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          reports: artifacts/test-results/**/coverage.cobertura.xml
+          targetdir: artifacts/coverage/report
+          reporttypes: ${{ inputs.coverage-reporttypes }}
+          assemblyfilters: ${{ inputs.coverage-assemblyfilters }}
+          custom-settings: ${{ inputs.coverage-report-custom-settings }}
+          tag: ${{ github.run_number }}_${{ github.run_id }}
+          tool-version: ${{ inputs.coverage-report-tool-version }}
+          comment-on-pr: ${{ inputs.coverage-pr-comment }}
+          pr-number: ${{ github.event.number }}
+
       - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
         if: always()
@@ -178,7 +285,7 @@ jobs:
           {
             "schema": "run-metadata/v1",
             "repository": "${GITHUB_REPOSITORY}",
-            "workflow": "wf-setup-dotnet",
+            "workflow": "wf-dotnet-test",
             "sha": "${GITHUB_SHA}",
             "ref": "${GITHUB_REF}",
             "event_name": "${GITHUB_EVENT_NAME}",
@@ -206,15 +313,15 @@ jobs:
             "schema": "ci-artifact-manifest/v1",
             "producer": {
               "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-setup-dotnet",
+              "workflow": "wf-dotnet-test",
               "run_id": "${GITHUB_RUN_ID}",
               "run_attempt": "${GITHUB_RUN_ATTEMPT}",
               "sha": "${GITHUB_SHA}",
-              "job": "setup"
+              "job": "test"
             },
             "artifacts": [
               {
-                "name": "${GITHUB_REPOSITORY#*/}-dotnet-setup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "name": "${GITHUB_REPOSITORY#*/}-dotnet-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
                 "kind": "diagnostics",
                 "paths": ["artifacts"],
                 "retention_days": ${RETENTION_DAYS}
@@ -228,28 +335,32 @@ jobs:
         if: always()
         env:
           SOLUTION: ${{ inputs.solution }}
-          CACHE_HIT: ${{ steps.setup-dotnet.outputs.cache-hit || 'false' }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          COVERAGE: ${{ inputs.coverage }}
+          COVERAGE_REPORT: ${{ inputs.coverage-report }}
+          COVERAGE_PR_COMMENT: ${{ inputs.coverage-pr-comment }}
         run: |
           {
-            echo "# .NET setup"
+            echo "# .NET test"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
             echo "| Solution | \`${SOLUTION}\` |"
-            echo "| Restore locked mode | \`${{ inputs.restore-locked-mode }}\` |"
-            echo "| Cache enabled | \`${{ inputs.enable-cache }}\` |"
-            echo "| Cache hit | \`${CACHE_HIT}\` |"
+            echo "| Configuration | \`${CONFIGURATION}\` |"
+            echo "| Coverage | \`${COVERAGE}\` |"
+            echo "| Coverage report | \`${COVERAGE_REPORT}\` |"
+            echo "| Coverage PR comment | \`${COVERAGE_PR_COMMENT}\` |"
             echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload diagnostics @ ${{ github.event.repository.name }}-dotnet-setup-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-dotnet-test-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-dotnet-setup-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event.repository.name }}-dotnet-test-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

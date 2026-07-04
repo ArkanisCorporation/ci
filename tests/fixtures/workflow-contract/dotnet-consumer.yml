@@ -6,9 +6,31 @@ on:
 permissions: {}
 
 jobs:
-  dotnet:
-    name: Example.slnx @ ${{ github.head_ref || github.ref_name }}
+  dotnet-setup:
+    name: Example.slnx setup @ ${{ github.head_ref || github.ref_name }}
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: Example.slnx
+
+  dotnet-format:
+    name: Example.slnx format @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      dotnet-version: 10.0.x
+      solution: Example.slnx
+
+  dotnet-test:
+    name: Example.slnx test @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
       pull-requests: write

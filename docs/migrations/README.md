@@ -16,7 +16,7 @@ Use them before editing consumer repositories.
 | `modern-dotnet-package` | Template.NET, Aspire.Hosting.Extensions.Kubernetes, aspire-kubernetes-example-host | Normalize near-modern package workflows and remove release exec scripts. |
 | `complex-app` | CitizenId, ArkanisOverlay | Preserve app-specific lanes while moving common setup, release, publish, and deploy work to reusable workflows. |
 | `infra` | Infrastructure | Isolate plan/apply/cleanup trust zones and prepare for future OpenTofu platform workflows. |
-| `node-docs` | CitizenId-docs, CitizenId-medusa-store | Move install/lint/test/build to `wf-setup-node` and keep deploy/release/service orchestration separate. |
+| `node-docs` | CitizenId-docs, CitizenId-medusa-store | Move install/lint/test/build to split Node workflows and keep deploy/release/service orchestration separate. |
 
 ## Common Migration Flow
 

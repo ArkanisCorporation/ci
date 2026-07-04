@@ -15,6 +15,7 @@ Keep each action narrow; prefer more small actions over one flag-heavy action.
 | `dotnet-setversion` | Installs `dotnet-setversion` and applies a bare SemVer value to .NET project files. | Modifies matched `.csproj` files. |
 | `release-backpropagation` | Creates, approves, and optionally auto-merges release backpropagation PRs. | May create PRs, approve them, and enable auto-merge. |
 | `setup-dotnet` | Sets up .NET SDK, NuGet cache, and optional local tools. | Writes `NUGET_PACKAGES` and restores cache/tools. |
+| `setup-node` | Sets up Node.js, package-manager tooling, cache, and optional install. | Writes Corepack state, cache metadata, and optional install logs. |
 
 ## dotnet-coverage-report
 
