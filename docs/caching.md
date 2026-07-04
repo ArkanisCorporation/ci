@@ -51,3 +51,7 @@ Prefer isolated venv; cache package download/build cache, not global interpreter
 - Prefer registry cache for self-host/ARC portability.
 - Use GHA cache for hosted-only, medium-size builds.
 - Cache invalidation includes Dockerfile + lockfiles + build args that affect output.
+- .NET container workflows default to `type=gha` BuildKit cache when `enable-cache` is true and both `cache-from` and `cache-to` are empty.
+- The generated cache scope is based on image, build context, Dockerfile, and platforms so independent container targets do not share one cache namespace.
+- Set `enable-cache` to false for cold image-build validation or runners without GitHub cache service access.
+- Set `cache-from` and `cache-to` when the caller needs registry cache, remote BuildKit portability, or a dedicated cache scope.

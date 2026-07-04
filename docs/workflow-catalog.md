@@ -298,8 +298,9 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `version-recursive` | boolean | no | `true` | n/a |
 | `version-project` | string | no | `""` | n/a |
 | `version-tool-version` | string | no | `"4.0.0"` | n/a |
-| `cache-from` | string | no | `""` | n/a |
-| `cache-to` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | Use a generated GitHub Actions BuildKit cache when cache-from and cache-to are empty. |
+| `cache-from` | string | no | `""` | Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
+| `cache-to` | string | no | `""` | Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
 | `sbom` | string | no | `"true"` | n/a |
 | `provenance` | string | no | `"mode=max"` | n/a |
 | `labels` | string | no | `""` | n/a |
@@ -456,8 +457,9 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `version-recursive` | boolean | no | `true` | n/a |
 | `version-project` | string | no | `""` | n/a |
 | `version-tool-version` | string | no | `"4.0.0"` | n/a |
-| `cache-from` | string | no | `""` | n/a |
-| `cache-to` | string | no | `""` | n/a |
+| `enable-cache` | boolean | no | `true` | Use a generated GitHub Actions BuildKit cache when cache-from and cache-to are empty. |
+| `cache-from` | string | no | `""` | Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
+| `cache-to` | string | no | `""` | Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
 | `labels` | string | no | `""` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
@@ -1402,6 +1404,9 @@ For deployment matrices, keep `environment-name`, namespaces, concurrency policy
 `wf-verify-publish-container-dotnet.yml` stamps .NET project versions, then builds with Docker Buildx without pushing.
 It uses read-only repository permissions.
 It disables SBOM and provenance emission so verification does not need OIDC or attestation permissions.
+By default it uses a generated `type=gha` BuildKit cache when `enable-cache` is true and both `cache-from` and `cache-to` are empty.
+Set `enable-cache` to false for cold image-build validation or runners without GitHub cache service access.
+Set `cache-from` and `cache-to` when the caller needs registry cache, remote BuildKit portability, or a dedicated cache scope.
 
 Flow:
 
@@ -1421,7 +1426,8 @@ flowchart TD
   platform --> setversion[[dotnet-setversion action]]
   setversion --> tags[[Resolve image tags]]
   tags --> args[[Resolve Docker build args]]
-  args --> build[[docker/build-push-action build only]]
+  args --> cache[[Resolve BuildKit cache]]
+  cache --> build[[docker/build-push-action build only]]
   build --> metadata[/Buildx metadata/]
   metadata --> manifest[/artifact-manifest.json/]
   manifest --> summary>Step summary]
@@ -1434,7 +1440,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,build action
+  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,cache,build action
   class preflight,builder decision
   class metadata,manifest,summary,upload artifact
   class outputs output
@@ -1449,6 +1455,7 @@ Preconditions:
 Side effects:
 
 - Builds container layers without pushing them.
+- Reads and writes BuildKit cache when `enable-cache` is true.
 - Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.
 - Modifies matched `.csproj` files before Docker Buildx runs.
 - Passes Docker build args to BuildKit; never put secrets in `build-args`.
@@ -1463,6 +1470,9 @@ It appends a non-secret `VERSION=<version>` Docker build argument unless `build-
 `version-tag` is only for image tags and may use the release tag form, such as `v1.2.3`.
 `version-channel` adds both the raw channel tag and, by default, a `<channel>-latest` tag.
 Use `extra-tags` for additional mutable tags such as `latest`.
+By default it uses a generated `type=gha` BuildKit cache when `enable-cache` is true and both `cache-from` and `cache-to` are empty.
+Set `enable-cache` to false for cold image-build validation or runners without GitHub cache service access.
+Set `cache-from` and `cache-to` when the caller needs registry cache, remote BuildKit portability, or a dedicated cache scope.
 
 Requirements:
 
@@ -1490,7 +1500,8 @@ flowchart TD
   platform --> setversion[[dotnet-setversion action]]
   setversion --> tags
   tags --> args[[Resolve Docker build args]]
-  args --> envGate[["Environment-gated publish job"]]
+  args --> cache[[Resolve BuildKit cache]]
+  cache --> envGate[["Environment-gated publish job"]]
   envGate --> registry[("Container registry")]
   registry --> build[[docker/build-push-action push]]
   build --> metadata[/Buildx metadata/]
@@ -1507,7 +1518,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,envGate,build action
+  class checkout,validate,inputs,sh,remote,local,setversion,tags,args,cache,envGate,build action
   class preflight,builder decision
   class metadata,manifest,summary,upload artifact
   class digest,outputs output
@@ -1527,6 +1538,7 @@ Preconditions:
 Side effects:
 
 - Builds container layers before pushing them.
+- Reads and writes BuildKit cache when `enable-cache` is true.
 - Pushes registry tags.
 - May create mutable channel tags, channel-latest tags, and extra tags when configured.
 - Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.

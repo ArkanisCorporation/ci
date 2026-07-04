@@ -328,6 +328,7 @@ void ValidateContainerPublishContract()
     }
 
     var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-container-dotnet.yml");
+    var verifyWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-verify-publish-container-dotnet.yml");
     var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-publish-container-dotnet.schema.json");
     var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-setversion", "action.yml");
 
@@ -384,6 +385,9 @@ void ValidateContainerPublishContract()
             AddFailure($"{workflowPath}: latest-on-stable tag path must be removed; use channel-latest or extra-tags.");
         }
     }
+
+    ValidateContainerBuildCacheContract(workflowPath);
+    ValidateContainerBuildCacheContract(verifyWorkflowPath);
 
     if (!File.Exists(schemaPath))
     {
@@ -602,6 +606,52 @@ void ValidatePlatformActionSourceContext()
         if (workflowText.Contains("rm -rf .ci/arkanis-ci", StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: platform action checkout must remain available for GitHub Actions post-job cleanup; do not remove .ci/arkanis-ci during the job.");
+        }
+    }
+}
+
+void ValidateContainerBuildCacheContract(string workflowPath)
+{
+    if (!File.Exists(workflowPath))
+    {
+        return;
+    }
+
+    var workflowText = File.ReadAllText(workflowPath);
+    var enableCacheInput = ReadWorkflowInputs(workflowPath).GetValueOrDefault("enable-cache");
+    if (enableCacheInput is null)
+    {
+        AddFailure($"{workflowPath}: container workflow must expose enable-cache for generated BuildKit cache fallback.");
+    }
+    else if (!string.Equals(NormalizeWorkflowDefault(enableCacheInput), "boolean:true", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: container workflow enable-cache must default to true.");
+    }
+
+    foreach (var requiredToken in new[]
+             {
+                 "id: build-cache",
+                 "type=gha,scope=${scope}",
+                 "cache-from: ${{ steps.build-cache.outputs.cache_from }}",
+                 "cache-to: ${{ steps.build-cache.outputs.cache_to }}",
+                 "artifacts/meta/docker-cache.txt"
+             })
+    {
+        if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: container workflow must resolve generated BuildKit cache through {requiredToken}.");
+        }
+    }
+
+    foreach (var staleToken in new[]
+             {
+                 "cache-from: ${{ inputs.cache-from }}",
+                 "cache-to: ${{ inputs.cache-to }}"
+             })
+    {
+        if (workflowText.Contains(staleToken, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: container workflow must pass resolved BuildKit cache outputs instead of {staleToken}.");
         }
     }
 }

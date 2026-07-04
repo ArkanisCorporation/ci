@@ -24,6 +24,7 @@ It publishes GitHub release metadata and updates mutable major version tags such
 
 `wf-publish-container-dotnet.yml` is the reusable .NET container publishing workflow.
 It stamps .NET project versions before Docker Buildx runs.
+It defaults to a generated GitHub Actions BuildKit cache when `enable-cache` is true and no explicit Buildx cache inputs are set.
 It binds publication to `environment-name` and always pushes.
 Use `extra-tags` for additional mutable tags such as `latest`.
 

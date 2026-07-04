@@ -107,13 +107,18 @@ on:
         type: string
         required: false
         default: 4.0.0
+      enable-cache:
+        description: Enables the generated GitHub Actions BuildKit cache when cache-from and cache-to are empty.
+        type: boolean
+        required: false
+        default: true
       cache-from:
-        description: Optional Docker Buildx cache-from value.
+        description: Optional Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set.
         type: string
         required: false
         default: ""
       cache-to:
-        description: Optional Docker Buildx cache-to value.
+        description: Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set.
         type: string
         required: false
         default: ""
@@ -166,6 +171,7 @@ jobs:
           RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
           RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
           BUILDKIT_ENDPOINT: ${{ inputs.buildkit-endpoint }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
         run: |
           mkdir -p artifacts/container artifacts/meta
           {
@@ -174,6 +180,7 @@ jobs:
             echo "Runner OS: ${RUNNER_OS}"
             echo "Runner arch: ${RUNNER_ARCH}"
             echo "Remote BuildKit endpoint configured: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
+            echo "BuildKit cache enabled: ${ENABLE_CACHE}"
             echo ".NET version stamping: true"
           } | tee artifacts/meta/runner-contract.txt
 
@@ -298,6 +305,58 @@ jobs:
             echo "BUILD_ARGS"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve Docker Buildx cache @ ${{ inputs.image }}
+        id: build-cache
+        env:
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+          CACHE_FROM: ${{ inputs.cache-from }}
+          CACHE_TO: ${{ inputs.cache-to }}
+          IMAGE: ${{ inputs.image }}
+          CONTEXT: ${{ inputs.context }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          mkdir -p artifacts/meta
+
+          slug() {
+            local value="$1"
+            value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//')"
+            value="${value:0:64}"
+            printf '%s' "${value:-default}"
+          }
+
+          scope=""
+          cache_from=""
+          cache_to=""
+
+          if [[ "$ENABLE_CACHE" == "true" ]]; then
+            if [[ -n "$CACHE_FROM" || -n "$CACHE_TO" ]]; then
+              cache_from="$CACHE_FROM"
+              cache_to="$CACHE_TO"
+            else
+              scope="container-$(slug "$IMAGE")-$(slug "$CONTEXT")-$(slug "$DOCKERFILE")-$(slug "$PLATFORMS")"
+              cache_from="type=gha,scope=${scope}"
+              cache_to="type=gha,scope=${scope},mode=max"
+            fi
+          fi
+
+          {
+            echo "BuildKit cache enabled: ${ENABLE_CACHE}"
+            echo "Default cache scope: ${scope:-none}"
+            echo "Cache from: $([[ -n "$cache_from" ]] && echo configured || echo none)"
+            echo "Cache to: $([[ -n "$cache_to" ]] && echo configured || echo none)"
+          } | tee artifacts/meta/docker-cache.txt
+
+          {
+            echo "cache_from<<CACHE_FROM"
+            printf '%s\n' "$cache_from"
+            echo "CACHE_FROM"
+            echo "cache_to<<CACHE_TO"
+            printf '%s\n' "$cache_to"
+            echo "CACHE_TO"
+            echo "scope=${scope}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build image (Dry Run) @ ${{ inputs.image }}
         id: build
         uses: docker/build-push-action@v7
@@ -309,8 +368,8 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ inputs.labels }}
           build-args: ${{ steps.build-args.outputs.value }}
-          cache-from: ${{ inputs.cache-from }}
-          cache-to: ${{ inputs.cache-to }}
+          cache-from: ${{ steps.build-cache.outputs.cache_from }}
+          cache-to: ${{ steps.build-cache.outputs.cache_to }}
           sbom: false
           provenance: false
 
@@ -355,6 +414,7 @@ jobs:
           CHANNEL_LATEST: ${{ inputs.channel-latest }}
           EXTRA_TAGS: ${{ inputs.extra-tags }}
           SDK_VERSION: ${{ inputs.sdk-version }}
+          CACHE_SCOPE: ${{ steps.build-cache.outputs.scope }}
         run: |
           {
             echo "# .NET container verification"
@@ -369,6 +429,8 @@ jobs:
             echo "| Version channel | \`${VERSION_CHANNEL:-none}\` |"
             echo "| Channel latest | \`${CHANNEL_LATEST}\` |"
             echo "| Extra tags | \`${EXTRA_TAGS:-none}\` |"
+            echo "| BuildKit cache | \`${{ inputs.enable-cache }}\` |"
+            echo "| BuildKit cache scope | \`${CACHE_SCOPE:-none}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 

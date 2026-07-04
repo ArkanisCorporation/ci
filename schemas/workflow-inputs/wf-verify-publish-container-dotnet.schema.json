@@ -88,13 +88,20 @@
       "type": "string",
       "default": "4.0.0"
     },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true,
+      "description": "Use a generated GitHub Actions BuildKit cache when cache-from and cache-to are empty."
+    },
     "cache-from": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set."
     },
     "cache-to": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set."
     },
     "labels": {
       "type": "string",
