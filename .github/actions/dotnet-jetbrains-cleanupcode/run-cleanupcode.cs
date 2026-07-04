@@ -253,6 +253,12 @@ static async Task<int> ReportDiffAsync(
         {changedFiles.StandardOutput.TrimEnd()}
         ~~~
 
+        Applied changes (first {diffPreviewLines} diff lines):
+
+        ~~~diff
+        {preview.TrimEnd()}
+        ~~~
+
         """);
 
     if (failOnDiff)
