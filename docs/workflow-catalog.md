@@ -46,7 +46,6 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Purpose | Permissions |
 |---|---|---|
-| `verify-release.yml` | Run platform selftests, fixture dogfood jobs, and semantic-release dry-run verification. | `contents: write` for semantic-release verification |
 | `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: write` for semantic-release dry-run tag push checks.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
 ## Common Inputs

@@ -3,12 +3,16 @@
 #:property Nullable=enable
 #:property ManagePackageVersionsCentrally=false
 #:property RestorePackagesWithLockFile=false
+#:property EnableAotAnalyzer=false
 #:package CliWrap@3.9.0
+#:package YamlDotNet@18.1.0
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
+using YamlDotNet.Serialization;
 
 /*
  * Summary:
@@ -28,6 +32,7 @@ const string ActionlintVersion = "1.7.12";
 var failures = new List<string>();
 
 ValidateWorkflowInputSchemas();
+ValidateWorkflowInputsMatchSchemas();
 ValidateWorkflows();
 ValidateRunnerSelectionInputContract();
 ValidateWorkflowCatalogDiagrams();
@@ -217,7 +222,6 @@ void ValidateRunnerSelectionInputContract()
 {
     const string EffectiveRunsOnJsonExpression = "${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}";
     var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
-    var schemaRoot = Path.Combine(repoRoot, "schemas", "workflow-inputs");
     if (!Directory.Exists(workflowRoot))
     {
         return;
@@ -225,24 +229,14 @@ void ValidateRunnerSelectionInputContract()
 
     foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
     {
-        var workflowName = Path.GetFileName(workflowPath);
         var workflowText = File.ReadAllText(workflowPath);
-        var workflowLines = File.ReadAllLines(workflowPath);
-
-        var runsOnBlock = GetYamlBlock(workflowLines, "runs-on");
-        if (runsOnBlock is null
-            || !runsOnBlock.Contains("type: string", StringComparison.Ordinal)
-            || !Regex.IsMatch(runsOnBlock, @"(?m)^\s*default:\s*ubuntu-latest\s*$"))
+        var workflowInputs = ReadWorkflowInputs(workflowPath);
+        foreach (var runnerInput in new[] { "runs-on", "runs-on-json", "runs-on-self-hosted" })
         {
-            AddFailure($"{workflowPath}: public workflows must expose a string runs-on input defaulting to ubuntu-latest.");
-        }
-
-        var runsOnJsonBlock = GetYamlBlock(workflowLines, "runs-on-json");
-        if (runsOnJsonBlock is null
-            || !runsOnJsonBlock.Contains("type: string", StringComparison.Ordinal)
-            || !Regex.IsMatch(runsOnJsonBlock, "(?m)^\\s*default:\\s*\"\"\\s*$"))
-        {
-            AddFailure($"{workflowPath}: runs-on-json must be an optional JSON-array override with an empty default.");
+            if (!workflowInputs.ContainsKey(runnerInput))
+            {
+                AddFailure($"{workflowPath}: public workflows must expose {runnerInput} input.");
+            }
         }
 
         if (!workflowText.Contains($"runs-on: {EffectiveRunsOnJsonExpression}", StringComparison.Ordinal))
@@ -253,23 +247,6 @@ void ValidateRunnerSelectionInputContract()
         if (!workflowText.Contains("inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))", StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: workflow diagnostics must record the effective runner JSON selection.");
-        }
-
-        var schemaPath = Path.Combine(schemaRoot, Path.ChangeExtension(workflowName, ".schema.json"));
-        if (!File.Exists(schemaPath))
-        {
-            continue;
-        }
-
-        var schemaText = File.ReadAllText(schemaPath);
-        if (!Regex.IsMatch(schemaText, "\"runs-on\"\\s*:\\s*\\{[^}]*\"type\"\\s*:\\s*\"string\"[^}]*\"default\"\\s*:\\s*\"ubuntu-latest\"", RegexOptions.Singleline))
-        {
-            AddFailure($"{schemaPath}: schema must document the runs-on single-label input default.");
-        }
-
-        if (!Regex.IsMatch(schemaText, "\"runs-on-json\"\\s*:\\s*\\{[^}]*\"type\"\\s*:\\s*\"string\"[^}]*\"default\"\\s*:\\s*\"\"", RegexOptions.Singleline))
-        {
-            AddFailure($"{schemaPath}: schema must document runs-on-json as an empty-default JSON-array override.");
         }
     }
 }
@@ -360,48 +337,10 @@ void ValidateContainerPublishContract()
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
-        var workflowLines = File.ReadAllLines(workflowPath);
 
         if (!Regex.IsMatch(workflowText, @"(?m)^name:\s*wf-publish-container-dotnet\s*$"))
         {
             AddFailure($"{workflowPath}: workflow name must be wf-publish-container-dotnet.");
-        }
-
-        foreach (var requiredInput in new[]
-                 {
-                     "runs-on-json",
-                     "runs-on-self-hosted",
-                     "image",
-                     "context",
-                     "dockerfile",
-                     "platforms",
-                     "version",
-                     "version-tag",
-                     "version-channel",
-                     "channel-latest",
-                     "extra-tags",
-                     "environment-name",
-                     "registry",
-                     "registry-username",
-                     "buildkit-endpoint",
-                     "build-args",
-                     "sdk-version",
-                     "global-json-file",
-                     "version-working-directory",
-                     "version-recursive",
-                     "version-project",
-                     "version-tool-version",
-                     "cache-from",
-                     "cache-to",
-                     "sbom",
-                     "provenance",
-                     "labels"
-                 })
-        {
-            if (GetYamlBlock(workflowLines, requiredInput) is null)
-            {
-                AddFailure($"{workflowPath}: .NET container publish workflow must expose {requiredInput} input.");
-            }
         }
 
         foreach (var forbiddenInput in new[]
@@ -418,7 +357,7 @@ void ValidateContainerPublishContract()
                      "dotnet-setversion-tool-version"
                  })
         {
-            if (GetYamlBlock(workflowLines, forbiddenInput) is not null)
+            if (WorkflowDefinesInput(workflowPath, forbiddenInput))
             {
                 AddFailure($"{workflowPath}: .NET container publish workflow must not expose stale input {forbiddenInput}.");
             }
@@ -456,10 +395,9 @@ void ValidateContainerPublishContract()
     }
     else
     {
-        var actionLines = File.ReadAllLines(actionPath);
         foreach (var requiredInput in new[] { "version", "working-directory", "recursive", "tool-version" })
         {
-            if (GetYamlBlock(actionLines, requiredInput) is null)
+            if (!ActionDefinesInput(actionPath, requiredInput))
             {
                 AddFailure($"{actionPath}: dotnet-setversion action must expose {requiredInput} input.");
             }
@@ -481,15 +419,6 @@ void ValidateDotNetJetBrainsContract()
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
-        var workflowLines = File.ReadAllLines(workflowPath);
-        foreach (var requiredInput in new[] { "runs-on-json", "runs-on-self-hosted", "solution", "profile", "exclude", "fail-on-diff", "enable-cache" })
-        {
-            if (GetYamlBlock(workflowLines, requiredInput) is null)
-            {
-                AddFailure($"{workflowPath}: .NET JetBrains workflow must expose {requiredInput} input.");
-            }
-        }
-
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-jetbrains-cleanupcode", StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: .NET JetBrains workflow must use dotnet-jetbrains-cleanupcode action.");
@@ -513,10 +442,9 @@ void ValidateDotNetJetBrainsContract()
     else
     {
         var actionText = File.ReadAllText(actionPath);
-        var actionLines = File.ReadAllLines(actionPath);
         foreach (var requiredInput in new[] { "solution", "profile", "exclude", "fail-on-diff", "restore-tools" })
         {
-            if (GetYamlBlock(actionLines, requiredInput) is null)
+            if (!ActionDefinesInput(actionPath, requiredInput))
             {
                 AddFailure($"{actionPath}: dotnet-jetbrains-cleanupcode action must expose {requiredInput} input.");
             }
@@ -673,6 +601,68 @@ void ValidatePlatformActionSourceContext()
     }
 }
 
+void ValidateWorkflowInputsMatchSchemas()
+{
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    var schemaRoot = Path.Combine(repoRoot, "schemas", "workflow-inputs");
+    if (!Directory.Exists(workflowRoot) || !Directory.Exists(schemaRoot))
+    {
+        return;
+    }
+
+    foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
+    {
+        var workflowName = Path.GetFileName(workflowPath);
+        var schemaPath = Path.Combine(schemaRoot, Path.ChangeExtension(workflowName, ".schema.json"));
+        if (!File.Exists(schemaPath))
+        {
+            continue;
+        }
+
+        var workflowInputs = ReadWorkflowInputs(workflowPath);
+        var schemaInputs = ReadWorkflowInputSchema(schemaPath).Inputs;
+
+        foreach (var inputName in workflowInputs.Keys.Except(schemaInputs.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            AddFailure($"{workflowPath}: workflow input {inputName} is missing from {schemaPath}.");
+        }
+
+        foreach (var inputName in schemaInputs.Keys.Except(workflowInputs.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            AddFailure($"{schemaPath}: schema input {inputName} is missing from {workflowPath}.");
+        }
+
+        foreach (var inputName in workflowInputs.Keys.Intersect(schemaInputs.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            var workflowInput = workflowInputs[inputName];
+            var schemaInput = schemaInputs[inputName];
+            var workflowType = NormalizeWorkflowInputType(workflowInput.Type);
+
+            if (!InputTypesMatch(workflowType, schemaInput.Type))
+            {
+                AddFailure($"{workflowPath}: input {inputName} type '{workflowInput.Type ?? "unspecified"}' must match schema type '{schemaInput.Type}'.");
+            }
+
+            if (workflowInput.Required != schemaInput.Required)
+            {
+                AddFailure($"{workflowPath}: input {inputName} required={workflowInput.Required.ToString().ToLowerInvariant()} must match schema required={schemaInput.Required.ToString().ToLowerInvariant()}.");
+            }
+
+            if (workflowInput.HasDefault != schemaInput.HasDefault)
+            {
+                AddFailure($"{workflowPath}: input {inputName} default presence must match {schemaPath}.");
+                continue;
+            }
+
+            if (workflowInput.HasDefault
+                && !string.Equals(NormalizeWorkflowDefault(workflowInput), schemaInput.DefaultValue, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: input {inputName} default '{FormatDisplayDefault(workflowInput.Default)}' must match schema default '{schemaInput.DisplayDefault}'.");
+            }
+        }
+    }
+}
+
 void ValidateNuGetPublishContract()
 {
     var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-nuget.yml");
@@ -685,14 +675,6 @@ void ValidateNuGetPublishContract()
     }
 
     var workflowText = File.ReadAllText(workflowPath);
-    var workflowLines = File.ReadAllLines(workflowPath);
-    foreach (var requiredInput in new[] { "dotnet-setversion", "dotnet-setversion-tool-version", "include-source", "include-symbols" })
-    {
-        if (GetYamlBlock(workflowLines, requiredInput) is null)
-        {
-            AddFailure($"{workflowPath}: NuGet publish workflow must expose {requiredInput} input.");
-        }
-    }
 
     if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
     {
@@ -704,7 +686,7 @@ void ValidateNuGetPublishContract()
         AddFailure($"{workflowPath}: NuGet publish workflow must support dotnet pack --include-source.");
     }
 
-    if (GetYamlBlock(workflowLines, "dry-run") is not null)
+    if (WorkflowDefinesInput(workflowPath, "dry-run"))
     {
         AddFailure($"{workflowPath}: NuGet publish workflow must not expose dry-run; use wf-verify-publish-nuget.yml for package verification.");
     }
@@ -787,29 +769,6 @@ void ValidateSplitVerificationWorkflowsContract()
         }
     }
 
-    var productionChecks = new (string WorkflowName, string RequiredInput)[]
-    {
-        ("wf-release-semantic.yml", "environment-name"),
-        ("wf-publish-container-dotnet.yml", "environment-name"),
-        ("wf-deploy-k8s-aspire.yml", "global-json-file"),
-    };
-
-    foreach (var (workflowName, requiredInput) in productionChecks)
-    {
-        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
-        if (!File.Exists(workflowPath))
-        {
-            AddFailure($"{workflowPath}: production workflow is required.");
-            continue;
-        }
-
-        var workflowLines = File.ReadAllLines(workflowPath);
-        if (GetYamlBlock(workflowLines, requiredInput) is null)
-        {
-            AddFailure($"{workflowPath}: production workflow must expose {requiredInput} input.");
-        }
-    }
-
     var noDryRunWorkflows = new[]
     {
         "wf-release-semantic.yml",
@@ -825,7 +784,7 @@ void ValidateSplitVerificationWorkflowsContract()
             continue;
         }
 
-        if (GetYamlBlock(File.ReadAllLines(workflowPath), "dry-run") is not null)
+        if (WorkflowDefinesInput(workflowPath, "dry-run"))
         {
             AddFailure($"{workflowPath}: production workflow must not expose dry-run; use the matching wf-verify-* workflow.");
         }
@@ -842,15 +801,6 @@ void ValidateCoverageReportContract()
     if (File.Exists(workflowPath))
     {
         var workflowText = File.ReadAllText(workflowPath);
-        var workflowLines = File.ReadAllLines(workflowPath);
-        foreach (var requiredInput in new[] { "coverage-report", "coverage-pr-comment", "coverage-report-custom-settings" })
-        {
-            if (GetYamlBlock(workflowLines, requiredInput) is null)
-            {
-                AddFailure($"{workflowPath}: .NET setup workflow must expose {requiredInput} input.");
-            }
-        }
-
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-coverage-report", StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: .NET setup workflow must use dotnet-coverage-report action when enabled.");
@@ -911,15 +861,6 @@ void ValidateGeneratedCodeContract()
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
-        var workflowLines = File.ReadAllLines(workflowPath);
-        foreach (var requiredInput in new[] { "commands", "generated-paths", "run-commands-in-parallel", "enable-cache" })
-        {
-            if (GetYamlBlock(workflowLines, requiredInput) is null)
-            {
-                AddFailure($"{workflowPath}: .NET generated code workflow must expose {requiredInput} input.");
-            }
-        }
-
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-generated-code-diff", StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: .NET generated code workflow must use dotnet-generated-code-diff action.");
@@ -1062,7 +1003,6 @@ void ValidateJobDisplayNameContract()
     }
 
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
-    var verifyReleaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "verify-release.yml");
     if (!File.Exists(releaseWorkflowPath))
     {
         AddFailure($"{releaseWorkflowPath}: release workflow is required for caller display name contract.");
@@ -1084,30 +1024,6 @@ void ValidateJobDisplayNameContract()
             if (!releaseText.Contains(expectedNameLine, StringComparison.Ordinal))
             {
                 AddFailure($"{releaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
-            }
-        }
-    }
-
-    if (!File.Exists(verifyReleaseWorkflowPath))
-    {
-        AddFailure($"{verifyReleaseWorkflowPath}: verify release workflow is required for caller display name contract.");
-    }
-    else
-    {
-        var verifyReleaseText = File.ReadAllText(verifyReleaseWorkflowPath);
-        foreach (var expectedNameLine in new[]
-                 {
-                     "    name: platform @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: typescript-pnpm @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: dotnet-nuget-library @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: repo @ verify",
-                 })
-        {
-            if (!verifyReleaseText.Contains(expectedNameLine, StringComparison.Ordinal))
-            {
-                AddFailure($"{verifyReleaseWorkflowPath}: caller display name must be '{expectedNameLine.Trim()}'.");
             }
         }
     }
@@ -1214,15 +1130,6 @@ void ValidateReleaseBackpropagationContract()
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
-        var workflowLines = File.ReadAllLines(workflowPath);
-        foreach (var requiredInput in new[] { "new-version", "release-ref-name", "default-branch", "auto-merge" })
-        {
-            if (GetYamlBlock(workflowLines, requiredInput) is null)
-            {
-                AddFailure($"{workflowPath}: release backpropagation workflow must expose {requiredInput} input.");
-            }
-        }
-
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/release-backpropagation", StringComparison.Ordinal)
             || !workflowText.Contains("PR_AUTOMATION_PAT", StringComparison.Ordinal))
         {
@@ -1271,55 +1178,19 @@ void ValidateAspireAppHostInputContract()
 
     foreach (var workflowName in aspireWorkflows)
     {
-        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
-        if (File.Exists(workflowPath))
-        {
-            var workflowBlock = GetYamlBlock(File.ReadAllLines(workflowPath), "apphost-project");
-            if (workflowBlock is null)
-            {
-                AddFailure($"{workflowPath}: Aspire deployment workflows must expose apphost-project input.");
-            }
-            else
-            {
-                if (!Regex.IsMatch(workflowBlock, @"(?m)^\s*required:\s*true\s*$"))
-                {
-                    AddFailure($"{workflowPath}: apphost-project must be required because there is no usable generic AppHost project default.");
-                }
-
-                if (Regex.IsMatch(workflowBlock, @"(?m)^\s*default:\s*"))
-                {
-                    AddFailure($"{workflowPath}: apphost-project must not define a repository-specific default.");
-                }
-            }
-        }
-
         var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", Path.ChangeExtension(workflowName, ".schema.json"));
         if (!File.Exists(schemaPath))
         {
             continue;
         }
 
-        using var schema = JsonDocument.Parse(File.ReadAllText(schemaPath), new JsonDocumentOptions
-        {
-            AllowTrailingCommas = false,
-            CommentHandling = JsonCommentHandling.Disallow
-        });
-
-        var root = schema.RootElement;
-        var hasRequiredAppHost = root.TryGetProperty("required", out var requiredElement)
-            && requiredElement.ValueKind == JsonValueKind.Array
-            && requiredElement.EnumerateArray().Any(item =>
-                item.ValueKind == JsonValueKind.String
-                && string.Equals(item.GetString(), "apphost-project", StringComparison.Ordinal));
-
-        if (!hasRequiredAppHost)
+        var schema = ReadWorkflowInputSchema(schemaPath);
+        if (!schema.Inputs.TryGetValue("apphost-project", out var appHostProject) || !appHostProject.Required)
         {
             AddFailure($"{schemaPath}: apphost-project must be listed as a required workflow input.");
         }
 
-        if (root.TryGetProperty("properties", out var properties)
-            && properties.TryGetProperty("apphost-project", out var appHostProject)
-            && appHostProject.TryGetProperty("default", out _))
+        if (appHostProject?.HasDefault == true)
         {
             AddFailure($"{schemaPath}: apphost-project must not define a repository-specific default.");
         }
@@ -1332,7 +1203,6 @@ void ValidateRepositoryPipelineContract()
     const string pinnedMajorTagPlugin = "semantic-release-major-tag@0.3.2";
     var buildWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "build.yml");
     var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
-    var verifyReleaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "verify-release.yml");
     var releaseConfigPath = Path.Combine(repoRoot, "release.config.cjs");
     var releasePrerequisiteNeedsBlock =
         "needs:\n"
@@ -1352,7 +1222,7 @@ void ValidateRepositoryPipelineContract()
 
     if (File.Exists(buildWorkflowPath))
     {
-        AddFailure($"{buildWorkflowPath}: verify-release.yml and release.yml own platform selftests; remove build.yml.");
+        AddFailure($"{buildWorkflowPath}: release.yml owns platform selftests; remove build.yml.");
     }
 
     if (!File.Exists(releaseWorkflowPath))
@@ -1374,7 +1244,7 @@ void ValidateRepositoryPipelineContract()
             AddFailure($"{releaseWorkflowPath}: release workflow must run on pull_request and manual dispatch.");
         }
 
-        if (GetYamlBlock(File.ReadAllLines(releaseWorkflowPath), "dry-run") is not null)
+        if (WorkflowDefinesInput(releaseWorkflowPath, "dry-run"))
         {
             AddFailure($"{releaseWorkflowPath}: release workflow must keep PR behavior event-gated instead of adding a dry-run input.");
         }
@@ -1423,50 +1293,6 @@ void ValidateRepositoryPipelineContract()
         }
     }
 
-    if (!File.Exists(verifyReleaseWorkflowPath))
-    {
-        AddFailure($"{verifyReleaseWorkflowPath}: repository release verification workflow is required.");
-    }
-    else
-    {
-        var verifyReleaseText = NormalizeLineEndings(File.ReadAllText(verifyReleaseWorkflowPath));
-        if (!Regex.IsMatch(verifyReleaseText, @"(?m)^\s*pull_request:\s*$")
-            || !Regex.IsMatch(verifyReleaseText, @"(?m)^\s*workflow_dispatch:\s*$"))
-        {
-            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must run on pull_request and manual dispatch.");
-        }
-
-        if (Regex.IsMatch(verifyReleaseText, @"(?m)^\s*environment:\s*")
-            || !verifyReleaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml", StringComparison.Ordinal)
-            || verifyReleaseText.Contains("uses: ./.github/workflows/wf-release-semantic.yml", StringComparison.Ordinal))
-        {
-            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must use the verification reusable workflow without environments or production release jobs.");
-        }
-
-        if (!verifyReleaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml\n    permissions:\n      contents: write", StringComparison.Ordinal))
-        {
-            AddFailure($"{verifyReleaseWorkflowPath}: semantic-release verification caller must grant contents: write for dry-run tag push verification.");
-        }
-
-        foreach (var (name, requiredUse) in repositoryPrerequisiteWorkflowUses)
-        {
-            if (!verifyReleaseText.Contains(requiredUse, StringComparison.Ordinal))
-            {
-                AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must call the {name} reusable workflow before semantic-release verification.");
-            }
-        }
-
-        if (!verifyReleaseText.Contains(releasePrerequisiteNeedsBlock, StringComparison.Ordinal))
-        {
-            AddFailure($"{verifyReleaseWorkflowPath}: semantic-release verification job must depend on all fixture dogfood jobs.");
-        }
-
-        if (!verifyReleaseText.Contains(pinnedMajorTagPlugin, StringComparison.Ordinal))
-        {
-            AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must install {pinnedMajorTagPlugin} so dry-runs load the production semantic-release config.");
-        }
-    }
-
     if (!File.Exists(releaseConfigPath))
     {
         AddFailure($"{releaseConfigPath}: semantic-release config is required.");
@@ -1503,8 +1329,11 @@ void ValidateCacheOptOutContract(string file, string text, string[] lines, bool 
         return;
     }
 
-    var enableCacheBlock = GetYamlBlock(lines, "enable-cache");
-    if (enableCacheBlock is null)
+    var enableCacheInput = isWorkflow
+        ? ReadWorkflowInputs(file).GetValueOrDefault("enable-cache")
+        : ReadActionInputs(file).GetValueOrDefault("enable-cache");
+
+    if (enableCacheInput is null)
     {
         AddFailure($"{file}: runs-on/cache consumers must expose an enable-cache input.");
         return;
@@ -1512,17 +1341,17 @@ void ValidateCacheOptOutContract(string file, string text, string[] lines, bool 
 
     if (isWorkflow)
     {
-        if (!Regex.IsMatch(enableCacheBlock, @"(?m)^\s*type:\s*boolean\s*$"))
+        if (!string.Equals(NormalizeWorkflowInputType(enableCacheInput.Type), "boolean", StringComparison.Ordinal))
         {
             AddFailure($"{file}: workflow enable-cache input must be boolean.");
         }
 
-        if (!Regex.IsMatch(enableCacheBlock, @"(?m)^\s*default:\s*true\s*$"))
+        if (!string.Equals(NormalizeWorkflowDefault(enableCacheInput), "boolean:true", StringComparison.Ordinal))
         {
             AddFailure($"{file}: enable-cache should default to true for existing caller compatibility.");
         }
     }
-    else if (!Regex.IsMatch(enableCacheBlock, @"(?m)^\s*default:\s*[""']true[""']\s*$"))
+    else if (!string.Equals(NormalizeWorkflowDefault(enableCacheInput), "string:true", StringComparison.Ordinal))
     {
         AddFailure($"{file}: composite enable-cache input should default to \"true\".");
     }
@@ -1559,41 +1388,160 @@ void ValidateCacheOptOutContract(string file, string text, string[] lines, bool 
     }
 }
 
-static string? GetYamlBlock(string[] lines, string key)
+Dictionary<string, WorkflowInput> ReadWorkflowInputs(string workflowPath) =>
+    ReadWorkflowFile(workflowPath).On?.WorkflowCall?.Inputs ?? new Dictionary<string, WorkflowInput>(StringComparer.Ordinal);
+
+Dictionary<string, WorkflowInput> ReadActionInputs(string actionPath) =>
+    ReadActionFile(actionPath).Inputs ?? new Dictionary<string, WorkflowInput>(StringComparer.Ordinal);
+
+WorkflowFile ReadWorkflowFile(string workflowPath) =>
+    ReadYaml<WorkflowFile>(workflowPath);
+
+ActionFile ReadActionFile(string actionPath) =>
+    ReadYaml<ActionFile>(actionPath);
+
+T ReadYaml<T>(string path)
 {
-    for (var index = 0; index < lines.Length; index++)
+    var deserializer = new DeserializerBuilder()
+        .IgnoreUnmatchedProperties()
+        .Build();
+
+    return deserializer.Deserialize<T>(File.ReadAllText(path));
+}
+
+WorkflowInputSchema ReadWorkflowInputSchema(string schemaPath)
+{
+    using var schema = JsonDocument.Parse(File.ReadAllText(schemaPath), new JsonDocumentOptions
     {
-        var match = Regex.Match(lines[index], $@"^(?<indent>\s*){Regex.Escape(key)}:\s*(?:#.*)?$");
-        if (!match.Success)
+        AllowTrailingCommas = false,
+        CommentHandling = JsonCommentHandling.Disallow
+    });
+
+    var root = schema.RootElement;
+    var required = new HashSet<string>(StringComparer.Ordinal);
+    if (root.TryGetProperty("required", out var requiredElement) && requiredElement.ValueKind == JsonValueKind.Array)
+    {
+        foreach (var item in requiredElement.EnumerateArray())
         {
-            continue;
-        }
-
-        var indent = match.Groups["indent"].Value.Length;
-        var block = new List<string> { lines[index] };
-        for (var lookAhead = index + 1; lookAhead < lines.Length; lookAhead++)
-        {
-            var line = lines[lookAhead];
-            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#'))
+            if (item.ValueKind == JsonValueKind.String && item.GetString() is { } inputName)
             {
-                block.Add(line);
-                continue;
+                required.Add(inputName);
             }
-
-            var currentIndent = line.TakeWhile(char.IsWhiteSpace).Count();
-            if (currentIndent <= indent)
-            {
-                break;
-            }
-
-            block.Add(line);
         }
-
-        return string.Join('\n', block);
     }
 
-    return null;
+    var inputs = new Dictionary<string, SchemaInput>(StringComparer.Ordinal);
+    if (!root.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object)
+    {
+        return new WorkflowInputSchema(inputs);
+    }
+
+    foreach (var property in properties.EnumerateObject())
+    {
+        var definition = property.Value;
+        var hasDefault = definition.TryGetProperty("default", out var defaultElement);
+        inputs[property.Name] = new SchemaInput(
+            Type: ReadSchemaType(definition),
+            Required: required.Contains(property.Name),
+            HasDefault: hasDefault,
+            DefaultValue: hasDefault ? NormalizeSchemaDefault(defaultElement) : string.Empty,
+            DisplayDefault: hasDefault ? FormatSchemaDisplayDefault(defaultElement) : "none");
+    }
+
+    return new WorkflowInputSchema(inputs);
 }
+
+static string ReadSchemaType(JsonElement definition)
+{
+    if (!definition.TryGetProperty("type", out var typeElement))
+    {
+        return "unspecified";
+    }
+
+    if (typeElement.ValueKind == JsonValueKind.String)
+    {
+        return NormalizeSchemaType(typeElement.GetString());
+    }
+
+    if (typeElement.ValueKind == JsonValueKind.Array)
+    {
+        return string.Join("/", typeElement.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => NormalizeSchemaType(item.GetString())));
+    }
+
+    return "unspecified";
+}
+
+bool WorkflowDefinesInput(string workflowPath, string inputName) =>
+    ReadWorkflowInputs(workflowPath).ContainsKey(inputName);
+
+bool ActionDefinesInput(string actionPath, string inputName) =>
+    ReadActionInputs(actionPath).ContainsKey(inputName);
+
+static bool InputTypesMatch(string workflowType, string schemaType) =>
+    string.Equals(workflowType, schemaType, StringComparison.Ordinal)
+    || (string.Equals(workflowType, "number", StringComparison.Ordinal)
+        && string.Equals(schemaType, "integer", StringComparison.Ordinal));
+
+static string NormalizeWorkflowInputType(string? type) =>
+    string.IsNullOrWhiteSpace(type) ? "unspecified" : type.Trim();
+
+static string NormalizeSchemaType(string? type) =>
+    string.IsNullOrWhiteSpace(type) ? "unspecified" : type.Trim();
+
+static string NormalizeWorkflowDefault(WorkflowInput input)
+{
+    var value = input.Default;
+    if (value is null)
+    {
+        return "missing:";
+    }
+
+    var text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+    return NormalizeWorkflowInputType(input.Type) switch
+    {
+        "boolean" when bool.TryParse(text, out var boolValue) => $"boolean:{boolValue.ToString().ToLowerInvariant()}",
+        "number" => $"number:{text}",
+        "string" => $"string:{text}",
+        _ => value switch
+        {
+            bool boolValue => $"boolean:{boolValue.ToString().ToLowerInvariant()}",
+            sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal => $"number:{text}",
+            string => $"string:{text}",
+            _ => $"object:{text}"
+        }
+    };
+}
+
+static string NormalizeSchemaDefault(JsonElement value) =>
+    value.ValueKind switch
+    {
+        JsonValueKind.String => $"string:{value.GetString()}",
+        JsonValueKind.True => "boolean:true",
+        JsonValueKind.False => "boolean:false",
+        JsonValueKind.Number => $"number:{value.GetRawText()}",
+        JsonValueKind.Null => "null:",
+        _ => $"object:{value.GetRawText()}"
+    };
+
+static string FormatDisplayDefault(object? value) =>
+    value switch
+    {
+        null => "none",
+        string stringValue => stringValue,
+        bool boolValue => boolValue.ToString().ToLowerInvariant(),
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+    };
+
+static string FormatSchemaDisplayDefault(JsonElement value) =>
+    value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString() ?? string.Empty,
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => value.GetRawText()
+    };
 
 static string NormalizeLineEndings(string text) =>
     text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal);
@@ -1758,3 +1706,50 @@ static string? FindExecutableOnPath(string executableName)
 
     return null;
 }
+
+sealed class WorkflowFile
+{
+    [YamlMember(Alias = "on", ApplyNamingConventions = false)]
+    public WorkflowTriggers? On { get; set; }
+}
+
+sealed class WorkflowTriggers
+{
+    [YamlMember(Alias = "workflow_call", ApplyNamingConventions = false)]
+    public WorkflowCall? WorkflowCall { get; set; }
+}
+
+sealed class WorkflowCall
+{
+    [YamlMember(Alias = "inputs", ApplyNamingConventions = false)]
+    public Dictionary<string, WorkflowInput> Inputs { get; set; } = new(StringComparer.Ordinal);
+}
+
+sealed class ActionFile
+{
+    [YamlMember(Alias = "inputs", ApplyNamingConventions = false)]
+    public Dictionary<string, WorkflowInput> Inputs { get; set; } = new(StringComparer.Ordinal);
+}
+
+sealed class WorkflowInput
+{
+    [YamlMember(Alias = "type", ApplyNamingConventions = false)]
+    public string? Type { get; set; }
+
+    [YamlMember(Alias = "required", ApplyNamingConventions = false)]
+    public bool Required { get; set; }
+
+    [YamlMember(Alias = "default", ApplyNamingConventions = false)]
+    public object? Default { get; set; }
+
+    public bool HasDefault => Default is not null;
+}
+
+sealed record WorkflowInputSchema(Dictionary<string, SchemaInput> Inputs);
+
+sealed record SchemaInput(
+    string Type,
+    bool Required,
+    bool HasDefault,
+    string DefaultValue,
+    string DisplayDefault);

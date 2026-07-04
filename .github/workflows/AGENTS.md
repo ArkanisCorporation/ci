@@ -67,7 +67,6 @@ Recommended order:
 
 ## Repository Workflows
 
-- `verify-release.yml` runs platform selftest and fixture dogfood jobs before semantic-release verification on pull requests and manual dispatch, with production semantic-release plugins installed for config parity.
 - `release.yml` runs platform selftest and fixture dogfood jobs before semantic-release verification on pull requests and before environment-gated semantic-release publication on main pushes and manual dispatch.
 
 ## Security Rules

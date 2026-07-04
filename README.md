@@ -119,13 +119,12 @@ Use `extra-tags` for additional mutable tags such as `latest`.
 ## Repository Pipeline
 
 This repository dogfoods its platform workflows.
-[verify-release.yml](.github/workflows/verify-release.yml) runs `wf-platform-selftest.yml`, the TypeScript pnpm fixture, the .NET NuGet fixture, and the .NET container fixture before semantic-release dry-run verification on pull requests and manual dispatches.
 [release.yml](.github/workflows/release.yml) runs the same fixture dogfood series on pull requests, main pushes, and manual dispatches.
 Pull requests call `wf-verify-release-semantic.yml` after the fixture jobs pass.
 Main pushes and manual dispatches call `wf-release-semantic.yml` after the fixture jobs pass.
 [release.config.cjs](release.config.cjs) publishes GitHub release metadata and updates mutable major version tags such as `v1`.
 It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
-The repository release and release-verification workflows both install `semantic-release-major-tag@0.3.2` so dry-runs load the same semantic-release configuration as production.
+The repository release workflow installs `semantic-release-major-tag@0.3.2` so dry-runs load the same semantic-release configuration as production.
 
 ## Local Validation
 

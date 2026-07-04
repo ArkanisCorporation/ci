@@ -8,13 +8,10 @@ Start each workflow from `AGENTS.md` contract, then add schema in `schemas/workf
 
 ## Repository workflows
 
-`verify-release.yml` is this repository's pull request and manual release verification pipeline.
-It runs `wf-platform-selftest.yml`, the TypeScript pnpm fixture, the .NET NuGet fixture, and the .NET container fixture before semantic-release dry-run verification.
 `release.yml` is this repository's default release pipeline for pull requests, main pushes, and manual dispatches.
-On pull requests, it runs the same fixture dogfood series before calling `wf-verify-release-semantic.yml`.
+On pull requests, it runs `wf-platform-selftest.yml`, the TypeScript pnpm fixture, the .NET NuGet fixture, and the .NET container fixture before calling `wf-verify-release-semantic.yml`.
 On main pushes and manual dispatches, it runs the same fixture dogfood series before calling `wf-release-semantic.yml` for trusted publication paths.
 It publishes GitHub release metadata and updates mutable major version tags such as `v1`.
-`verify-release.yml` installs the same semantic-release major-tag plugin as production so dry-runs load the same configuration.
 
 ## Verification Workflows
 

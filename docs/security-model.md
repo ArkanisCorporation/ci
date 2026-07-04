@@ -35,10 +35,10 @@ Artifacts moving into a higher-trust zone require a manifest and digest or prove
 
 ## Semantic Release
 
-The release verification workflow runs semantic-release in dry-run mode with `contents: read`.
+Pull requests in `release.yml` run semantic-release in dry-run mode with `contents: write` so semantic-release can verify tag push authorization.
 `wf-release-semantic.yml` publishes release metadata from an environment-gated job.
 This platform repository also updates mutable major version tags such as `v1` through `semantic-release-major-tag` in the production release workflow.
-Its release-verification workflow installs the same plugin so dry-runs validate the production semantic-release configuration without write permissions.
+The repository release workflow installs the same plugin for dry-runs so verification loads the production semantic-release configuration.
 It does not run verification or publishing scripts.
 It rejects `@semantic-release/exec` by default.
 Use standalone jobs for pre-release verification, package publishing, image publishing, and deployment.

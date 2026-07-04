@@ -4,7 +4,7 @@
 
 This repository provides reusable GitHub Actions workflows as its public API.
 Current tests validate workflow contracts, schemas, docs, policies, and caller workflow fixtures.
-The repository already has a small `tests/fixtures/node-pnpm` package, but it does not yet provide realistic multi-language fixture projects for end-to-end workflow smoke testing.
+The repository uses realistic multi-language fixture projects for end-to-end workflow smoke testing.
 GitHub Actions documentation confirms that reusable workflows can be called from another repository with `owner/repo/.github/workflows/file.yml@ref` and from the same repository with `./.github/workflows/file.yml`.
 This design uses same-repository calls for local smoke fixtures so workflow changes in this repository can be tested before release.
 
