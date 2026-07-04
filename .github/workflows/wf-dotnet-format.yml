@@ -52,7 +52,7 @@ on:
         description: Runs dotnet format before mandatory JetBrains CleanupCode verification.
         type: boolean
         required: false
-        default: false
+        default: true
       enable-cache:
         description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-format validation or runners without cache service access.
         type: boolean
@@ -179,7 +179,7 @@ jobs:
           solution: ${{ inputs.solution }}
           restore-locked-mode: ${{ inputs.restore-locked-mode }}
 
-      - name: Apply dotnet format @ ${{ inputs.solution }}
+      - name: Verify formatting @ ${{ inputs.solution }}
         id: dotnet-format
         if: inputs.run-dotnet-format
         continue-on-error: true
@@ -188,7 +188,7 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           cd "$WORKING_DIRECTORY"
-          dotnet format "$SOLUTION" --verbosity diagnostic --no-restore
+          dotnet format "$SOLUTION" --verify-no-changes --verbosity diagnostic --no-restore
 
       - name: Verify JetBrains CleanupCode @ ${{ inputs.profile }}
         id: cleanupcode

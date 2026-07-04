@@ -1249,6 +1249,13 @@ void ValidateRepositoryPipelineContract()
         ("NuGet publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-nuget.yml"),
         ("container image publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml"),
     };
+    var localDotNetFormatToolSetup =
+        "      working-directory: tests/fixtures/mock-projects/dotnet-nuget-library\n"
+        + "      solution: Mock.NuGet.Library.slnx\n"
+        + "      restore-locked-mode: true\n"
+        + "      restore-tools: false\n"
+        + "      install-tool: true\n"
+        + "      tool-version: 2026.1.4\n";
 
     if (File.Exists(buildWorkflowPath))
     {
@@ -1305,6 +1312,11 @@ void ValidateRepositoryPipelineContract()
         if (Regex.Matches(releaseText, Regex.Escape(releasePrerequisiteNeedsBlock)).Count < 2)
         {
             AddFailure($"{releaseWorkflowPath}: semantic-release verification and publication jobs must depend on all fixture dogfood jobs.");
+        }
+
+        if (!releaseText.Contains(localDotNetFormatToolSetup, StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: local .NET format fixture must install pinned JetBrains tools and diff only the fixture workspace.");
         }
 
         if (!releaseText.Contains("if: github.event_name == 'pull_request'", StringComparison.Ordinal))

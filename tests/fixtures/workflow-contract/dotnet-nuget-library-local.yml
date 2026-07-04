@@ -16,8 +16,12 @@ jobs:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
-      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
+      working-directory: tests/fixtures/mock-projects/dotnet-nuget-library
+      solution: Mock.NuGet.Library.slnx
       restore-locked-mode: true
+      restore-tools: false
+      install-tool: true
+      tool-version: 2026.1.4
       enable-cache: false
 
   dotnet-test:
