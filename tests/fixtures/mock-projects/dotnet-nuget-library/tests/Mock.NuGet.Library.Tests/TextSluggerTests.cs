@@ -1,11 +1,11 @@
 namespace Mock.NuGet.Library.Tests;
 
-using Mock.NuGet.Library;
+using Library;
 
 public sealed class TextSluggerTests
 {
     [Fact]
-    public void ToSlug_TrimsLowercasesAndCollapsesWordSeparators()
+    public void ToSlugTrimsLowercasesAndCollapsesWordSeparators()
     {
         var slug = TextSlugger.ToSlug("  Shared CI Workflows  ");
 
@@ -13,7 +13,7 @@ public sealed class TextSluggerTests
     }
 
     [Fact]
-    public void ToSlug_RemovesPunctuationRuns()
+    public void ToSlugRemovesPunctuationRuns()
     {
         var slug = TextSlugger.ToSlug("NuGet: verify, pack, publish?");
 
@@ -21,7 +21,7 @@ public sealed class TextSluggerTests
     }
 
     [Fact]
-    public void ToSlug_RejectsBlankInput()
+    public void ToSlugRejectsBlankInput()
     {
         var exception = Assert.Throws<ArgumentException>(() => TextSlugger.ToSlug("   "));
 

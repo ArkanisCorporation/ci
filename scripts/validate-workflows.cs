@@ -433,6 +433,11 @@ void ValidateDotNetJetBrainsContract()
         {
             AddFailure($"{workflowPath}: .NET format workflow must expose run-dotnet-format for optional dotnet format.");
         }
+
+        if (!workflowText.Contains("if: always() && steps.dotnet-format.outcome == 'failure'", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: dotnet format failure step must run even when CleanupCode fails.");
+        }
     }
 
     if (!File.Exists(actionPath))
@@ -463,7 +468,7 @@ void ValidateDotNetJetBrainsContract()
     else
     {
         var actionScriptText = File.ReadAllText(actionScriptPath);
-        foreach (var requiredToken in new[] { "#:package CliWrap@", "cleanupcode", "git", "diff", "Applied changes" })
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "cleanupcode", "git", "diff", "Applied changes", "::group::Applied CleanupCode changes" })
         {
             if (!actionScriptText.Contains(requiredToken, StringComparison.Ordinal))
             {

@@ -244,6 +244,11 @@ static async Task<int> ReportDiffAsync(
     await File.WriteAllTextAsync(Path.Combine(artifactsPath, "diff-stat.txt"), diffStat.StandardOutput);
     await File.WriteAllTextAsync(Path.Combine(artifactsPath, "diff-preview.patch"), preview);
 
+    Console.WriteLine("::group::Applied CleanupCode changes");
+    Console.WriteLine(changedFiles.StandardOutput.TrimEnd());
+    Console.WriteLine(preview.TrimEnd());
+    Console.WriteLine("::endgroup::");
+
     await AppendStepSummaryAsync($"""
         ## JetBrains CleanupCode diff
 

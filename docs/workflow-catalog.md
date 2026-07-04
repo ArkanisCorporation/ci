@@ -585,7 +585,8 @@ Side effects:
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
 - Runs CleanupCode, which may modify workspace files before the Git diff gate.
-- Writes a CleanupCode summary with changed files and the applied diff preview.
+- Writes changed files and the applied CleanupCode diff preview to the log and summary.
+- Reports a `dotnet format` failure even when CleanupCode also fails.
 - Fails when CleanupCode creates a Git diff and `fail-on-diff` is true.
 
 ## .NET Test Workflow

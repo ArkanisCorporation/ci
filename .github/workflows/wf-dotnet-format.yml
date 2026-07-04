@@ -208,7 +208,7 @@ jobs:
           artifacts-path: ${{ github.workspace }}/artifacts/jetbrains-cleanupcode
 
       - name: Fail when dotnet format changes are required
-        if: steps.dotnet-format.outcome == 'failure'
+        if: always() && steps.dotnet-format.outcome == 'failure'
         run: |
           echo "dotnet format reported required changes." >&2
           exit 1

@@ -107,7 +107,7 @@ Side effects:
 - Runs `dotnet tool restore` by default.
 - Runs CleanupCode, which can modify workspace files.
 - Writes logs, changed-file lists, diff stats, and diff previews under `artifacts/jetbrains-cleanupcode`.
-- Writes a cleanup summary with changed files and the applied diff preview to `$GITHUB_STEP_SUMMARY`.
+- Writes changed files and the applied diff preview to the log and `$GITHUB_STEP_SUMMARY`.
 
 Example:
 
