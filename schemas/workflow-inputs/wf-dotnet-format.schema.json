@@ -31,13 +31,57 @@
     "solution": {
       "type": "string"
     },
+    "working-directory": {
+      "type": "string",
+      "default": "."
+    },
     "restore-locked-mode": {
+      "type": "boolean",
+      "default": true
+    },
+    "run-dotnet-format": {
       "type": "boolean",
       "default": true
     },
     "enable-cache": {
       "type": "boolean",
       "default": true
+    },
+    "profile": {
+      "type": "string",
+      "default": "Built-in: Reformat & Apply Syntax Style"
+    },
+    "include": {
+      "type": "string",
+      "default": ""
+    },
+    "exclude": {
+      "type": "string",
+      "default": "**/*.razor;**/*.svg;**/*.md"
+    },
+    "no-updates": {
+      "type": "boolean",
+      "default": true
+    },
+    "restore-tools": {
+      "type": "boolean",
+      "default": true
+    },
+    "install-tool": {
+      "type": "boolean",
+      "default": false
+    },
+    "tool-version": {
+      "type": "string",
+      "default": ""
+    },
+    "fail-on-diff": {
+      "type": "boolean",
+      "default": true
+    },
+    "remediation-message": {
+      "type": "string",
+      "default": "Run `dotnet husky run --name dotnet-cleanupcode` locally and commit the resulting changes."
     },
     "artifact-retention-days": {
       "type": "integer",

@@ -47,6 +47,10 @@ inputs:
     description: Restores local .NET tools with one retry for first-use SDK home races.
     required: false
     default: "true"
+  working-directory:
+    description: Directory where local tool restore and optional dependency restore run.
+    required: false
+    default: "."
   solution:
     description: Optional solution or project path to restore.
     required: false
@@ -143,19 +147,29 @@ runs:
 
     - name: Restore local .NET tools
       if: inputs.restore-tools == 'true'
-      run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        cd "$WORKING_DIRECTORY"
+        dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
       shell: bash
 
     - name: Restore solution with lock file
       if: inputs.solution != '' && inputs.restore-locked-mode == 'true'
       env:
         SOLUTION: ${{ inputs.solution }}
-      run: dotnet restore "$SOLUTION" --locked-mode
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        cd "$WORKING_DIRECTORY"
+        dotnet restore "$SOLUTION" --locked-mode
       shell: bash
 
     - name: Restore solution
       if: inputs.solution != '' && inputs.restore-locked-mode != 'true'
       env:
         SOLUTION: ${{ inputs.solution }}
-      run: dotnet restore "$SOLUTION"
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        cd "$WORKING_DIRECTORY"
+        dotnet restore "$SOLUTION"
       shell: bash

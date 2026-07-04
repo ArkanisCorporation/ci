@@ -1,7 +1,7 @@
 # Summary:
-#   Reusable .NET formatting verification workflow.
+#   Reusable .NET formatting and JetBrains CleanupCode verification workflow.
 # Remarks:
-#   This workflow restores dependencies and runs dotnet format verification only.
+#   This workflow restores dependencies, optionally runs dotnet format verification, then runs JetBrains CleanupCode verification.
 #   It does not build, test, publish, or deploy.
 
 name: wf-dotnet-format
@@ -35,19 +35,74 @@ on:
         required: false
         default: ""
       solution:
-        description: Solution or project path to restore and format.
+        description: Solution or project path to restore, format, and pass to CleanupCode.
         type: string
         required: true
+      working-directory:
+        description: Directory where restore, dotnet format, CleanupCode, and Git diff checks run.
+        type: string
+        required: false
+        default: .
       restore-locked-mode:
         description: Runs dotnet restore with --locked-mode.
         type: boolean
         required: false
         default: true
+      run-dotnet-format:
+        description: Runs dotnet format before mandatory JetBrains CleanupCode verification.
+        type: boolean
+        required: false
+        default: false
       enable-cache:
         description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-format validation or runners without cache service access.
         type: boolean
         required: false
         default: true
+      profile:
+        description: CleanupCode profile name.
+        type: string
+        required: false
+        default: "Built-in: Reformat & Apply Syntax Style"
+      include:
+        description: Optional semicolon-delimited CleanupCode include filter.
+        type: string
+        required: false
+        default: ""
+      exclude:
+        description: Optional semicolon-delimited CleanupCode exclude filter.
+        type: string
+        required: false
+        default: "**/*.razor;**/*.svg;**/*.md"
+      no-updates:
+        description: Passes --no-updates to CleanupCode when true.
+        type: boolean
+        required: false
+        default: true
+      restore-tools:
+        description: Restores local .NET tools during shared setup.
+        type: boolean
+        required: false
+        default: true
+      install-tool:
+        description: Installs JetBrains.ReSharper.GlobalTools into RUNNER_TEMP instead of using a local tool manifest.
+        type: boolean
+        required: false
+        default: false
+      tool-version:
+        description: Optional JetBrains.ReSharper.GlobalTools version used when install-tool is true.
+        type: string
+        required: false
+        default: ""
+      fail-on-diff:
+        description: Fails the workflow when CleanupCode creates a Git diff.
+        type: boolean
+        required: false
+        default: true
+      remediation-message:
+        description: Message written to the step summary when CleanupCode creates a diff.
+        type: string
+        required: false
+        default: "Run `dotnet husky run --name dotnet-cleanupcode` locally and commit the resulting changes."
       artifact-retention-days:
         description: Diagnostic artifact retention in days.
         type: number
@@ -90,7 +145,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout setup action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
+      - name: Setup .NET action tooling @ 10.0.x
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Checkout platform actions @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -100,6 +160,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/setup-dotnet
+            .github/actions/dotnet-jetbrains-cleanupcode
           sparse-checkout-cone-mode: false
 
       - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
@@ -113,14 +174,44 @@ jobs:
           runs-on-self-hosted: ${{ inputs.runs-on-self-hosted }}
           enable-cache: ${{ inputs.enable-cache }}
           nuget-packages: ${{ env.NUGET_PACKAGES }}
-          restore-tools: "true"
+          restore-tools: ${{ inputs.restore-tools }}
+          working-directory: ${{ inputs.working-directory }}
           solution: ${{ inputs.solution }}
           restore-locked-mode: ${{ inputs.restore-locked-mode }}
 
-      - name: Verify formatting @ ${{ inputs.solution }}
+      - name: Apply dotnet format @ ${{ inputs.solution }}
+        id: dotnet-format
+        if: inputs.run-dotnet-format
+        continue-on-error: true
         env:
           SOLUTION: ${{ inputs.solution }}
-        run: dotnet format "$SOLUTION" --verify-no-changes --verbosity diagnostic --no-restore
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          cd "$WORKING_DIRECTORY"
+          dotnet format "$SOLUTION" --verbosity diagnostic --no-restore
+
+      - name: Verify JetBrains CleanupCode @ ${{ inputs.profile }}
+        id: cleanupcode
+        uses: ./.ci/arkanis-ci/.github/actions/dotnet-jetbrains-cleanupcode
+        with:
+          solution: ${{ inputs.solution }}
+          working-directory: ${{ inputs.working-directory }}
+          profile: ${{ inputs.profile }}
+          include: ${{ inputs.include }}
+          exclude: ${{ inputs.exclude }}
+          no-updates: ${{ inputs.no-updates }}
+          restore-tools: "false"
+          install-tool: ${{ inputs.install-tool }}
+          tool-version: ${{ inputs.tool-version }}
+          fail-on-diff: ${{ inputs.fail-on-diff }}
+          remediation-message: ${{ inputs.remediation-message }}
+          artifacts-path: ${{ github.workspace }}/artifacts/jetbrains-cleanupcode
+
+      - name: Fail when dotnet format changes are required
+        if: steps.dotnet-format.outcome == 'failure'
+        run: |
+          echo "dotnet format reported required changes." >&2
+          exit 1
 
       - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
@@ -184,6 +275,10 @@ jobs:
         if: always()
         env:
           SOLUTION: ${{ inputs.solution }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          PROFILE: ${{ inputs.profile }}
+          EXCLUDE: ${{ inputs.exclude }}
+          FAIL_ON_DIFF: ${{ inputs.fail-on-diff }}
         run: |
           {
             echo "# .NET format"
@@ -193,6 +288,14 @@ jobs:
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
             echo "| Solution | \`${SOLUTION}\` |"
+            echo "| Working directory | \`${WORKING_DIRECTORY}\` |"
+            echo "| dotnet format | \`${{ inputs.run-dotnet-format }}\` |"
+            echo "| dotnet format outcome | \`${{ steps.dotnet-format.outcome || 'skipped' }}\` |"
+            echo "| CleanupCode profile | \`${PROFILE}\` |"
+            echo "| CleanupCode exclude | \`${EXCLUDE}\` |"
+            echo "| CleanupCode fail on diff | \`${FAIL_ON_DIFF}\` |"
+            echo "| CleanupCode diff found | \`${{ steps.cleanupcode.outputs.diff-found || 'unknown' }}\` |"
+            echo "| CleanupCode changed files | \`${{ steps.cleanupcode.outputs.changed-files || '' }}\` |"
             echo "| Restore locked mode | \`${{ inputs.restore-locked-mode }}\` |"
             echo "| Cache enabled | \`${{ inputs.enable-cache }}\` |"
             echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"

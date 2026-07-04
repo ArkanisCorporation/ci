@@ -407,32 +407,31 @@ void ValidateContainerPublishContract()
 
 void ValidateDotNetJetBrainsContract()
 {
-    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-setup-dotnet-jetbrains.yml");
-    var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-setup-dotnet-jetbrains.schema.json");
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-dotnet-format.yml");
     var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-jetbrains-cleanupcode", "action.yml");
     var actionScriptPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-jetbrains-cleanupcode", "run-cleanupcode.cs");
 
     if (!File.Exists(workflowPath))
     {
-        AddFailure($"{workflowPath}: .NET JetBrains CleanupCode workflow is required.");
+        AddFailure($"{workflowPath}: .NET format workflow is required.");
     }
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
         if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-jetbrains-cleanupcode", StringComparison.Ordinal))
         {
-            AddFailure($"{workflowPath}: .NET JetBrains workflow must use dotnet-jetbrains-cleanupcode action.");
+            AddFailure($"{workflowPath}: .NET format workflow must use dotnet-jetbrains-cleanupcode action.");
         }
 
-        if (!workflowText.Contains("dotnet restore", StringComparison.Ordinal))
+        if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/setup-dotnet", StringComparison.Ordinal))
         {
-            AddFailure($"{workflowPath}: .NET JetBrains workflow must restore dependencies before cleanup verification.");
+            AddFailure($"{workflowPath}: .NET format workflow must use setup-dotnet before cleanup verification.");
         }
-    }
 
-    if (!File.Exists(schemaPath))
-    {
-        AddFailure($"{schemaPath}: .NET JetBrains workflow schema is required.");
+        if (!WorkflowDefinesInput(workflowPath, "run-dotnet-format"))
+        {
+            AddFailure($"{workflowPath}: .NET format workflow must expose run-dotnet-format for optional dotnet format.");
+        }
     }
 
     if (!File.Exists(actionPath))
@@ -984,7 +983,6 @@ void ValidateJobDisplayNameContract()
         ("wf-node-build.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-dotnet-format.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-dotnet-test.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
-        ("wf-setup-dotnet-jetbrains.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-setup-dotnet-generated-code.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-lint-github-actions.yml", "    name: workflows @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-platform-selftest.yml", "    name: contracts @ ${{ github.head_ref || github.ref_name }}"),
@@ -1093,6 +1091,7 @@ void ValidateStepDisplayNameContract()
         ["wf-dotnet-format.yml"] =
         [
             "      - name: Verify formatting @ ${{ inputs.solution }}",
+            "      - name: Verify JetBrains CleanupCode @ ${{ inputs.profile }}",
         ],
         ["wf-dotnet-test.yml"] =
         [

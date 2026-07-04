@@ -19,7 +19,7 @@ Remove script-driven publishing from semantic-release.
 ## Target Shape
 
 - Use `wf-dotnet-format.yml` and `wf-dotnet-test.yml` for format, build, tests, coverage, and diagnostics.
-- Use `wf-setup-dotnet-jetbrains.yml` when the legacy service already has JetBrains CleanupCode as a CI or pre-commit gate.
+- Set `run-dotnet-format: false` on `wf-dotnet-format.yml` only when the legacy service has CleanupCode without ordinary `dotnet format`.
 - Use `wf-release-semantic.yml` only for release metadata.
 - Use `wf-publish-container-dotnet.yml` for .NET container publish.
 - Pass bare release versions through `version` and release tags through `version-tag`.

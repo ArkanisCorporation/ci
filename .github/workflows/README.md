@@ -27,12 +27,6 @@ It stamps .NET project versions before Docker Buildx runs.
 It binds publication to `environment-name` and always pushes.
 Use `extra-tags` for additional mutable tags such as `latest`.
 
-## .NET JetBrains CleanupCode
-
-`wf-setup-dotnet-jetbrains.yml` is the reusable CleanupCode verification workflow.
-It keeps CitizenId-style JetBrains cleanup checks separate from ordinary `dotnet format`, build, and test verification.
-It installs .NET 10 action tooling so the composite action can run its `CliWrap` file script.
-
 ## .NET Generated Code
 
 `wf-setup-dotnet-generated-code.yml` is the reusable generated-source diff gate.
@@ -41,7 +35,7 @@ It supports CitizenId-style Wolverine generated handler checks by building once,
 ## .NET Setup, Format, And Test
 
 `.github/actions/setup-dotnet` is the internal setup composite used by .NET verification workflows.
-`wf-dotnet-format.yml` runs `dotnet format --verify-no-changes`.
+`wf-dotnet-format.yml` optionally runs `dotnet format --verify-no-changes` and always runs JetBrains CleanupCode verification.
 `wf-dotnet-test.yml` builds, tests, and handles coverage output.
 
 ## Node Setup, Lint, Test, And Build

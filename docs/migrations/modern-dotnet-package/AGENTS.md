@@ -19,7 +19,7 @@ Keep repository-specific package metadata and release channels intact.
 ## Target Shape
 
 - Use `wf-dotnet-format.yml` and `wf-dotnet-test.yml` for format and test verification.
-- Use `wf-setup-dotnet-jetbrains.yml` only when the repository already gates JetBrains CleanupCode.
+- Set `run-dotnet-format: false` on `wf-dotnet-format.yml` only when the repository already gates JetBrains CleanupCode without ordinary `dotnet format`.
 - Use `wf-release-semantic.yml` for semantic-release metadata.
 - Use `wf-publish-nuget.yml` for package publication.
 - Keep package backpropagation separate.

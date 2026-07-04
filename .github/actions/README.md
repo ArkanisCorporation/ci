@@ -14,7 +14,7 @@ Keep each action narrow; prefer more small actions over one flag-heavy action.
 | `dotnet-jetbrains-cleanupcode` | Runs JetBrains ReSharper CleanupCode and verifies that it produces no Git diff. | May modify workspace files before failing on diff. |
 | `dotnet-setversion` | Installs `dotnet-setversion` and applies a bare SemVer value to .NET project files. | Modifies matched `.csproj` files. |
 | `release-backpropagation` | Creates, approves, and optionally auto-merges release backpropagation PRs. | May create PRs, approve them, and enable auto-merge. |
-| `setup-dotnet` | Sets up .NET SDK, NuGet cache, and optional local tools. | Writes `NUGET_PACKAGES` and restores cache/tools. |
+| `setup-dotnet` | Sets up .NET SDK, NuGet cache, optional local tools, and optional restore. | Writes `NUGET_PACKAGES` and restores cache/tools/dependencies. |
 | `setup-node` | Sets up Node.js, package-manager tooling, cache, and optional install. | Writes Corepack state, cache metadata, and optional install logs. |
 
 ## dotnet-coverage-report

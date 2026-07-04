@@ -6,10 +6,9 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Purpose | Trust zone |
 |---|---|---|
-| `wf-dotnet-format.yml` | Verify `dotnet format` without running tests. | untrusted or trusted-build |
+| `wf-dotnet-format.yml` | Verify optional `dotnet format` and mandatory JetBrains CleanupCode without running tests. | untrusted or trusted-build |
 | `wf-dotnet-test.yml` | Build, test, collect coverage, metadata, and diagnostics for .NET repositories. | untrusted or trusted-build |
 | `wf-setup-dotnet-generated-code.yml` | Verify committed .NET generated source. | untrusted or trusted-build |
-| `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode creates no diff. | untrusted or trusted-build |
 | `wf-node-lint.yml` | Run one Node lint script or command. | untrusted or trusted-build |
 | `wf-node-test.yml` | Run one Node test script or command. | untrusted or trusted-build |
 | `wf-node-build.yml` | Run one Node build script or command. | untrusted or trusted-build |
@@ -29,10 +28,9 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Minimum caller permissions | Main outputs |
 |---|---|---|
-| `wf-dotnet-format.yml` | `contents: read` | format diagnostics, metadata, manifest |
+| `wf-dotnet-format.yml` | `contents: read` | format diagnostics, CleanupCode diff diagnostics, metadata, manifest |
 | `wf-dotnet-test.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
 | `wf-setup-dotnet-generated-code.yml` | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
-| `wf-setup-dotnet-jetbrains.yml` | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
 | `wf-node-lint.yml` | `contents: read` | install and lint logs, metadata, manifest |
 | `wf-node-test.yml` | `contents: read` | install and test logs, metadata, manifest |
 | `wf-node-build.yml` | `contents: read` | install and build logs, metadata, manifest |
@@ -121,8 +119,19 @@ Schema: `schemas/workflow-inputs/wf-dotnet-format.schema.json`.
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
 | `solution` | string | yes | none | n/a |
+| `working-directory` | string | no | `"."` | n/a |
 | `restore-locked-mode` | boolean | no | `true` | n/a |
+| `run-dotnet-format` | boolean | no | `true` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
+| `profile` | string | no | `"Built-in: Reformat & Apply Syntax Style"` | n/a |
+| `include` | string | no | `""` | n/a |
+| `exclude` | string | no | `"**/*.razor;**/*.svg;**/*.md"` | n/a |
+| `no-updates` | boolean | no | `true` | n/a |
+| `restore-tools` | boolean | no | `true` | n/a |
+| `install-tool` | boolean | no | `false` | n/a |
+| `tool-version` | string | no | `""` | n/a |
+| `fail-on-diff` | boolean | no | `true` | n/a |
+| `remediation-message` | string | no | `"Run \`dotnet husky run --name dotnet-cleanupcode\` locally and commit the resulting changes."` | n/a |
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -397,35 +406,6 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
 
 Outputs: schema does not define workflow outputs.
 
-### wf-setup-dotnet-jetbrains.yml
-
-Schema: `schemas/workflow-inputs/wf-setup-dotnet-jetbrains.schema.json`.
-
-| Input | Type | Required | Default | Details |
-|---|---|---|---|---|
-| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
-| `runs-on-json` | string | no | `""` | n/a |
-| `runs-on-self-hosted` | boolean | no | `false` | n/a |
-| `dotnet-version` | string | no | `"10.0.x"` | n/a |
-| `global-json-file` | string | no | `""` | n/a |
-| `solution` | string | yes | none | n/a |
-| `working-directory` | string | no | `"."` | n/a |
-| `restore-locked-mode` | boolean | no | `true` | n/a |
-| `enable-cache` | boolean | no | `true` | n/a |
-| `profile` | string | no | `"Built-in: Reformat & Apply Syntax Style"` | n/a |
-| `include` | string | no | `""` | n/a |
-| `exclude` | string | no | `"**/*.razor;**/*.svg;**/*.md"` | n/a |
-| `no-updates` | boolean | no | `true` | n/a |
-| `restore-tools` | boolean | no | `true` | n/a |
-| `install-tool` | boolean | no | `false` | n/a |
-| `tool-version` | string | no | `""` | n/a |
-| `fail-on-diff` | boolean | no | `true` | n/a |
-| `remediation-message` | string | no | `"Run \`dotnet husky run --name dotnet-cleanupcode\` locally and commit the resulting changes."` | n/a |
-| `timeout-minutes` | integer | no | `15` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
-
-Outputs: schema does not define workflow outputs.
-
 ### wf-verify-deploy-k8s-aspire.yml
 
 Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
@@ -543,16 +523,18 @@ External services and caches are gray dashed nodes.
 ## .NET Format Workflow
 
 `wf-dotnet-format.yml` checks out the caller repository.
-It checks out this CI platform repository for the shared `setup-dotnet` action.
-It sets up .NET, restores dependencies, runs `dotnet format --verify-no-changes`, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
+It installs .NET 10 action tooling for CleanupCode file scripts, checks out this CI platform repository for shared actions, sets up .NET, restores dependencies, optionally runs `dotnet format --verify-no-changes`, always runs JetBrains CleanupCode, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
 It does not build, test, collect coverage, publish, or deploy.
+The default CleanupCode profile is `Built-in: Reformat & Apply Syntax Style`.
+The default exclude filter is `**/*.razor;**/*.svg;**/*.md`.
 
 Flow:
 
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> platform[("CI platform checkout")]
+  checkout --> tooling[[Setup .NET action tooling]]
+  tooling --> platform[("CI platform checkout")]
   platform --> setup[[setup-dotnet action]]
   setup --> cache[("NuGet cache")]
   cache --> validate[[Validate runner contract]]
@@ -560,8 +542,14 @@ flowchart TD
   preflight -->|yes| sh[[Self-hosted preflight]]
   preflight -->|no| restore[[Restore dependencies]]
   sh --> restore
-  restore --> format[[dotnet format --verify-no-changes]]
-  format --> metadata[/run-metadata.json/]
+  restore --> format{dotnet format?}
+  format -->|yes| dotnetFormat[[dotnet format --verify-no-changes]]
+  format -->|no| cleanup[[dotnet-jetbrains-cleanupcode action]]
+  dotnetFormat --> cleanup
+  cleanup --> diff{Git diff?}
+  diff -->|yes, fail-on-diff| fail[/Diff diagnostics/]
+  diff -->|no or warning| metadata[/run-metadata.json/]
+  fail --> metadata
   metadata --> manifest[/artifact-manifest.json/]
   manifest --> summary>Step summary]
   summary --> diagnostics[/Diagnostics artifact/]
@@ -573,9 +561,9 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,setup,validate,sh,restore,format action
-  class preflight decision
-  class metadata,manifest,summary,diagnostics artifact
+  class checkout,tooling,setup,validate,sh,restore,dotnetFormat,cleanup action
+  class preflight,format,diff decision
+  class fail,metadata,manifest,summary,diagnostics artifact
   class outputs output
   class cache external
 ```
@@ -585,13 +573,19 @@ Preconditions:
 - `solution` points to a solution or project in the caller repository.
 - Lock files exist when `restore-locked-mode` is true.
 - The selected runner can install or run the requested .NET SDK.
+- The selected runner can install .NET 10 SDK for the CleanupCode action file script.
+- Local tool restore requires `JetBrains.ReSharper.GlobalTools` in `.config/dotnet-tools.json`.
+- `install-tool` requires network access to NuGet and should set `tool-version` for repeatability.
 
 Side effects:
 
 - Writes under `artifacts/`.
+- Writes CleanupCode diagnostics under `artifacts/jetbrains-cleanupcode`.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
+- Runs CleanupCode, which may modify workspace files before the Git diff gate.
+- Fails when CleanupCode creates a Git diff and `fail-on-diff` is true.
 
 ## .NET Test Workflow
 
@@ -661,88 +655,6 @@ Side effects:
 - Runs `dotnet tool restore` when local tools exist.
 - Checks out this CI platform repository under `.ci/arkanis-ci`.
 - May create or update one pull request comment when `coverage-pr-comment` is true.
-
-## .NET JetBrains CleanupCode Workflow
-
-`wf-setup-dotnet-jetbrains.yml` checks out the caller repository.
-It sets up .NET 10 action tooling, sets up the requested project SDK, restores NuGet dependencies, restores or installs JetBrains ReSharper command line tools, runs `jb cleanupcode`, writes diff diagnostics, writes a manifest, writes a summary, and uploads diagnostics.
-It is based on the CitizenId format job shape.
-The default CleanupCode profile is `Built-in: Reformat & Apply Syntax Style`.
-The default exclude filter is `**/*.razor;**/*.svg;**/*.md`.
-
-Flow:
-
-```mermaid
-flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> tooling[[Setup .NET action tooling]]
-  tooling --> sdk{global.json?}
-  sdk -->|yes| global[[Setup .NET from global.json]]
-  sdk -->|no| version[[Setup .NET from dotnet-version]]
-  global --> cache[("NuGet cache")]
-  version --> cache
-  cache --> validate[[Validate runner contract]]
-  validate --> preflight{self-hosted?}
-  preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| restore[[Restore dependencies]]
-  sh --> restore
-  restore --> platform[("CI platform checkout")]
-  platform --> cleanup[[dotnet-jetbrains-cleanupcode action]]
-  cleanup --> diff{Git diff?}
-  diff -->|yes, fail-on-diff| fail[/Diff diagnostics/]
-  diff -->|no or warning| manifest[/artifact-manifest.json/]
-  fail --> manifest
-  manifest --> summary>Step summary]
-  summary --> diagnostics[/Diagnostics artifact/]
-  manifest --> outputs(("artifact-manifest"))
-  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
-  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
-  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
-  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
-  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
-  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
-  class caller,platform repo
-  class checkout,tooling,global,version,validate,sh,restore,cleanup action
-  class sdk,preflight,diff decision
-  class fail,manifest,summary,diagnostics artifact
-  class outputs output
-  class cache external
-```
-
-Preconditions:
-
-- `solution` points to a solution or project in the caller repository.
-- Lock files exist when `restore-locked-mode` is true.
-- The selected runner can install or run the requested .NET SDK.
-- The selected runner can install .NET 10 SDK for the action file script.
-- Local tool restore requires `JetBrains.ReSharper.GlobalTools` in `.config/dotnet-tools.json`.
-- `install-tool` requires network access to NuGet and should set `tool-version` for repeatability.
-
-Side effects:
-
-- Writes under `artifacts/jetbrains-cleanupcode`.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
-- Runs CleanupCode, which may modify workspace files before the Git diff gate.
-- Fails when CleanupCode creates a Git diff and `fail-on-diff` is true.
-
-Example:
-
-```yaml
-jobs:
-  cleanup:
-    name: CitizenId.slnx @ ${{ github.head_ref || github.ref_name }}
-    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-jetbrains.yml@v1
-    permissions:
-      contents: read
-    with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
-      dotnet-version: 10.0.x
-      solution: CitizenId.slnx
-      profile: "Built-in: Reformat & Apply Syntax Style"
-      exclude: "**/*.razor;**/*.svg;**/*.md"
-      enable-cache: true
-```
 
 ## .NET Generated Code Workflow
 

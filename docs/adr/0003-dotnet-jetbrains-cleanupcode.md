@@ -1,6 +1,6 @@
 # ADR-0003: .NET JetBrains CleanupCode Workflow
 
-Status: accepted
+Status: superseded by `wf-dotnet-format.yml`
 
 ## Context
 
@@ -14,8 +14,8 @@ This check is distinct from `dotnet format` because JetBrains CleanupCode applie
 Add `.github/actions/dotnet-jetbrains-cleanupcode/action.yml`.
 The composite action runs CleanupCode, captures logs and Git diff diagnostics, and fails when a diff exists.
 The composite action delegates native command execution to `run-cleanupcode.cs`, a .NET file script using `CliWrap`.
-Add `.github/workflows/wf-setup-dotnet-jetbrains.yml`.
-The reusable workflow checks out the caller repository, sets up .NET 10 action tooling, sets up the requested project SDK, restores dependencies, runs the composite action, writes an artifact manifest, and uploads diagnostics.
+Run the composite action from `wf-dotnet-format.yml` after optional `dotnet format`.
+The reusable workflow checks out the caller repository, sets up .NET 10 action tooling, sets up the requested project SDK, restores dependencies, optionally runs `dotnet format`, runs the composite action, writes an artifact manifest, and uploads diagnostics.
 Default inputs mirror CitizenId: profile `Built-in: Reformat & Apply Syntax Style`, exclude `**/*.razor;**/*.svg;**/*.md`, and pass `--no-updates`.
 The default tool mode restores local .NET tools so consumers can pin `JetBrains.ReSharper.GlobalTools` in `.config/dotnet-tools.json`.
 An optional installed-tool mode supports repositories that do not yet use local tool manifests.
@@ -30,11 +30,11 @@ Repositories that want exact repeatability should prefer local tool manifests or
 
 ## Migration
 
-Replace repo-local CleanupCode workflow steps with `wf-setup-dotnet-jetbrains.yml`.
+Replace repo-local CleanupCode workflow steps with `wf-dotnet-format.yml`.
 Pass the solution path through `solution`.
 Use the default profile and exclude filter for CitizenId-compatible behavior.
-Keep `wf-dotnet-format.yml` and `wf-dotnet-test.yml` for ordinary format, build, test, and coverage verification.
-Run both workflows as separate jobs when both `dotnet format` and JetBrains CleanupCode are required.
+Set `run-dotnet-format: false` when a caller only wants CleanupCode.
+Keep `wf-dotnet-test.yml` for build, test, and coverage verification.
 
 ## References
 

@@ -22,10 +22,9 @@ Composite actions are optional step bundles for same-repository workflows or exp
 
 | Workflow | Purpose |
 |---|---|
-| `wf-dotnet-format.yml` | Verify `dotnet format` without running tests. |
+| `wf-dotnet-format.yml` | Verify optional `dotnet format` and mandatory JetBrains CleanupCode without running tests. |
 | `wf-dotnet-test.yml` | Build, test, collect coverage, metadata, and diagnostics for .NET repositories. |
 | `wf-setup-dotnet-generated-code.yml` | Verify generated .NET source stays committed after codegen commands. |
-| `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
 | `wf-node-lint.yml` | Run one Node lint script or command. |
 | `wf-node-test.yml` | Run one Node test script or command. |
 | `wf-node-build.yml` | Run one Node build script or command. |

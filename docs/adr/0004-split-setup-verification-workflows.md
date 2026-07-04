@@ -15,7 +15,7 @@ Last verified: 2026-07-04.
 
 Remove public setup-only .NET and Node workflows.
 Keep shared setup as internal composite actions so the caller workflow job can continue with format, lint, test, or build steps after setup.
-Add `wf-dotnet-format.yml` for `dotnet format --verify-no-changes`.
+Add `wf-dotnet-format.yml` for formatting verification.
 Add `wf-dotnet-test.yml` for build, test, coverage collection, and coverage report publishing.
 Add `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` for separate Node script lanes.
 Add `.github/actions/setup-node` so Node setup logic is shared by all Node workflows.
