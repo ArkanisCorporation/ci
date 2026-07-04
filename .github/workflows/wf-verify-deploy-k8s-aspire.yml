@@ -93,7 +93,7 @@ env:
 
 jobs:
   verify:
-    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ verify
+    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

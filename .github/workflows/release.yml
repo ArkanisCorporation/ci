@@ -135,7 +135,7 @@ jobs:
 
   verify-release:
     if: github.event_name == 'pull_request'
-    name: repo @ verify
+    name: repo
     needs:
       - selftest
       - typescript-pnpm-lint

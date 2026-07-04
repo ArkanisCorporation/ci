@@ -149,7 +149,7 @@ permissions: {}
 
 jobs:
   verify:
-    name: ${{ inputs.version-tag || inputs.version }} @ verify
+    name: ${{ inputs.version || inputs.version-tag }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -184,7 +184,7 @@ jobs:
             echo ".NET version stamping: true"
           } | tee artifacts/meta/runner-contract.txt
 
-      - name: Validate container publish inputs @ ${{ inputs.image }}:${{ inputs.version-tag || inputs.version }}
+      - name: Validate container publish inputs @ ${{ inputs.image }}:${{ inputs.version || inputs.version-tag }}
         env:
           VERSION: ${{ inputs.version }}
           VERSION_PROJECT: ${{ inputs.version-project }}
@@ -251,7 +251,7 @@ jobs:
           driver: remote
           endpoint: ${{ inputs.buildkit-endpoint }}
 
-      - name: Resolve image tags @ ${{ inputs.image }}:${{ inputs.version-tag || inputs.version }}
+      - name: Resolve image tags @ ${{ inputs.image }}:${{ inputs.version || inputs.version-tag }}
         id: tags
         env:
           IMAGE: ${{ inputs.image }}

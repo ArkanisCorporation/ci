@@ -109,7 +109,7 @@ env:
 
 jobs:
   verify:
-    name: ${{ inputs.version }} @ verify
+    name: ${{ inputs.version }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

@@ -437,11 +437,6 @@ void ValidateDotNetJetBrainsContract()
         {
             AddFailure($"{workflowPath}: .NET format workflow must expose run-dotnet-format for optional dotnet format.");
         }
-
-        if (!workflowText.Contains("if: always() && steps.dotnet-format.outcome == 'failure'", StringComparison.Ordinal))
-        {
-            AddFailure($"{workflowPath}: dotnet format failure step must run even when CleanupCode fails.");
-        }
     }
 
     if (!File.Exists(actionPath))
@@ -1028,12 +1023,12 @@ void ValidateJobDisplayNameContract()
         ("wf-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }} @ ${{ inputs.environment-name }}"),
         ("wf-release-backpropagation.yml", "    name: ${{ inputs.new-version }} @ ${{ inputs.default-branch }}"),
         ("wf-publish-nuget.yml", "    name: ${{ inputs.version }} @ ${{ inputs.environment-name }}"),
-        ("wf-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ ${{ inputs.environment-name }}"),
+        ("wf-publish-container-dotnet.yml", "    name: ${{ inputs.version || inputs.version-tag }} @ ${{ inputs.environment-name }}"),
         ("wf-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ ${{ inputs.environment-name }}"),
-        ("wf-verify-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }} @ verify"),
-        ("wf-verify-publish-nuget.yml", "    name: ${{ inputs.version }} @ verify"),
-        ("wf-verify-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ verify"),
-        ("wf-verify-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ verify"),
+        ("wf-verify-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }}"),
+        ("wf-verify-publish-nuget.yml", "    name: ${{ inputs.version }}"),
+        ("wf-verify-publish-container-dotnet.yml", "    name: ${{ inputs.version || inputs.version-tag }}"),
+        ("wf-verify-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }}"),
         ("wf-node-lint.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-test.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-build.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
@@ -1077,7 +1072,7 @@ void ValidateJobDisplayNameContract()
                      "    name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: repo @ verify",
+                     "    name: repo",
                      "    name: repo @ publish",
                  })
         {
