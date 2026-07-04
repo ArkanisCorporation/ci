@@ -1118,11 +1118,12 @@ void ValidatePlatformSelftestContract()
     }
 
     var workflowText = File.ReadAllText(workflowPath);
+    var setupPythonIndex = workflowText.IndexOf("uses: actions/setup-python@v6", StringComparison.Ordinal);
     var setupNodeIndex = workflowText.IndexOf("uses: actions/setup-node@v6", StringComparison.Ordinal);
     var actionlintIndex = workflowText.IndexOf("uses: raven-actions/actionlint@v2", StringComparison.Ordinal);
     var validatorIndex = workflowText.IndexOf("dotnet run --file scripts/validate-workflows.cs", StringComparison.Ordinal);
 
-    foreach (var requiredToken in new[] { "actions/setup-node@v6", "node-version: \"24.x\"", "package-manager-cache: false", "node --version", "npm --version", "- Node: \\`", "- npm: \\`" })
+    foreach (var requiredToken in new[] { "actions/setup-python@v6", "python-version: \"3.14\"", "pip-install: \"pipx\"", "actions/setup-node@v6", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pipx --version", "node --version", "npm --version", "- Python: \\`", "- pipx: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -1133,6 +1134,10 @@ void ValidatePlatformSelftestContract()
     if (actionlintIndex < 0)
     {
         AddFailure($"{workflowPath}: platform selftest must run raven-actions/actionlint@v2 before the contract validator.");
+    }
+    else if (setupPythonIndex < 0 || setupPythonIndex > actionlintIndex)
+    {
+        AddFailure($"{workflowPath}: platform selftest must set up Python and pipx before raven-actions/actionlint.");
     }
     else if (setupNodeIndex < 0 || setupNodeIndex > actionlintIndex)
     {
