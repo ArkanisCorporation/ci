@@ -769,9 +769,16 @@ void ValidateSplitVerificationWorkflowsContract()
         }
 
         var workflowText = File.ReadAllText(workflowPath);
+        var normalizedWorkflowText = NormalizeLineEndings(workflowText);
         if (Regex.IsMatch(workflowText, @"(?m)^\s*environment:\s*"))
         {
             AddFailure($"{workflowPath}: verification workflows must not bind GitHub environments.");
+        }
+
+        if (workflowName == "wf-verify-release-semantic.yml"
+            && !normalizedWorkflowText.Contains("permissions:\n      contents: write", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: semantic-release dry-run verification must request contents: write because semantic-release verifies tag push access.");
         }
 
         if (Regex.IsMatch(workflowText, @"(?m)^\s*dry-run:\s*$"))
@@ -1385,6 +1392,11 @@ void ValidateRepositoryPipelineContract()
             AddFailure($"{releaseWorkflowPath}: release workflow must call wf-verify-release-semantic.yml for pull requests.");
         }
 
+        if (!releaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml\n    permissions:\n      contents: write", StringComparison.Ordinal))
+        {
+            AddFailure($"{releaseWorkflowPath}: semantic-release verification caller must grant contents: write for dry-run tag push verification.");
+        }
+
         if (!releaseText.Contains("uses: ./.github/workflows/wf-release-semantic.yml", StringComparison.Ordinal))
         {
             AddFailure($"{releaseWorkflowPath}: release workflow must call wf-release-semantic.yml.");
@@ -1429,6 +1441,11 @@ void ValidateRepositoryPipelineContract()
             || verifyReleaseText.Contains("uses: ./.github/workflows/wf-release-semantic.yml", StringComparison.Ordinal))
         {
             AddFailure($"{verifyReleaseWorkflowPath}: verify-release workflow must use the verification reusable workflow without environments or production release jobs.");
+        }
+
+        if (!verifyReleaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml\n    permissions:\n      contents: write", StringComparison.Ordinal))
+        {
+            AddFailure($"{verifyReleaseWorkflowPath}: semantic-release verification caller must grant contents: write for dry-run tag push verification.");
         }
 
         foreach (var (name, requiredUse) in repositoryPrerequisiteWorkflowUses)

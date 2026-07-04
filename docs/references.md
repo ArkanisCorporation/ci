@@ -1,6 +1,6 @@
 # References
 
-Last verified: 2026-07-03.
+Last verified: 2026-07-04.
 
 ## Primary Docs
 
@@ -29,7 +29,9 @@ Last verified: 2026-07-03.
 - GitHub CLI pull request commands: https://cli.github.com/manual/gh_pr
 - semantic-release configuration: https://semantic-release.gitbook.io/semantic-release/usage/configuration
 - semantic-release plugins: https://semantic-release.gitbook.io/semantic-release/extending/plugins-list
+- semantic-release dry-run and Git authorization behavior: https://github.com/semantic-release/semantic-release/blob/master/lib/git.js
 - semantic-release GitHub plugin: https://github.com/semantic-release/github
+- cycjimmy semantic-release-action inputs: https://github.com/cycjimmy/semantic-release-action
 - semantic-release-major-tag plugin: https://github.com/doteric/semantic-release-major-tag
 - Node.js Corepack: https://nodejs.org/api/corepack.html
 - GitHub local reusable workflow reference changelog: https://github.blog/changelog/2022-01-25-github-actions-reusable-workflows-can-be-referenced-locally/
@@ -54,3 +56,4 @@ Last verified: 2026-07-03.
 - Local composite actions resolve against the checked-out caller workspace: https://github.com/actions/runner/issues/1348
 - NuGet Trusted Publishing with shared workflows can require careful policy ownership: https://github.com/NuGet/login/issues/6
 - semantic-release major tag update request: https://github.com/semantic-release/semantic-release/issues/1515
+- semantic-release dry-run still checks push permissions: https://github.com/semantic-release/semantic-release/issues/2232

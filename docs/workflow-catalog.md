@@ -11,7 +11,7 @@ Audience: consumers and platform maintainers.
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode creates no diff. | untrusted or trusted-build |
 | `wf-setup-node.yml` | Node install, lint, test, build, metadata, and diagnostics. | untrusted or trusted-build |
 | `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows. | untrusted or trusted-build |
-| `wf-verify-release-semantic.yml` | Verify semantic-release metadata without publishing. | untrusted or trusted-build |
+| `wf-verify-release-semantic.yml` | Verify semantic-release metadata without publishing. | trusted-build |
 | `wf-release-semantic.yml` | Publish semantic-release metadata without `@semantic-release/exec`. | publish |
 | `wf-release-backpropagation.yml` | Create release branch backpropagation PRs. | publish |
 | `wf-verify-publish-nuget.yml` | Pack one NuGet project without publishing. | untrusted or trusted-build |
@@ -31,7 +31,7 @@ Audience: consumers and platform maintainers.
 | `wf-setup-dotnet-jetbrains.yml` | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
 | `wf-setup-node.yml` | `contents: read` | install, lint, test, build logs, metadata, manifest |
 | `wf-lint-github-actions.yml` | `contents: read` | step summary |
-| `wf-verify-release-semantic.yml` | `contents: read` | release diagnostics and predicted release outputs |
+| `wf-verify-release-semantic.yml` | `contents: write` | release diagnostics and predicted release outputs |
 | `wf-release-semantic.yml` | `contents: write`<br>`issues: write`<br>`pull-requests: write` | release diagnostics and release outputs |
 | `wf-release-backpropagation.yml` | `contents: write`<br>`pull-requests: write` | pull request summary |
 | `wf-verify-publish-nuget.yml` | `contents: read` | `.nupkg`, `.snupkg`, manifest |
@@ -46,8 +46,8 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Purpose | Permissions |
 |---|---|---|
-| `verify-release.yml` | Run platform selftests, fixture dogfood jobs, and read-only semantic-release verification. | `contents: read` |
-| `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: read`.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
+| `verify-release.yml` | Run platform selftests, fixture dogfood jobs, and semantic-release dry-run verification. | `contents: write` for semantic-release verification |
+| `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: write` for semantic-release dry-run tag push checks.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
 ## Common Inputs
 
@@ -843,7 +843,8 @@ jobs:
 
 `wf-verify-release-semantic.yml` runs semantic-release with Node 24 in dry-run mode.
 It rejects `@semantic-release/exec` unless `allow-exec-plugin` is explicitly true.
-It uses read-only repository permissions and does not bind a GitHub environment.
+It uses `contents: write` because semantic-release verifies Git tag push authorization even in dry-run mode.
+It does not bind a GitHub environment.
 Callers that use production-only semantic-release plugins should pass the same pinned plugins through `extra-plugins` so dry-runs validate the production release configuration.
 
 Flow:
@@ -881,6 +882,7 @@ flowchart TD
 
 Preconditions:
 
+- The caller grants `contents: write` so semantic-release can run its dry-run Git push authorization check.
 - The caller repository contains valid semantic-release configuration.
 - The selected runner can run Node.js and npm.
 

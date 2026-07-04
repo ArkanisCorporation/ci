@@ -2,6 +2,7 @@
 #   Reusable semantic-release verification workflow.
 # Remarks:
 #   This workflow runs semantic-release in dry-run mode.
+#   semantic-release verifies Git tag push access even in dry-run mode, so this workflow requests contents: write.
 #   It does not bind a GitHub environment or publish tags, releases, comments, packages, images, or deployments.
 
 name: wf-verify-release-semantic
@@ -83,7 +84,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
-      contents: read
+      contents: write
     outputs:
       new-version: ${{ steps.semantic-release.outputs.new_release_version }}
       new-tag: ${{ steps.semantic-release.outputs.new_release_git_tag }}

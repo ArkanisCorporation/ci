@@ -27,7 +27,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
 | `wf-setup-node.yml` | Install, lint, test, build, metadata, and diagnostics for Node.js repositories. |
 | `wf-lint-github-actions.yml` | Lint caller GitHub Actions workflows with actionlint. |
-| `wf-verify-release-semantic.yml` | Verify semantic-release in dry-run mode with read-only permissions. |
+| `wf-verify-release-semantic.yml` | Verify semantic-release in dry-run mode, including tag push authorization. |
 | `wf-release-semantic.yml` | Publish semantic-release metadata without `@semantic-release/exec` verification or publishing scripts. |
 | `wf-release-backpropagation.yml` | Create and optionally auto-merge release branch backpropagation PRs. |
 | `wf-verify-publish-nuget.yml` | Pack NuGet packages without publishing or requesting NuGet credentials. |
@@ -108,7 +108,7 @@ jobs:
 ## Release Shape
 
 Release verification and release publication use separate workflows.
-`wf-verify-release-semantic.yml` exercises semantic-release without publish permissions.
+`wf-verify-release-semantic.yml` exercises semantic-release without environments, but it requires `contents: write` because semantic-release verifies tag push access even in dry-run mode.
 `wf-release-semantic.yml` publishes release metadata from an environment-gated job.
 Package publishing, image publishing, and deployment consume release outputs in separate jobs.
 Use `wf-verify-publish-*` and `wf-verify-deploy-*` workflows for dry-run style validation without environments.
@@ -119,7 +119,7 @@ Use `extra-tags` for additional mutable tags such as `latest`.
 ## Repository Pipeline
 
 This repository dogfoods its platform workflows.
-[verify-release.yml](.github/workflows/verify-release.yml) runs `wf-platform-selftest.yml`, the TypeScript pnpm fixture, the .NET NuGet fixture, and the .NET container fixture before read-only release verification on pull requests and manual dispatches.
+[verify-release.yml](.github/workflows/verify-release.yml) runs `wf-platform-selftest.yml`, the TypeScript pnpm fixture, the .NET NuGet fixture, and the .NET container fixture before semantic-release dry-run verification on pull requests and manual dispatches.
 [release.yml](.github/workflows/release.yml) runs the same fixture dogfood series on pull requests, main pushes, and manual dispatches.
 Pull requests call `wf-verify-release-semantic.yml` after the fixture jobs pass.
 Main pushes and manual dispatches call `wf-release-semantic.yml` after the fixture jobs pass.

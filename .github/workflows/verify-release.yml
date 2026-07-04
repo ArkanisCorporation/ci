@@ -2,7 +2,8 @@
 #   Runs this repository's platform selftest, fixture dogfood checks, and semantic-release verification.
 # Remarks:
 #   This workflow does not publish tags or GitHub releases.
-#   It does not bind GitHub environments or request write permissions.
+#   It does not bind GitHub environments.
+#   It grants contents: write only to semantic-release dry-run verification so tag push authorization is checked.
 #   It installs production semantic-release plugins so dry-runs load the same release configuration.
 
 name: verify-release
@@ -97,7 +98,7 @@ jobs:
       - dotnet-container
     uses: ./.github/workflows/wf-verify-release-semantic.yml
     permissions:
-      contents: read
+      contents: write
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
