@@ -12,6 +12,8 @@ Keep each action narrow; prefer more small actions over one flag-heavy action.
 | `dotnet-coverage-report` | Generates ReportGenerator coverage output and optional PR comments. | Writes coverage report files and may update one PR comment. |
 | `dotnet-generated-code-diff` | Runs generated-code commands and verifies generated paths stay unchanged. | May modify workspace files before failing on diff. |
 | `dotnet-jetbrains-cleanupcode` | Runs JetBrains ReSharper CleanupCode and verifies that it produces no Git diff. | May modify workspace files before failing on diff. |
+| `dotnet-pack-nuget` | Restores, optionally stamps, and packs one NuGet project. | Writes packages, package-list.txt, metadata, and an artifact manifest under `artifacts/`. |
+| `dotnet-publish-nuget` | Pushes existing NuGet package files with a caller-provided API key. | Calls `dotnet nuget push` for each matched `.nupkg`. |
 | `dotnet-setversion` | Installs `dotnet-setversion` and applies a bare SemVer value to .NET project files. | Modifies matched `.csproj` files. |
 | `release-backpropagation` | Creates, approves, and optionally auto-merges release backpropagation PRs. | May create PRs, approve them, and enable auto-merge. |
 | `setup-dotnet` | Sets up .NET SDK, NuGet cache, optional local tools, and optional restore. | Writes `NUGET_PACKAGES` and restores cache/tools/dependencies. |
@@ -122,6 +124,75 @@ steps:
       solution: CitizenId.slnx
       profile: "Built-in: Reformat & Apply Syntax Style"
       exclude: "**/*.razor;**/*.svg;**/*.md"
+```
+
+## dotnet-pack-nuget
+
+Use `dotnet-pack-nuget` in caller-owned workflows that need reusable NuGet packaging without moving OIDC token ownership into a reusable workflow.
+The action restores the project, optionally stamps `.csproj` versions with `dotnet-setversion`, packs `.nupkg` and `.snupkg` files, and writes an artifact manifest.
+
+Preconditions:
+
+- The runner has Bash.
+- The repository has already been checked out.
+- The project supports `dotnet restore --locked-mode` and `dotnet pack`.
+- Network access to NuGet is available for restore and optional `dotnet-setversion` install.
+
+Side effects:
+
+- Installs the requested .NET SDK through `actions/setup-dotnet`.
+- Optionally uses `runs-on/cache` for NuGet packages.
+- Optionally modifies matched `.csproj` files before packing.
+- Writes package files under `package-directory`, defaulting to `artifacts/nuget`.
+
+Example:
+
+```yaml
+steps:
+  - name: Checkout
+    uses: actions/checkout@v7
+
+  - name: Pack NuGet package
+    uses: ArkanisCorporation/ci/.github/actions/dotnet-pack-nuget@v1
+    with:
+      project: src/Library/Library.csproj
+      version: ${{ needs.release.outputs.new-version }}
+      dotnet-setversion-working-directory: src/Library
+```
+
+## dotnet-publish-nuget
+
+Use `dotnet-publish-nuget` after a caller-owned authentication step has produced a NuGet API key.
+For Trusted Publishing, run the OIDC login in the same protected caller job immediately before this action.
+
+Preconditions:
+
+- The runner has Bash and `dotnet`.
+- Package files already exist under `package-directory`.
+- `api-key` is passed from a secret or a same-job OIDC login output.
+
+Side effects:
+
+- Masks `api-key`.
+- Runs `dotnet nuget push` for every matched package file.
+- Writes only a non-secret publish count as an output.
+
+Example:
+
+```yaml
+steps:
+  - name: NuGet login
+    id: nuget-login
+    uses: NuGet/login@v1
+    with:
+      user: arkanis
+
+  - name: Publish NuGet package
+    uses: ArkanisCorporation/ci/.github/actions/dotnet-publish-nuget@v1
+    with:
+      api-key: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+      package-directory: artifacts/nuget
+      skip-duplicate: "true"
 ```
 
 ## release-backpropagation

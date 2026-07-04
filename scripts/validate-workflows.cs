@@ -41,6 +41,7 @@ ValidateStepDisplayNameContract();
 ValidateCompositeActions();
 ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
+ValidateNuGetCompositeActionsContract();
 ValidateNuGetPackSymbolContract();
 ValidateCoverageReportContract();
 ValidateGeneratedCodeContract();
@@ -726,14 +727,14 @@ void ValidateNuGetPublishContract()
 
     var workflowText = File.ReadAllText(workflowPath);
 
-    if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion", StringComparison.Ordinal))
+    if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-pack-nuget", StringComparison.Ordinal))
     {
-        AddFailure($"{workflowPath}: NuGet publish workflow must use dotnet-setversion action when enabled.");
+        AddFailure($"{workflowPath}: NuGet publish workflow must delegate package creation to dotnet-pack-nuget.");
     }
 
-    if (!workflowText.Contains("--include-source", StringComparison.Ordinal))
+    if (!workflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-publish-nuget", StringComparison.Ordinal))
     {
-        AddFailure($"{workflowPath}: NuGet publish workflow must support dotnet pack --include-source.");
+        AddFailure($"{workflowPath}: NuGet publish workflow must delegate package pushes to dotnet-publish-nuget.");
     }
 
     if (WorkflowDefinesInput(workflowPath, "dry-run"))
@@ -752,25 +753,100 @@ void ValidateNuGetPublishContract()
     }
 }
 
+void ValidateNuGetCompositeActionsContract()
+{
+    var packActionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-pack-nuget", "action.yml");
+    var publishActionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-publish-nuget", "action.yml");
+    var verifyWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-verify-publish-nuget.yml");
+
+    if (!File.Exists(packActionPath))
+    {
+        AddFailure($"{packActionPath}: NuGet pack composite action is required for caller-owned Trusted Publishing workflows.");
+    }
+    else
+    {
+        var packActionText = File.ReadAllText(packActionPath);
+        foreach (var requiredInput in new[] { "project", "version", "include-symbols", "include-source", "dotnet-setversion", "artifact-name" })
+        {
+            if (!ActionDefinesInput(packActionPath, requiredInput))
+            {
+                AddFailure($"{packActionPath}: dotnet-pack-nuget action must expose {requiredInput} input.");
+            }
+        }
+
+        foreach (var requiredToken in new[] { "dotnet restore", "dotnet pack", "--include-source", "-p:SymbolPackageFormat=snupkg", "dotnet tool install dotnet-setversion" })
+        {
+            if (!packActionText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{packActionPath}: dotnet-pack-nuget action must contain {requiredToken}.");
+            }
+        }
+    }
+
+    if (!File.Exists(publishActionPath))
+    {
+        AddFailure($"{publishActionPath}: NuGet publish composite action is required for caller-owned Trusted Publishing workflows.");
+    }
+    else
+    {
+        var publishActionText = File.ReadAllText(publishActionPath);
+        foreach (var requiredInput in new[] { "api-key", "source", "package-directory", "skip-duplicate" })
+        {
+            if (!ActionDefinesInput(publishActionPath, requiredInput))
+            {
+                AddFailure($"{publishActionPath}: dotnet-publish-nuget action must expose {requiredInput} input.");
+            }
+        }
+
+        foreach (var requiredToken in new[] { "::add-mask::", "dotnet nuget push", "--api-key", "--skip-duplicate" })
+        {
+            if (!publishActionText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{publishActionPath}: dotnet-publish-nuget action must contain {requiredToken}.");
+            }
+        }
+
+        if (publishActionText.Contains("NuGet/login", StringComparison.Ordinal))
+        {
+            AddFailure($"{publishActionPath}: dotnet-publish-nuget must consume an API key from the caller and must not request OIDC itself.");
+        }
+    }
+
+    if (File.Exists(verifyWorkflowPath))
+    {
+        var verifyWorkflowText = File.ReadAllText(verifyWorkflowPath);
+        if (!verifyWorkflowText.Contains("uses: ./.ci/arkanis-ci/.github/actions/dotnet-pack-nuget", StringComparison.Ordinal))
+        {
+            AddFailure($"{verifyWorkflowPath}: NuGet verification workflow must delegate package creation to dotnet-pack-nuget.");
+        }
+    }
+}
+
 void ValidateNuGetPackSymbolContract()
 {
-    foreach (var workflowName in new[] { "wf-verify-publish-nuget.yml", "wf-publish-nuget.yml" })
+    foreach (var relativePath in new[]
+             {
+                 Path.Combine(".github", "actions", "dotnet-pack-nuget", "action.yml"),
+                 Path.Combine(".github", "workflows", "wf-verify-publish-nuget.yml"),
+                 Path.Combine(".github", "workflows", "wf-publish-nuget.yml")
+             })
     {
-        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
-        if (!File.Exists(workflowPath))
+        var contractPath = Path.Combine(repoRoot, relativePath);
+        if (!File.Exists(contractPath))
         {
             continue;
         }
 
-        var workflowText = File.ReadAllText(workflowPath);
-        if (workflowText.Contains("--symbol-package-format", StringComparison.Ordinal))
+        var contractText = File.ReadAllText(contractPath);
+        if (contractText.Contains("--symbol-package-format", StringComparison.Ordinal))
         {
-            AddFailure($"{workflowPath}: dotnet pack must set SymbolPackageFormat with -p:SymbolPackageFormat=snupkg, not unsupported CLI switch --symbol-package-format.");
+            AddFailure($"{contractPath}: dotnet pack must set SymbolPackageFormat with -p:SymbolPackageFormat=snupkg, not unsupported CLI switch --symbol-package-format.");
         }
 
-        if (!workflowText.Contains("-p:SymbolPackageFormat=snupkg", StringComparison.Ordinal))
+        if (relativePath.Contains($"dotnet-pack-nuget{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            && !contractText.Contains("-p:SymbolPackageFormat=snupkg", StringComparison.Ordinal))
         {
-            AddFailure($"{workflowPath}: NuGet symbol packages must pass -p:SymbolPackageFormat=snupkg to dotnet pack.");
+            AddFailure($"{contractPath}: NuGet symbol packages must pass -p:SymbolPackageFormat=snupkg to dotnet pack.");
         }
     }
 }

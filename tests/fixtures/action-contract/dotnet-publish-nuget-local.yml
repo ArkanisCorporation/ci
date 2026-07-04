@@ -1,0 +1,48 @@
+name: dotnet-publish-nuget local smoke fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  publish:
+    # Expected: success without network because dotnet is faked on PATH.
+    name: Publish sample NuGet package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Create fake package and dotnet
+        run: |
+          mkdir -p artifacts/nuget "$RUNNER_TEMP/fake-bin"
+          touch artifacts/nuget/Example.1.0.0.nupkg
+          cat > "$RUNNER_TEMP/fake-bin/dotnet" <<'BASH'
+          #!/usr/bin/env bash
+          if [[ "$1" == "nuget" && "$2" == "push" ]]; then
+            printf '%s\n' "$@" > artifacts/nuget/fake-dotnet-args.txt
+            exit 0
+          fi
+          echo "unexpected dotnet command: $*" >&2
+          exit 1
+          BASH
+          chmod +x "$RUNNER_TEMP/fake-bin/dotnet"
+          echo "$RUNNER_TEMP/fake-bin" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Publish sample package
+        uses: ./.github/actions/dotnet-publish-nuget
+        with:
+          api-key: fake-api-key
+          source: https://api.nuget.org/v3/index.json
+          package-directory: artifacts/nuget
+          skip-duplicate: "true"
+
+      - name: Verify publish command
+        run: |
+          grep -q -- '--skip-duplicate' artifacts/nuget/fake-dotnet-args.txt
+          grep -q -- 'artifacts/nuget/Example.1.0.0.nupkg' artifacts/nuget/fake-dotnet-args.txt
+        shell: bash

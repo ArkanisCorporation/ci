@@ -1,0 +1,118 @@
+# Summary:
+#   Publishes existing NuGet package files with a caller-provided API key.
+# Remarks:
+#   This action expects Bash, dotnet, and package files already present on disk.
+#   It does not request OIDC tokens and does not expose secret outputs.
+
+name: Publish .NET NuGet package
+description: Publishes existing NuGet package files with a caller-provided API key.
+
+inputs:
+  api-key:
+    description: NuGet API key, usually steps.nuget-login.outputs.NUGET_API_KEY from a caller-owned OIDC login step.
+    required: true
+  source:
+    description: NuGet package source.
+    required: false
+    default: https://api.nuget.org/v3/index.json
+  package-directory:
+    description: Directory containing package files.
+    required: false
+    default: artifacts/nuget
+  package-pattern:
+    description: File name pattern passed to find -name.
+    required: false
+    default: "*.nupkg"
+  skip-duplicate:
+    description: Adds --skip-duplicate to dotnet nuget push.
+    required: false
+    default: "true"
+
+outputs:
+  published-count:
+    description: Number of package files passed to dotnet nuget push.
+    value: ${{ steps.publish.outputs.published-count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Publish NuGet packages
+      id: publish
+      run: |
+        if [[ -n "$API_KEY" ]]; then
+          echo "::add-mask::$API_KEY"
+        fi
+
+        if [[ -z "$API_KEY" ]]; then
+          echo "api-key is required." >&2
+          exit 2
+        fi
+
+        if [[ -z "$SOURCE" ]]; then
+          echo "source is required." >&2
+          exit 2
+        fi
+
+        if [[ -z "$PACKAGE_DIRECTORY" || ! -d "$PACKAGE_DIRECTORY" ]]; then
+          echo "package-directory does not exist: $PACKAGE_DIRECTORY" >&2
+          exit 1
+        fi
+
+        case "$SKIP_DUPLICATE" in
+          true|false)
+            ;;
+          *)
+            echo "skip-duplicate must be true or false." >&2
+            exit 2
+            ;;
+        esac
+
+        packages=()
+        while IFS= read -r -d '' package; do
+          packages+=("$package")
+        done < <(find "$PACKAGE_DIRECTORY" -maxdepth 1 -type f -name "$PACKAGE_PATTERN" -print0)
+
+        if [[ "${#packages[@]}" -eq 0 ]]; then
+          echo "No package files matched ${PACKAGE_DIRECTORY}/${PACKAGE_PATTERN}." >&2
+          exit 1
+        fi
+
+        push_args=()
+        if [[ "$SKIP_DUPLICATE" == "true" ]]; then
+          push_args+=(--skip-duplicate)
+        fi
+
+        for package in "${packages[@]}"; do
+          dotnet nuget push "$package" --api-key "$API_KEY" --source "$SOURCE" "${push_args[@]}"
+        done
+
+        echo "published-count=${#packages[@]}" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api-key }}
+        SOURCE: ${{ inputs.source }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        PACKAGE_PATTERN: ${{ inputs.package-pattern }}
+        SKIP_DUPLICATE: ${{ inputs.skip-duplicate }}
+
+    - name: Publish NuGet summary
+      if: always()
+      run: |
+        {
+          echo "# NuGet package publish"
+          echo
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Source | \`${SOURCE}\` |"
+          echo "| Package directory | \`${PACKAGE_DIRECTORY}\` |"
+          echo "| Package pattern | \`${PACKAGE_PATTERN}\` |"
+          echo "| Skip duplicate | \`${SKIP_DUPLICATE}\` |"
+          echo "| Published count | \`${PUBLISHED_COUNT}\` |"
+        } >> "$GITHUB_STEP_SUMMARY"
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        PACKAGE_PATTERN: ${{ inputs.package-pattern }}
+        SKIP_DUPLICATE: ${{ inputs.skip-duplicate }}
+        PUBLISHED_COUNT: ${{ steps.publish.outputs.published-count }}

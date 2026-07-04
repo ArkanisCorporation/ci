@@ -104,9 +104,6 @@ on:
 
 permissions: {}
 
-env:
-  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
-
 jobs:
   verify:
     name: ${{ inputs.version }}
@@ -115,7 +112,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      artifact-manifest: ${{ steps.manifest.outputs.path }}
+      artifact-manifest: ${{ steps.pack.outputs.artifact-manifest }}
     defaults:
       run:
         shell: bash
@@ -125,80 +122,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: ${{ inputs.dotnet-version }}
-          global-json-file: ${{ inputs.global-json-file }}
-
-      - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
-        if: inputs.enable-cache
-        uses: runs-on/cache@v5.0.7
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
-        env:
-          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
-          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
-          ENABLE_CACHE: ${{ inputs.enable-cache }}
-          DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
-        run: |
-          mkdir -p artifacts/meta
-          {
-            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
-            echo "Requested runner labels: ${RUNS_ON_JSON}"
-            echo "NuGet cache enabled: ${ENABLE_CACHE}"
-            echo "Dotnet setversion enabled: ${DOTNET_SETVERSION}"
-            echo "Runner OS: ${RUNNER_OS}"
-            echo "Runner arch: ${RUNNER_ARCH}"
-            dotnet --info
-          } | tee artifacts/meta/runner-contract.txt
-
-      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
-        if: inputs.runs-on-self-hosted
-        run: |
-          {
-            echo "## Self-hosted runner preflight"
-            echo
-            df -h .
-            echo
-            command -v dotnet
-            command -v git
-          } | tee artifacts/meta/self-hosted-preflight.txt
-
-      - name: Validate package inputs @ ${{ inputs.project }} ${{ inputs.version }}
-        env:
-          VERSION: ${{ inputs.version }}
-          DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
-          DOTNET_SETVERSION_PROJECT: ${{ inputs.dotnet-setversion-project }}
-          DOTNET_SETVERSION_RECURSIVE: ${{ inputs.dotnet-setversion-recursive }}
-        run: |
-          if [[ -n "$VERSION" && "$VERSION" =~ ^[vV] ]]; then
-            echo "version must be a bare semantic version without leading v." >&2
-            exit 2
-          fi
-
-          if [[ "$DOTNET_SETVERSION" == "true" && -z "$VERSION" ]]; then
-            echo "version is required when dotnet-setversion is true." >&2
-            exit 2
-          fi
-
-          if [[ "$DOTNET_SETVERSION_RECURSIVE" == "true" && -n "$DOTNET_SETVERSION_PROJECT" ]]; then
-            echo "dotnet-setversion-project requires dotnet-setversion-recursive to be false." >&2
-            exit 2
-          fi
-
-      - name: Restore package project @ ${{ inputs.project }}
-        env:
-          PROJECT: ${{ inputs.project }}
-        run: dotnet restore "$PROJECT" --locked-mode
-
-      - name: Checkout platform action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        if: inputs.dotnet-setversion
+      - name: Checkout platform pack action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -207,111 +131,31 @@ jobs:
           path: .ci/arkanis-ci
           persist-credentials: false
           sparse-checkout: |
-            .github/actions/dotnet-setversion
+            .github/actions/dotnet-pack-nuget
           sparse-checkout-cone-mode: false
 
-      - name: Stamp .NET projects @ ${{ inputs.version }}
-        if: inputs.dotnet-setversion
-        uses: ./.ci/arkanis-ci/.github/actions/dotnet-setversion
+      - name: Pack ${{ inputs.project }} @ ${{ inputs.version }}
+        id: pack
+        uses: ./.ci/arkanis-ci/.github/actions/dotnet-pack-nuget
         with:
+          project: ${{ inputs.project }}
           version: ${{ inputs.version }}
-          working-directory: ${{ inputs.dotnet-setversion-working-directory }}
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
-          recursive: ${{ inputs.dotnet-setversion-recursive }}
-          project: ${{ inputs.dotnet-setversion-project }}
-          tool-version: ${{ inputs.dotnet-setversion-tool-version }}
-
-      - name: Pack ${{ inputs.project }} @ ${{ inputs.version }}
-        env:
-          PROJECT: ${{ inputs.project }}
-          VERSION: ${{ inputs.version }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
-          INCLUDE_SOURCE: ${{ inputs.include-source }}
-        run: |
-          mkdir -p artifacts/nuget
-          pack_args=(
-            dotnet pack "$PROJECT"
-            --configuration "$CONFIGURATION"
-            --no-restore
-            --output artifacts/nuget
-            -p:PackageVersion="$VERSION"
-            -p:ContinuousIntegrationBuild=true
-          )
-
-          if [[ "$INCLUDE_SYMBOLS" == "true" ]]; then
-            pack_args+=(--include-symbols -p:SymbolPackageFormat=snupkg)
-          fi
-
-          if [[ "$INCLUDE_SOURCE" == "true" ]]; then
-            pack_args+=(--include-source)
-          fi
-
-          "${pack_args[@]}"
-
-      - name: Verify package output @ artifacts/nuget
-        run: |
-          shopt -s nullglob
-          packages=(artifacts/nuget/*.nupkg)
-          if [[ "${#packages[@]}" -eq 0 ]]; then
-            echo "dotnet pack produced no .nupkg files." >&2
-            exit 1
-          fi
-          printf '%s\n' "${packages[@]}" | tee artifacts/nuget/package-list.txt
-
-      - name: Write artifact manifest @ artifacts/artifact-manifest.json
-        id: manifest
-        if: always()
-        env:
-          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
-        run: |
-          cat > artifacts/artifact-manifest.json <<JSON
-          {
-            "schema": "ci-artifact-manifest/v1",
-            "producer": {
-              "repository": "${GITHUB_REPOSITORY}",
-              "workflow": "wf-verify-publish-nuget",
-              "run_id": "${GITHUB_RUN_ID}",
-              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
-              "sha": "${GITHUB_SHA}",
-              "job": "verify"
-            },
-            "artifacts": [
-              {
-                "name": "${GITHUB_REPOSITORY#*/}-nuget-verify-${{ inputs.version }}",
-                "kind": "package",
-                "paths": ["artifacts/nuget"],
-                "retention_days": ${RETENTION_DAYS}
-              }
-            ]
-          }
-          JSON
-          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
-
-      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
-        if: always()
-        env:
-          PROJECT: ${{ inputs.project }}
-          VERSION: ${{ inputs.version }}
-          INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
-          INCLUDE_SOURCE: ${{ inputs.include-source }}
-          DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
-        run: |
-          {
-            echo "# NuGet package verification"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
-            echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
-            echo "| Project | \`${PROJECT}\` |"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Include symbols | \`${INCLUDE_SYMBOLS}\` |"
-            echo "| Include source | \`${INCLUDE_SOURCE}\` |"
-            echo "| Dotnet setversion | \`${DOTNET_SETVERSION}\` |"
-            echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          configuration: ${{ inputs.configuration }}
+          enable-cache: ${{ inputs.enable-cache }}
+          runs-on-json: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          runs-on-self-hosted: ${{ inputs.runs-on-self-hosted }}
+          include-symbols: ${{ inputs.include-symbols }}
+          include-source: ${{ inputs.include-source }}
+          dotnet-setversion: ${{ inputs.dotnet-setversion }}
+          dotnet-setversion-working-directory: ${{ inputs.dotnet-setversion-working-directory }}
+          dotnet-setversion-recursive: ${{ inputs.dotnet-setversion-recursive }}
+          dotnet-setversion-project: ${{ inputs.dotnet-setversion-project }}
+          dotnet-setversion-tool-version: ${{ inputs.dotnet-setversion-tool-version }}
+          artifact-name: ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}
+          artifact-retention-days: ${{ inputs.artifact-retention-days }}
+          workflow-name: wf-verify-publish-nuget
 
       - name: Upload package artifacts @ ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()

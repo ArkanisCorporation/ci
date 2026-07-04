@@ -11,6 +11,7 @@ Last verified: 2026-07-04.
 - GitHub variables reference: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
 - GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
+- GitHub OIDC with reusable workflows: https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax
 - GitHub composite action tutorial: https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action
 - GitHub secure use reference: https://docs.github.com/en/actions/reference/security/secure-use
@@ -56,5 +57,6 @@ Last verified: 2026-07-04.
 - Composite actions inside external reusable workflows need explicit repository references or checked-out platform code: https://github.com/orgs/community/discussions/18601
 - Local composite actions resolve against the checked-out caller workspace: https://github.com/actions/runner/issues/1348
 - NuGet Trusted Publishing with shared workflows can require careful policy ownership: https://github.com/NuGet/login/issues/6
+- NuGet Trusted Publishing and shared workflow discussion: https://github.com/orgs/community/discussions/179952
 - semantic-release major tag update request: https://github.com/semantic-release/semantic-release/issues/1515
 - semantic-release dry-run still checks push permissions: https://github.com/semantic-release/semantic-release/issues/2232

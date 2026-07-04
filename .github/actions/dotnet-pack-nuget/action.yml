@@ -1,0 +1,418 @@
+# Summary:
+#   Restores, optionally stamps, packs, and records NuGet package artifacts.
+# Remarks:
+#   This action expects Bash, a checked-out caller repository, and network access for .NET restore/setup.
+#   It does not request OIDC tokens, read package publishing secrets, or publish packages.
+
+name: Pack .NET NuGet package
+description: Restores, optionally stamps, packs, and records NuGet package artifacts.
+
+inputs:
+  project:
+    description: Project path passed to dotnet restore and dotnet pack.
+    required: true
+  version:
+    description: PackageVersion value passed to dotnet pack.
+    required: true
+  dotnet-version:
+    description: .NET SDK version used for setup and version stamping.
+    required: false
+    default: 10.0.x
+  global-json-file:
+    description: Optional global.json path passed to actions/setup-dotnet.
+    required: false
+    default: ""
+  configuration:
+    description: Build configuration.
+    required: false
+    default: Release
+  enable-cache:
+    description: Restores and saves NuGet dependency cache with runs-on/cache when true.
+    required: false
+    default: "true"
+  runs-on-json:
+    description: Effective runner-label JSON recorded for diagnostics.
+    required: false
+    default: ""
+  runs-on-self-hosted:
+    description: True when the effective runner selection targets self-hosted runners.
+    required: false
+    default: "false"
+  include-symbols:
+    description: Creates a .snupkg with dotnet pack --include-symbols and SymbolPackageFormat=snupkg.
+    required: false
+    default: "true"
+  include-source:
+    description: Passes --include-source to dotnet pack when true.
+    required: false
+    default: "true"
+  dotnet-setversion:
+    description: Installs dotnet-setversion and stamps project files before packing when true.
+    required: false
+    default: "true"
+  dotnet-setversion-working-directory:
+    description: Working directory whose csproj files are stamped before dotnet pack.
+    required: false
+    default: .
+  dotnet-setversion-recursive:
+    description: Recursively stamps csproj files under dotnet-setversion-working-directory when true.
+    required: false
+    default: "true"
+  dotnet-setversion-project:
+    description: Optional project path passed to setversion when recursive stamping is false.
+    required: false
+    default: ""
+  dotnet-setversion-tool-version:
+    description: dotnet-setversion tool package version installed before stamping.
+    required: false
+    default: 4.0.0
+  package-directory:
+    description: Directory where packages and package-list.txt are written.
+    required: false
+    default: artifacts/nuget
+  artifact-name:
+    description: Artifact name written into the manifest. Defaults to repository-nuget-version.
+    required: false
+    default: ""
+  artifact-retention-days:
+    description: Package artifact retention in days.
+    required: false
+    default: "30"
+  artifact-manifest-path:
+    description: Path to write the artifact manifest JSON file.
+    required: false
+    default: artifacts/artifact-manifest.json
+  workflow-name:
+    description: Producer workflow name written into the artifact manifest. Defaults to GITHUB_WORKFLOW.
+    required: false
+    default: ""
+
+outputs:
+  artifact-manifest:
+    description: Path to the generated artifact manifest.
+    value: ${{ steps.manifest.outputs.artifact-manifest }}
+  package-directory:
+    description: Directory containing generated packages.
+    value: ${{ steps.verify.outputs.package-directory }}
+  package-list:
+    description: Path to package-list.txt.
+    value: ${{ steps.verify.outputs.package-list }}
+  package-count:
+    description: Number of .nupkg files produced.
+    value: ${{ steps.verify.outputs.package-count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate NuGet pack inputs
+      run: |
+        require_boolean() {
+          case "$2" in
+            true|false)
+              ;;
+            *)
+              echo "$1 must be true or false." >&2
+              exit 2
+              ;;
+          esac
+        }
+
+        if [[ -z "$PROJECT" ]]; then
+          echo "project is required." >&2
+          exit 2
+        fi
+
+        if [[ -z "$VERSION" ]]; then
+          echo "version is required." >&2
+          exit 2
+        fi
+
+        if [[ "$VERSION" =~ ^[vV] ]]; then
+          echo "version must be a bare semantic version without leading v." >&2
+          exit 2
+        fi
+
+        require_boolean enable-cache "$ENABLE_CACHE"
+        require_boolean runs-on-self-hosted "$RUNS_ON_SELF_HOSTED"
+        require_boolean include-symbols "$INCLUDE_SYMBOLS"
+        require_boolean include-source "$INCLUDE_SOURCE"
+        require_boolean dotnet-setversion "$DOTNET_SETVERSION"
+        require_boolean dotnet-setversion-recursive "$DOTNET_SETVERSION_RECURSIVE"
+
+        if [[ "$DOTNET_SETVERSION" == "true" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+          echo "version must be SemVer 2.0.0 compatible when dotnet-setversion is true." >&2
+          exit 2
+        fi
+
+        if [[ "$DOTNET_SETVERSION_RECURSIVE" == "true" && -n "$DOTNET_SETVERSION_PROJECT" ]]; then
+          echo "dotnet-setversion-project requires dotnet-setversion-recursive to be false." >&2
+          exit 2
+        fi
+
+        if [[ -z "$PACKAGE_DIRECTORY" ]]; then
+          echo "package-directory is required." >&2
+          exit 2
+        fi
+
+        if [[ ! "$RETENTION_DAYS" =~ ^[0-9]+$ || "$RETENTION_DAYS" -lt 1 || "$RETENTION_DAYS" -gt 90 ]]; then
+          echo "artifact-retention-days must be an integer from 1 to 90." >&2
+          exit 2
+        fi
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        VERSION: ${{ inputs.version }}
+        ENABLE_CACHE: ${{ inputs.enable-cache }}
+        RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+        INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
+        INCLUDE_SOURCE: ${{ inputs.include-source }}
+        DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
+        DOTNET_SETVERSION_RECURSIVE: ${{ inputs.dotnet-setversion-recursive }}
+        DOTNET_SETVERSION_PROJECT: ${{ inputs.dotnet-setversion-project }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        global-json-file: ${{ inputs.global-json-file }}
+
+    - name: Cache NuGet packages
+      if: inputs.enable-cache == 'true'
+      uses: runs-on/cache@v5.0.7
+      with:
+        path: ${{ github.workspace }}/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Record runner contract
+      run: |
+        mkdir -p artifacts/meta
+        {
+          echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+          echo "Requested runner labels: ${RUNS_ON_JSON}"
+          echo "NuGet cache enabled: ${ENABLE_CACHE}"
+          echo "Dotnet setversion enabled: ${DOTNET_SETVERSION}"
+          echo "Runner OS: ${RUNNER_OS}"
+          echo "Runner arch: ${RUNNER_ARCH}"
+          dotnet --info
+        } | tee artifacts/meta/runner-contract.txt
+      shell: bash
+      env:
+        RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+        RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+        ENABLE_CACHE: ${{ inputs.enable-cache }}
+        DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
+
+    - name: Self-hosted preflight
+      if: ${{ inputs.runs-on-self-hosted == 'true' }}
+      run: |
+        {
+          echo "## Self-hosted runner preflight"
+          echo
+          df -h .
+          echo
+          command -v dotnet
+          command -v git
+        } | tee artifacts/meta/self-hosted-preflight.txt
+      shell: bash
+
+    - name: Restore package project
+      run: dotnet restore "$PROJECT" --locked-mode
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    - name: Install dotnet-setversion
+      if: ${{ inputs.dotnet-setversion == 'true' }}
+      id: install-setversion
+      run: |
+        tool_path="${RUNNER_TEMP}/arkanis-dotnet-setversion"
+        rm -rf "$tool_path"
+        mkdir -p "$tool_path"
+
+        dotnet tool install dotnet-setversion \
+          --tool-path "$tool_path" \
+          --version "$TOOL_VERSION" \
+          --allow-roll-forward
+
+        tool_executable="${tool_path}/setversion"
+        if [[ ! -x "$tool_executable" && -x "${tool_executable}.exe" ]]; then
+          tool_executable="${tool_executable}.exe"
+        fi
+
+        if [[ ! -x "$tool_executable" ]]; then
+          echo "dotnet-setversion installed but setversion executable was not found in $tool_path." >&2
+          exit 1
+        fi
+
+        echo "tool-executable=$tool_executable" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        TOOL_VERSION: ${{ inputs.dotnet-setversion-tool-version }}
+        NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    - name: Stamp .NET projects
+      if: ${{ inputs.dotnet-setversion == 'true' }}
+      run: |
+        if [[ "$WORKING_DIRECTORY" = /* || "$WORKING_DIRECTORY" =~ ^[A-Za-z]:[\\/] ]]; then
+          workdir="$WORKING_DIRECTORY"
+        else
+          workdir="${GITHUB_WORKSPACE}/${WORKING_DIRECTORY}"
+        fi
+
+        if [[ ! -d "$workdir" ]]; then
+          echo "dotnet-setversion-working-directory does not exist: $workdir" >&2
+          exit 1
+        fi
+
+        cd "$workdir"
+
+        if [[ "$RECURSIVE" == "true" ]]; then
+          "$SETVERSION" --recursive "$VERSION"
+        elif [[ -n "$PROJECT" ]]; then
+          "$SETVERSION" "$VERSION" "$PROJECT"
+        else
+          "$SETVERSION" "$VERSION"
+        fi
+      shell: bash
+      env:
+        SETVERSION: ${{ steps.install-setversion.outputs.tool-executable }}
+        VERSION: ${{ inputs.version }}
+        WORKING_DIRECTORY: ${{ inputs.dotnet-setversion-working-directory }}
+        RECURSIVE: ${{ inputs.dotnet-setversion-recursive }}
+        PROJECT: ${{ inputs.dotnet-setversion-project }}
+
+    - name: Pack NuGet package
+      run: |
+        mkdir -p "$PACKAGE_DIRECTORY"
+        pack_args=(
+          dotnet pack "$PROJECT"
+          --configuration "$CONFIGURATION"
+          --no-restore
+          --output "$PACKAGE_DIRECTORY"
+          -p:PackageVersion="$VERSION"
+          -p:ContinuousIntegrationBuild=true
+        )
+
+        if [[ "$INCLUDE_SYMBOLS" == "true" ]]; then
+          pack_args+=(--include-symbols -p:SymbolPackageFormat=snupkg)
+        fi
+
+        if [[ "$INCLUDE_SOURCE" == "true" ]]; then
+          pack_args+=(--include-source)
+        fi
+
+        "${pack_args[@]}"
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        VERSION: ${{ inputs.version }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
+        INCLUDE_SOURCE: ${{ inputs.include-source }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    - name: Verify package output
+      id: verify
+      run: |
+        shopt -s nullglob
+        packages=("$PACKAGE_DIRECTORY"/*.nupkg)
+        if [[ "${#packages[@]}" -eq 0 ]]; then
+          echo "dotnet pack produced no .nupkg files." >&2
+          exit 1
+        fi
+
+        package_list="${PACKAGE_DIRECTORY}/package-list.txt"
+        printf '%s\n' "${packages[@]}" | tee "$package_list"
+        echo "package-directory=$PACKAGE_DIRECTORY" >> "$GITHUB_OUTPUT"
+        echo "package-list=$package_list" >> "$GITHUB_OUTPUT"
+        echo "package-count=${#packages[@]}" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+
+    - name: Write artifact manifest
+      id: manifest
+      if: always()
+      run: |
+        json_escape() {
+          printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+        }
+
+        output_path="$ARTIFACT_MANIFEST_PATH"
+        mkdir -p "$(dirname "$output_path")"
+
+        workflow_name="$WORKFLOW_NAME"
+        if [[ -z "$workflow_name" ]]; then
+          workflow_name="$GITHUB_WORKFLOW"
+        fi
+
+        artifact_name="$ARTIFACT_NAME"
+        if [[ -z "$artifact_name" ]]; then
+          artifact_name="${GITHUB_REPOSITORY#*/}-nuget-${VERSION}"
+        fi
+
+        cat > "$output_path" <<JSON
+        {
+          "schema": "ci-artifact-manifest/v1",
+          "producer": {
+            "repository": "$(json_escape "$GITHUB_REPOSITORY")",
+            "workflow": "$(json_escape "$workflow_name")",
+            "run_id": "$(json_escape "$GITHUB_RUN_ID")",
+            "run_attempt": "$(json_escape "$GITHUB_RUN_ATTEMPT")",
+            "sha": "$(json_escape "$GITHUB_SHA")"
+          },
+          "artifacts": [
+            {
+              "name": "$(json_escape "$artifact_name")",
+              "kind": "package",
+              "paths": ["$(json_escape "$PACKAGE_DIRECTORY")"],
+              "retention_days": ${RETENTION_DAYS}
+            }
+          ]
+        }
+        JSON
+        echo "artifact-manifest=$output_path" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        ARTIFACT_MANIFEST_PATH: ${{ inputs.artifact-manifest-path }}
+        WORKFLOW_NAME: ${{ inputs.workflow-name }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        VERSION: ${{ inputs.version }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+
+    - name: Publish pack summary
+      if: always()
+      run: |
+        {
+          echo "# NuGet package pack"
+          echo
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Runs on self-hosted | \`${RUNS_ON_SELF_HOSTED}\` |"
+          echo "| Runner labels | \`${RUNS_ON_JSON}\` |"
+          echo "| Project | \`${PROJECT}\` |"
+          echo "| Version | \`${VERSION}\` |"
+          echo "| Include symbols | \`${INCLUDE_SYMBOLS}\` |"
+          echo "| Include source | \`${INCLUDE_SOURCE}\` |"
+          echo "| Dotnet setversion | \`${DOTNET_SETVERSION}\` |"
+          echo "| Package directory | \`${PACKAGE_DIRECTORY}\` |"
+          echo "| Manifest | \`${ARTIFACT_MANIFEST}\` |"
+        } >> "$GITHUB_STEP_SUMMARY"
+      shell: bash
+      env:
+        RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+        RUNS_ON_JSON: ${{ inputs.runs-on-json }}
+        PROJECT: ${{ inputs.project }}
+        VERSION: ${{ inputs.version }}
+        INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
+        INCLUDE_SOURCE: ${{ inputs.include-source }}
+        DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        ARTIFACT_MANIFEST: ${{ steps.manifest.outputs.artifact-manifest }}

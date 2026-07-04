@@ -16,9 +16,15 @@ It publishes GitHub release metadata and updates mutable major version tags such
 ## Verification Workflows
 
 `wf-verify-release-semantic.yml` runs semantic-release in dry-run mode with `contents: write` so semantic-release can verify tag push authorization.
-`wf-verify-publish-nuget.yml` packs NuGet packages without credentials or environments.
+`wf-verify-publish-nuget.yml` packs NuGet packages without credentials or environments through `.github/actions/dotnet-pack-nuget`.
 `wf-verify-publish-container-dotnet.yml` builds .NET container images without pushing.
 `wf-verify-deploy-k8s-aspire.yml` validates deployment inputs without configuring kube credentials or applying changes.
+
+## .NET NuGet Publish
+
+Use `.github/actions/dotnet-pack-nuget` and `.github/actions/dotnet-publish-nuget` when NuGet Trusted Publishing must match the consumer repository workflow file.
+The consumer workflow should run `NuGet/login` between those two actions in the same protected job.
+`wf-publish-nuget.yml` remains available for environment-gated workflow reuse and API-key fallback, but caller-owned Trusted Publishing is the safer default for nuget.org policies.
 
 ## .NET Container Publish
 

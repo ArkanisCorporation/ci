@@ -1164,14 +1164,16 @@ Side effects:
 
 - Creates packages under `artifacts/nuget`.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
-- Checks out this CI platform repository under `.ci/arkanis-ci` when `dotnet-setversion` is true, then removes that checkout before pack runs.
-- Modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
+- Checks out this CI platform repository under `.ci/arkanis-ci` for the `dotnet-pack-nuget` action.
+- The pack action modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
 - Does not publish packages.
 
 ## NuGet Publish Workflow
 
 `wf-publish-nuget.yml` restores and packs one project.
-It publishes packages from environment-gated jobs with NuGet Trusted Publishing by default.
+It delegates packaging to `dotnet-pack-nuget` and package pushes to `dotnet-publish-nuget`.
+It publishes packages from environment-gated jobs with NuGet Trusted Publishing or API-key fallback.
+Use the composite action caller pattern below when NuGet Trusted Publishing must match the consumer repository workflow file.
 Trusted Publishing resolves the NuGet profile or organization from `nuget-user`, then caller secret `NUGET_USER`, then caller configuration variable `NUGET_USER`.
 Prefer `nuget-user` or a repository, organization, or environment configuration variable because NuGet profile and organization names are normally not secret.
 Use the secret fallback only when a caller deliberately treats the NuGet owner as sensitive.
@@ -1186,21 +1188,13 @@ Flow:
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> dotnet[[Setup .NET]]
+  checkout --> platformPack[("CI platform checkout")]
+  platformPack --> packAction[[dotnet-pack-nuget]]
+  packAction --> dotnet[[Setup .NET]]
   dotnet --> cache{enable cache?}
   cache -->|yes| nugetCache[("NuGet cache")]
-  cache -->|no| validate[[Validate runner contract]]
-  nugetCache --> validate
-  validate --> preflight{self-hosted?}
-  preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| inputs[[Validate publish inputs]]
-  sh --> inputs
-  inputs --> restore[[Restore package project]]
-  restore --> stamp{dotnet-setversion?}
-  stamp -->|yes| platform[("CI platform checkout")]
-  platform --> setversion[[dotnet-setversion action]]
-  stamp -->|no| pack[[Pack package]]
-  setversion --> pack
+  cache -->|no| pack[[Restore, stamp, and pack]]
+  nugetCache --> pack
   pack --> verify[[Verify package output]]
   verify --> packageArtifact[/Package artifact/]
   packageArtifact --> auth{trusted publishing?}
@@ -1208,11 +1202,11 @@ flowchart TD
   auth -->|no| envApi[["Environment-gated API-key publish job"]]
   envOidc --> nugetUser[[Resolve nuget-user, NUGET_USER secret, or NUGET_USER variable]]
   nugetUser --> oidc[[NuGet/login OIDC]]
-  oidc --> trustedPush[[dotnet nuget push]]
+  oidc --> platformPublish[("CI platform checkout")]
+  platformPublish --> publishAction[[dotnet-publish-nuget]]
   envApi --> apiKey[("NUGET_API_KEY")]
-  apiKey --> keyPush[[dotnet nuget push]]
-  trustedPush --> manifest[/artifact-manifest.json/]
-  keyPush --> manifest
+  apiKey --> platformPublish
+  publishAction --> manifest[/artifact-manifest.json/]
   manifest --> summary>Step summary]
   summary --> outputs(("artifact-manifest"))
   classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
@@ -1221,9 +1215,9 @@ flowchart TD
   classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
-  class caller,platform repo
-  class checkout,dotnet,validate,sh,inputs,restore,setversion,pack,verify,envOidc,envApi,nugetUser,oidc,trustedPush,keyPush action
-  class cache,preflight,stamp,auth decision
+  class caller,platformPack,platformPublish repo
+  class checkout,packAction,dotnet,pack,verify,envOidc,envApi,nugetUser,oidc,publishAction action
+  class cache,auth decision
   class packageArtifact,manifest,summary artifact
   class outputs output
   class nugetCache,apiKey external
@@ -1243,56 +1237,52 @@ Side effects:
 
 - Creates packages under `artifacts/nuget`.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
-- Checks out this CI platform repository under `.ci/arkanis-ci` when `dotnet-setversion` is true, then removes that checkout before pack runs.
-- Modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
+- Checks out this CI platform repository under `.ci/arkanis-ci` for the pack and publish composite actions.
+- The pack action modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
 - Publishes packages from the selected environment-gated publish job.
 
 ## NuGet Trusted Publishing Caller Pattern
 
 Use a caller-owned protected publish job when nuget.org policy ownership must match the consumer repository workflow file.
-Call `wf-verify-publish-nuget.yml` first to produce package artifacts without secrets.
-Then download the package artifact in the caller repository publish job, run `NuGet/login`, and push with the returned API key in a subsequent step in the same job.
+Call `dotnet-pack-nuget` first, then run `NuGet/login`, then pass the login output directly to `dotnet-publish-nuget`.
+Keep those steps in the same protected job so the temporary API key never crosses a job or workflow boundary.
 Do not pass the temporary API key through job outputs, workflow outputs, artifacts, caches, or summaries.
 
 Example:
 
 ```yaml
 jobs:
-  verify_nuget:
-    uses: ArkanisCorporation/ci/.github/workflows/wf-verify-publish-nuget.yml@v1
-    permissions:
-      contents: read
-    with:
-      project: src/Library/Library.csproj
-      version: ${{ needs.release.outputs.new-version }}
-
   publish_nuget:
-    needs: verify_nuget
+    name: NuGet
+    if: ${{ needs.release.outputs.new-version != '' }}
+    needs: release
     runs-on: ubuntu-latest
     environment: nuget
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Download verified package
-        uses: actions/download-artifact@v7
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Pack package
+        uses: ArkanisCorporation/ci/.github/actions/dotnet-pack-nuget@v1
         with:
-          pattern: '*-nuget-verify-*'
-          path: artifacts
-          merge-multiple: true
+          project: src/Library/Library.csproj
+          version: ${{ needs.release.outputs.new-version }}
+          dotnet-setversion-working-directory: src/Library
+
       - name: NuGet login
         id: nuget-login
         uses: NuGet/login@v1
         with:
           user: arkanis
+
       - name: Push packages
-        run: |
-          for package in artifacts/nuget/*.nupkg; do
-            dotnet nuget push "$package" \
-              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
-          done
+        uses: ArkanisCorporation/ci/.github/actions/dotnet-publish-nuget@v1
+        with:
+          api-key: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          package-directory: artifacts/nuget
 ```
 
 ## Matrix Caller Patterns
@@ -1362,6 +1352,8 @@ jobs:
     name: NuGet - ${{ matrix.package }}
     if: ${{ needs.release.outputs.new-version != '' }}
     needs: release
+    runs-on: ${{ vars.RUNNER_DEFAULT || 'ubuntu-latest' }}
+    environment: publish-nuget
     strategy:
       fail-fast: false
       matrix:
@@ -1375,26 +1367,35 @@ jobs:
           - package: client
             project: src/Client/Client.csproj
             version-working-directory: src/Client
-    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-nuget.yml@v1
     permissions:
       contents: read
       id-token: write
-    with:
-      runs-on: ${{ vars.RUNNER_DEFAULT || 'ubuntu-latest' }}
-      runs-on-self-hosted: false
-      project: ${{ matrix.project }}
-      version: ${{ needs.release.outputs.new-version }}
-      dotnet-setversion-working-directory: ${{ matrix.version-working-directory }}
-      environment-name: publish-nuget
-      # Omit nuget-user when caller NUGET_USER secret or configuration variable is set.
-      # nuget-user: arkanis
-    # secrets:
-    #   NUGET_USER: ${{ secrets.NUGET_USER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Pack package
+        uses: ArkanisCorporation/ci/.github/actions/dotnet-pack-nuget@v1
+        with:
+          project: ${{ matrix.project }}
+          version: ${{ needs.release.outputs.new-version }}
+          dotnet-setversion-working-directory: ${{ matrix.version-working-directory }}
+
+      - name: NuGet login
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish package
+        uses: ArkanisCorporation/ci/.github/actions/dotnet-publish-nuget@v1
+        with:
+          api-key: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          package-directory: artifacts/nuget
 ```
 
 Set `NUGET_USER` as a caller repository, organization, or `publish-nuget` environment configuration variable to share one NuGet owner across matrix children.
-Pass a named `NUGET_USER` secret only when the caller deliberately treats the NuGet owner as sensitive.
-Pass `nuget-user` only when a package needs to override that shared owner.
+Use separate jobs or matrix entries when packages need different nuget.org policy owners or environments.
 
 The same pattern applies to `wf-verify-publish-container-dotnet.yml`, `wf-verify-publish-nuget.yml`, verification workflows, and deployment workflows when each matrix child can run independently.
 For deployment matrices, keep `environment-name`, namespaces, concurrency policy, and rollback ownership explicit per target.

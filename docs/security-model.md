@@ -48,7 +48,10 @@ This separation keeps release metadata from becoming a privileged shell-script d
 ## NuGet Trusted Publishing
 
 Trusted Publishing is preferred over long-lived API keys.
-`wf-publish-nuget.yml` uses `NuGet/login` when `trusted-publishing` is true.
+NuGet currently validates the workflow that requests the OIDC token.
+For caller-owned nuget.org policies, keep that token request in the consumer repository workflow.
+Use `.github/actions/dotnet-pack-nuget`, then `NuGet/login`, then `.github/actions/dotnet-publish-nuget` with `api-key: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}` in the same protected job.
+`wf-publish-nuget.yml` still uses `NuGet/login` when `trusted-publishing` is true, so use it only when the nuget.org policy intentionally matches that reusable workflow.
 The NuGet user resolves from `nuget-user`, then a caller `NUGET_USER` secret, then a caller repository, organization, or environment configuration variable named `NUGET_USER`.
 Prefer the input or configuration variable because NuGet profile and organization names are normally not secret.
 Use the secret only when the caller deliberately treats the NuGet owner as sensitive.
@@ -61,13 +64,13 @@ The API-key fallback job uses `contents: read` plus the explicit `NUGET_API_KEY`
 Important edge case:
 NuGet Trusted Publishing validates the workflow that requests the OIDC token.
 Consumers must configure the nuget.org policy to match the reusable workflow behavior they use.
-If that does not fit a package policy, use API-key fallback or keep the `NuGet/login` step in the consumer repository.
+If that does not fit a package policy, use the composite action pattern or API-key fallback.
 
 Caller-owned Trusted Publishing:
-Run `NuGet/login` and `dotnet nuget push` in the same protected caller job when the nuget.org policy must match the caller workflow file exactly.
+Run `NuGet/login` and `dotnet-publish-nuget` in the same protected caller job when the nuget.org policy must match the caller workflow file exactly.
 The `NuGet/login` output is a short-lived API key for subsequent steps in that job.
 Do not pass that value through job outputs or artifacts.
-If reusable platform packaging is still desired, call the package verification workflow first, then download the verified package artifact in the protected caller-owned publish job.
+If reusable platform packaging is desired, call `dotnet-pack-nuget` earlier in the same job before requesting the short-lived key.
 
 ## Secrets
 
