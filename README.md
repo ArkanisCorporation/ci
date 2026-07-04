@@ -219,12 +219,14 @@ The repository release workflow installs `semantic-release-major-tag@0.3.2` so d
 dotnet run --file scripts/generate-docs.cs -- --check
 dotnet run --file scripts/validate-workflows.cs
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
-act workflow_dispatch -W .github/workflows/wf-platform-selftest.yml -j validate -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
-act workflow_dispatch -W tests/fixtures/workflow-contract/typescript-pnpm-local.yml -j node-test -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/act-local.ps1 workflow_dispatch -W .github/workflows/wf-platform-selftest.yml -j validate
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/act-local.ps1 workflow_dispatch -W tests/fixtures/workflow-contract/typescript-pnpm-local.yml -j node-test
 ```
 
 The validation script requires version tags for external actions.
 It also checks that generated workflow input tables in `docs/workflow-catalog.md` are current.
 The platform selftest pins actionlint 1.7.12 through `raven-actions/actionlint@v2` before running the validator.
-The `act` command runs the platform self-test locally.
+The repository `.actrc` pins the local runner image, architecture, artifact server path, and pull behavior.
+The `scripts/act-local.ps1` launcher preserves an existing `DOCKER_HOST`, and on Windows defaults to Docker Desktop's Linux engine pipe.
+The platform selftest `act` command runs the platform self-test locally.
 The TypeScript fixture `act` command runs one bounded mock-project smoke test.

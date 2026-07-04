@@ -52,6 +52,7 @@ ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
 ValidateAspireAppHostInputContract();
 ValidateRepositoryPipelineContract();
+ValidateLocalActContract();
 await ValidateDotNetActionFileScriptsAnalyzerCleanAsync();
 await ValidateGeneratedWorkflowDocsAsync();
 await RunActionlintWhenAvailableAsync();
@@ -462,7 +463,7 @@ void ValidateDotNetJetBrainsContract()
     else
     {
         var actionScriptText = File.ReadAllText(actionScriptPath);
-        foreach (var requiredToken in new[] { "#:package CliWrap@", "cleanupcode", "git", "diff" })
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "cleanupcode", "git", "diff", "Applied changes" })
         {
             if (!actionScriptText.Contains(requiredToken, StringComparison.Ordinal))
             {
@@ -1361,6 +1362,56 @@ void ValidateRepositoryPipelineContract()
         {
             AddFailure($"{releaseConfigPath}: semantic-release config must create/update vN major version tags with {majorTagPlugin}.");
         }
+    }
+}
+
+void ValidateLocalActContract()
+{
+    var actConfigPath = Path.Combine(repoRoot, ".actrc");
+    var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+    var readmePath = Path.Combine(repoRoot, "README.md");
+    var actScriptPath = Path.Combine(repoRoot, "scripts", "act-local.ps1");
+
+    var requiredActConfigLines = new[]
+    {
+        "--container-architecture=linux/amd64",
+        "-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest",
+        "--artifact-server-path=.act-artifacts",
+        "--pull=false",
+    };
+
+    if (!File.Exists(actConfigPath))
+    {
+        AddFailure($"{actConfigPath}: repo-local act configuration is required.");
+    }
+    else
+    {
+        var actConfigText = File.ReadAllText(actConfigPath);
+        foreach (var requiredLine in requiredActConfigLines)
+        {
+            if (!actConfigText.Contains(requiredLine, StringComparison.Ordinal))
+            {
+                AddFailure($"{actConfigPath}: act config must contain {requiredLine}.");
+            }
+        }
+    }
+
+    if (!File.Exists(gitIgnorePath)
+        || !File.ReadAllText(gitIgnorePath).Contains(".act-artifacts/", StringComparison.Ordinal))
+    {
+        AddFailure($"{gitIgnorePath}: local act artifact output must be ignored.");
+    }
+
+    if (!File.Exists(actScriptPath)
+        || !File.ReadAllText(actScriptPath).Contains("dockerDesktopLinuxEngine", StringComparison.Ordinal))
+    {
+        AddFailure($"{actScriptPath}: Windows act launcher must set the Docker Desktop Linux engine pipe.");
+    }
+
+    if (!File.Exists(readmePath)
+        || !File.ReadAllText(readmePath).Contains("scripts/act-local.ps1", StringComparison.Ordinal))
+    {
+        AddFailure($"{readmePath}: local validation docs must use the act launcher.");
     }
 }
 

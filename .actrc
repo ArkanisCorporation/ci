@@ -1,0 +1,4 @@
+--container-architecture=linux/amd64
+-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest
+--artifact-server-path=.act-artifacts
+--pull=false
