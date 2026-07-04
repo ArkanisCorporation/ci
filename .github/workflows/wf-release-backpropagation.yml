@@ -90,6 +90,9 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     environment: ${{ inputs.environment-name }}
+    concurrency:
+      group: release-backpropagation-${{ inputs.default-branch }}-${{ inputs.release-ref-name }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write

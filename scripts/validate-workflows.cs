@@ -49,6 +49,7 @@ ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
 ValidatePlatformSelftestContract();
 ValidateReleaseBackpropagationContract();
+ValidateStateChangingWorkflowConcurrencyContract();
 ValidateDotNetJetBrainsContract();
 ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
@@ -1544,6 +1545,34 @@ void ValidateRepositoryPipelineContract()
         if (!releaseConfigText.Contains(majorTagPlugin, StringComparison.Ordinal))
         {
             AddFailure($"{releaseConfigPath}: semantic-release config must create/update vN major version tags with {majorTagPlugin}.");
+        }
+    }
+}
+
+void ValidateStateChangingWorkflowConcurrencyContract()
+{
+    RequireWorkflowText("wf-release-semantic.yml", "group: release-semantic-${{ inputs.environment-name }}");
+    RequireWorkflowText("wf-release-semantic.yml", "cancel-in-progress: false");
+    RequireWorkflowText("wf-release-backpropagation.yml", "group: release-backpropagation-${{ inputs.default-branch }}-${{ inputs.release-ref-name }}");
+    RequireWorkflowText("wf-release-backpropagation.yml", "cancel-in-progress: false");
+    RequireWorkflowText("wf-publish-container-dotnet.yml", "group: publish-container-${{ inputs.environment-name }}-${{ inputs.registry }}-${{ inputs.image }}");
+    RequireWorkflowText("wf-publish-container-dotnet.yml", "cancel-in-progress: false");
+    RequireWorkflowText("wf-publish-nuget.yml", "group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}");
+    RequireWorkflowText("wf-deploy-k8s-aspire.yml", "group: deploy-k8s-${{ inputs.environment-name }}-${{ inputs.kubernetes-namespace }}");
+
+    void RequireWorkflowText(string workflowName, string expectedText)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            AddFailure($"{workflowPath}: state-changing workflow is required for concurrency contract validation.");
+            return;
+        }
+
+        var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
+        if (!workflowText.Contains(expectedText, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: state-changing workflows must serialize shared release, publish, or deploy side effects with '{expectedText}'.");
         }
     }
 }

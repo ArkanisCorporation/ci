@@ -991,6 +991,7 @@ Side effects:
 `wf-release-semantic.yml` runs semantic-release with Node 24 by default.
 It rejects `@semantic-release/exec` unless `allow-exec-plugin` is explicitly true.
 It binds the release job to `environment-name`.
+It serializes release side effects per `environment-name` with `cancel-in-progress: false`.
 Callers can pass pinned semantic-release plugins through `extra-plugins`, for example `semantic-release-major-tag@0.3.2` when repository config updates mutable major version tags such as `v1`.
 
 Flow:
@@ -1043,6 +1044,7 @@ Side effects:
 `wf-release-backpropagation.yml` creates a pull request from a release branch back to the default branch.
 It can approve the PR using `PR_AUTOMATION_PAT` and enable auto-merge with GitHub CLI.
 It binds the backpropagation job to `environment-name` so the environment can provide `PR_AUTOMATION_PAT`.
+It serializes backpropagation per `default-branch` and `release-ref-name` with `cancel-in-progress: false`.
 Use it only from trusted release workflows after semantic-release publishes a version.
 
 Flow:
@@ -1416,6 +1418,7 @@ It disables SBOM and provenance emission so verification does not need OIDC or a
 By default it uses a generated `type=gha` BuildKit cache when `enable-cache` is true and both `cache-from` and `cache-to` are empty.
 Set `enable-cache` to false for cold image-build validation or runners without GitHub cache service access.
 Set `cache-from` and `cache-to` when the caller needs registry cache, remote BuildKit portability, or a dedicated cache scope.
+It serializes registry writes per `environment-name`, `registry`, and `image` with `cancel-in-progress: false`.
 
 Flow:
 
@@ -1640,6 +1643,7 @@ Side effects:
 `wf-deploy-k8s-aspire.yml` deploys with `dotnet tool run aspire -- deploy`.
 It accepts an optional `KUBE_CONFIG` secret.
 If `KUBE_CONFIG` is omitted, the runner must already have a valid kube context.
+It serializes deployments per `environment-name` and `kubernetes-namespace` with `cancel-in-progress: false`.
 
 Flow:
 

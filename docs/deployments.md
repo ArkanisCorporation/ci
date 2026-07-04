@@ -31,6 +31,8 @@ source -> build artifact/image digest -> attest/manifest -> environment approval
 
 ## Concurrency
 
+Last verified: 2026-07-04 against GitHub Actions concurrency docs.
+
 Concurrency group per app/env:
 
 ```yaml
@@ -41,6 +43,7 @@ concurrency:
 ```
 
 Use environment protection for prod.
+Current platform workflows omit `queue: max` until the pinned actionlint version supports the key.
 
 ## Rollback
 

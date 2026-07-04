@@ -7,6 +7,7 @@ Last verified: 2026-07-04.
 - GitHub reusable workflows: https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
 - GitHub reusable workflow configuration comparison: https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations
 - GitHub workflow syntax: https://docs.github.com/actions/using-workflows/workflow-syntax-for-github-actions
+- GitHub workflow concurrency: https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
 - GitHub contexts reference: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
 - GitHub variables reference: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
 - GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
@@ -53,6 +54,7 @@ Last verified: 2026-07-04.
 - Non-zipped artifacts: https://github.blog/changelog/2026-02-26-github-actions-now-supports-uploading-and-downloading-non-zipped-artifacts/
 - Self-hosted runner minimum version enforcement: https://github.blog/changelog/2026-06-12-github-actions-minimum-version-enforcement-timeline-for-self-hosted-runners/
 - Safer `pull_request_target` defaults: https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/
+- GitHub Actions larger concurrency queues: https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/
 
 ## Known Edge Discussions
 
@@ -62,3 +64,4 @@ Last verified: 2026-07-04.
 - NuGet Trusted Publishing and shared workflow discussion: https://github.com/orgs/community/discussions/179952
 - semantic-release major tag update request: https://github.com/semantic-release/semantic-release/issues/1515
 - semantic-release dry-run still checks push permissions: https://github.com/semantic-release/semantic-release/issues/2232
+- actionlint `queue` key support gap: https://github.com/rhysd/actionlint/issues/657

@@ -17,4 +17,6 @@ Audience: agents + maintainers.
 | Node action runtime warning | Update action version/SHA to Node24-compatible |
 | Cache poisoning concern | Exact keys, no secret cache, trusted warmers |
 | Release rerun duplicates | Idempotent publish flags + digest check |
-| K8s deploy race | Env concurrency group + queued deploys |
+| Release/publish/deploy race | Job-level concurrency by protected target |
+| K8s deploy race | Environment and namespace concurrency group |
+| Queued concurrency backlog | Add `queue: max` after pinned actionlint supports it |

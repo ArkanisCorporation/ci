@@ -109,7 +109,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     environment: ${{ inputs.environment-name }}
     concurrency:
-      group: deploy-k8s-${{ inputs.environment-name }}
+      group: deploy-k8s-${{ inputs.environment-name }}-${{ inputs.kubernetes-namespace }}
       cancel-in-progress: false
     permissions:
       contents: read
