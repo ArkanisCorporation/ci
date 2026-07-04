@@ -207,6 +207,7 @@ jobs:
 
 This repository dogfoods its platform workflows.
 [release.yml](.github/workflows/release.yml) runs the same fixture dogfood series on pull requests, main pushes, and manual dispatches.
+The repository pipeline jobs use `vars.RUNNER_DEFAULT` for runner selection and fall back to `daedalus`.
 Pull requests call `wf-verify-release-semantic.yml` after the fixture jobs pass.
 Main pushes and manual dispatches call `wf-release-semantic.yml` after the fixture jobs pass.
 [release.config.cjs](release.config.cjs) publishes GitHub release metadata and updates mutable major version tags such as `v1`.

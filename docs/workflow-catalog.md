@@ -52,6 +52,8 @@ Audience: consumers and platform maintainers.
 |---|---|---|
 | `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: write` for semantic-release dry-run tag push checks.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
 
+`release.yml` passes `vars.RUNNER_DEFAULT || 'daedalus'` and `runs-on-self-hosted: true` to every repository-local reusable workflow call.
+
 ## Common Inputs
 
 | Input | Meaning |

@@ -1469,6 +1469,15 @@ void ValidateRepositoryPipelineContract()
             }
         }
 
+        var repositoryWorkflowCallCount = Regex.Matches(releaseText, @"(?m)^\s+uses:\s+\./\.github/workflows/wf-[A-Za-z0-9-]+\.yml\s*$").Count;
+        var repositoryDefaultRunnerCount = Regex.Matches(releaseText, @"(?m)^\s+runs-on:\s+\$\{\{\s*vars\.RUNNER_DEFAULT\s*\|\|\s*'daedalus'\s*\}\}\s*$").Count;
+        var repositorySelfHostedRunnerCount = Regex.Matches(releaseText, @"(?m)^\s+runs-on-self-hosted:\s+true\s*$").Count;
+        if (repositoryDefaultRunnerCount != repositoryWorkflowCallCount
+            || repositorySelfHostedRunnerCount != repositoryWorkflowCallCount)
+        {
+            AddFailure($"{releaseWorkflowPath}: every repository workflow call must use RUNNER_DEFAULT with the daedalus fallback and self-hosted runner behavior.");
+        }
+
         if (!releaseText.Contains("uses: ./.github/workflows/wf-verify-release-semantic.yml", StringComparison.Ordinal))
         {
             AddFailure($"{releaseWorkflowPath}: release workflow must call wf-verify-release-semantic.yml for pull requests.");

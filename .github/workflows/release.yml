@@ -22,8 +22,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
 
   typescript-pnpm-lint:
     name: typescript-pnpm lint @ ${{ github.head_ref || github.ref_name }}
@@ -31,8 +31,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       node-version: 24.x
       package-manager: pnpm
       package-manager-version: "10"
@@ -45,8 +45,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       node-version: 24.x
       package-manager: pnpm
       package-manager-version: "10"
@@ -59,8 +59,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       node-version: 24.x
       package-manager: pnpm
       package-manager-version: "10"
@@ -73,8 +73,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       dotnet-version: 10.0.x
       working-directory: tests/fixtures/mock-projects/dotnet-nuget-library
       solution: Mock.NuGet.Library.slnx
@@ -91,8 +91,8 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       dotnet-version: 10.0.x
       solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
       restore-locked-mode: true
@@ -107,8 +107,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       project: tests/fixtures/mock-projects/dotnet-nuget-library/src/Mock.NuGet.Library/Mock.NuGet.Library.csproj
       version: 1.2.3-ci.1
       dotnet-version: 10.0.x
@@ -121,8 +121,8 @@ jobs:
     permissions:
       contents: read
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       image: local/mock-container-app
       context: tests/fixtures/mock-projects/dotnet-container-app
       dockerfile: tests/fixtures/mock-projects/dotnet-container-app/src/Mock.Container.App/Dockerfile
@@ -149,8 +149,8 @@ jobs:
     permissions:
       contents: write
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       extra-plugins: |
         semantic-release-major-tag@0.3.2
 
@@ -172,8 +172,8 @@ jobs:
       issues: write
       pull-requests: write
     with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
       environment-name: release
       extra-plugins: |
         semantic-release-major-tag@0.3.2
