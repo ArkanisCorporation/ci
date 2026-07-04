@@ -1036,7 +1036,7 @@ void ValidateWorkflowLintContract()
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
-        foreach (var requiredToken in new[] { "raven-actions/actionlint@v2", "runs-on-self-hosted", "enable-cache" })
+        foreach (var requiredToken in new[] { "actions/setup-node@v6", "node-version: \"24.x\"", "package-manager-cache: false", "raven-actions/actionlint@v2", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
         {
             if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
             {
@@ -1044,11 +1044,18 @@ void ValidateWorkflowLintContract()
             }
         }
 
-        foreach (var requiredReportingToken in new[] { "Set up Python 3.14 + pipx", "python --version", "pipx --version", "| Python |", "| pipx |" })
+        var setupNodeIndex = workflowText.IndexOf("uses: actions/setup-node@v6", StringComparison.Ordinal);
+        var actionlintIndex = workflowText.IndexOf("uses: raven-actions/actionlint@v2", StringComparison.Ordinal);
+        if (setupNodeIndex < 0 || actionlintIndex < 0 || setupNodeIndex > actionlintIndex)
+        {
+            AddFailure($"{workflowPath}: GitHub Actions lint workflow must set up Node.js before raven-actions/actionlint.");
+        }
+
+        foreach (var requiredReportingToken in new[] { "Set up Python 3.14 + pipx", "Set up Node.js 24 + npm", "python --version", "pipx --version", "node --version", "npm --version", "| Python |", "| pipx |", "| Node |", "| npm |" })
         {
             if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
             {
-                AddFailure($"{workflowPath}: GitHub Actions lint workflow must report {requiredReportingToken} after setting up Python and pipx.");
+                AddFailure($"{workflowPath}: GitHub Actions lint workflow must report {requiredReportingToken} after setting up Python, pipx, Node.js, and npm.");
             }
         }
     }

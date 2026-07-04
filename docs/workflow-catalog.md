@@ -174,7 +174,7 @@ Schema: `schemas/workflow-inputs/wf-lint-github-actions.schema.json`.
 | `runs-on` | string | no | `"ubuntu-latest"` | n/a |
 | `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
-| `enable-cache` | boolean | no | `true` | n/a |
+| `enable-cache` | boolean | no | `true` | Enable the actionlint binary cache used by raven-actions/actionlint. |
 | `timeout-minutes` | integer | no | `10` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
@@ -870,7 +870,7 @@ flowchart TD
 
 ## GitHub Actions Lint Workflow
 
-`wf-lint-github-actions.yml` checks out the caller repository, sets up Python with pipx, records toolchain versions, and runs actionlint.
+`wf-lint-github-actions.yml` checks out the caller repository, sets up Python with pipx, sets up Node.js with npm, records toolchain versions, and runs actionlint.
 Use it to replace repository-local workflow lint jobs during migration.
 
 Flow:
@@ -879,7 +879,8 @@ Flow:
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
   checkout --> python[[Set up Python and pipx]]
-  python --> validate[[Validate runner contract]]
+  python --> node[[Set up Node.js and npm]]
+  node --> validate[[Validate runner contract]]
   validate --> preflight{self-hosted?}
   preflight -->|yes| sh[[Self-hosted preflight]]
   preflight -->|no| lint[[raven-actions/actionlint]]
@@ -893,7 +894,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
-  class checkout,python,validate,sh,lint action
+  class checkout,python,node,validate,sh,lint action
   class preflight decision
   class summary artifact
   class outputs output
@@ -903,12 +904,14 @@ Preconditions:
 
 - Caller workflows live under `.github/workflows`.
 - The selected runner can run `actions/setup-python@v6` and install pipx.
+- The selected runner can run `actions/setup-node@v6` or has Node.js 24 in the Actions tool cache.
 - The selected runner can run `raven-actions/actionlint@v2`.
 
 Side effects:
 
 - Reads workflow YAML files.
-- Records Python and pipx versions in diagnostics and the step summary.
+- Reads and writes the actionlint binary cache when `enable-cache` is true.
+- Records Python, pipx, Node.js, and npm versions in diagnostics and the step summary.
 - Writes a short step summary.
 
 Example:

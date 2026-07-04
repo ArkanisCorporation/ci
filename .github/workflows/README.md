@@ -53,6 +53,7 @@ It supports CitizenId-style Wolverine generated handler checks by building once,
 ## GitHub Actions Lint
 
 `wf-lint-github-actions.yml` is the reusable caller workflow lint gate.
+It sets up Node.js because raven-actions/actionlint may call npm on cold cache misses.
 It runs actionlint with read-only repository permissions.
 
 ## Release Backpropagation

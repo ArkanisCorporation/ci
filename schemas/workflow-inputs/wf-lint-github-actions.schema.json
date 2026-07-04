@@ -19,6 +19,7 @@
     },
     "enable-cache": {
       "type": "boolean",
+      "description": "Enable the actionlint binary cache used by raven-actions/actionlint.",
       "default": true
     },
     "timeout-minutes": {
