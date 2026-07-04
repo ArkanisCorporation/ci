@@ -1199,6 +1199,102 @@ jobs:
           done
 ```
 
+## Matrix Caller Patterns
+
+GitHub Actions supports `strategy.matrix` on jobs that call reusable workflows.
+Use this when one release should fan out to independent packages, images, verification targets, or deployment targets.
+Put target-specific values in `matrix.include` when each target needs a different project file, Dockerfile, image name, working directory, or environment.
+Pass those values through `with` to the called workflow.
+Set `fail-fast: false` for publish fan-out so one failed target does not cancel unrelated publish jobs.
+Do not aggregate matrix reusable-workflow outputs directly.
+Use the package, metadata, manifest, or deployment artifacts when a downstream job needs all matrix results.
+
+Container image matrix example:
+
+```yaml
+jobs:
+  publish_images:
+    name: Image - ${{ matrix.target }}
+    if: ${{ needs.release.outputs.new-version != '' }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: web
+            image: ghcr.io/arkaniscorporation/example-web
+            dockerfile: src/Web/Dockerfile
+            version-working-directory: src/Web
+          - target: bot
+            image: ghcr.io/arkaniscorporation/example-bot
+            dockerfile: src/Bot/Dockerfile
+            version-working-directory: src/Bot
+          - target: gateway
+            image: ghcr.io/arkaniscorporation/example-gateway
+            dockerfile: src/Gateway/Dockerfile
+            version-working-directory: src/Gateway
+          - target: worker
+            image: ghcr.io/arkaniscorporation/example-worker
+            dockerfile: src/Worker/Dockerfile
+            version-working-directory: src/Worker
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'ubuntu-latest' }}
+      runs-on-self-hosted: false
+      image: ${{ matrix.image }}
+      context: .
+      dockerfile: ${{ matrix.dockerfile }}
+      version: ${{ needs.release.outputs.new-version }}
+      version-tag: ${{ needs.release.outputs.new-tag }}
+      version-channel: ${{ needs.release.outputs.new-channel }}
+      version-working-directory: ${{ matrix.version-working-directory }}
+      environment-name: publish-ghcr
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+NuGet package matrix example:
+
+```yaml
+jobs:
+  publish_packages:
+    name: NuGet - ${{ matrix.package }}
+    if: ${{ needs.release.outputs.new-version != '' }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: core
+            project: src/Core/Core.csproj
+            version-working-directory: src/Core
+          - package: contracts
+            project: src/Contracts/Contracts.csproj
+            version-working-directory: src/Contracts
+          - package: client
+            project: src/Client/Client.csproj
+            version-working-directory: src/Client
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-nuget.yml@v1
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'ubuntu-latest' }}
+      runs-on-self-hosted: false
+      project: ${{ matrix.project }}
+      version: ${{ needs.release.outputs.new-version }}
+      dotnet-setversion-working-directory: ${{ matrix.version-working-directory }}
+      environment-name: publish-nuget
+```
+
+The same pattern applies to `wf-verify-publish-container-dotnet.yml`, `wf-verify-publish-nuget.yml`, `wf-setup-dotnet.yml`, `wf-setup-node.yml`, and deployment workflows when each matrix child can run independently.
+For deployment matrices, keep `environment-name`, namespaces, concurrency policy, and rollback ownership explicit per target.
+
 ## .NET Container Publish Verification Workflow
 
 `wf-verify-publish-container-dotnet.yml` stamps .NET project versions, then builds with Docker Buildx without pushing.

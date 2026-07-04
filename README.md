@@ -115,6 +115,49 @@ Use `wf-verify-publish-*` and `wf-verify-deploy-*` workflows for dry-run style v
 Container publishing passes the bare semantic-release version as `version` and the tagged release ref as `version-tag`.
 For .NET images, use `wf-publish-container-dotnet.yml` so assemblies are stamped before Docker Buildx runs.
 Use `extra-tags` for additional mutable tags such as `latest`.
+Jobs that call reusable workflows can use `strategy.matrix` for independent publish targets.
+Use that shape for multiple container images, NuGet packages, verification targets, or deploy targets that share the same release outputs.
+Pass matrix values through `with`, and keep each matrix entry explicit enough to name the project, image, Dockerfile, or environment it owns.
+Do not aggregate matrix reusable-workflow outputs directly; use the emitted artifacts or manifests when a downstream job needs all results.
+
+```yaml
+jobs:
+  publish_images:
+    name: Image - ${{ matrix.target }}
+    if: ${{ needs.release.outputs.new-version != '' }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: web
+            image: ghcr.io/arkaniscorporation/example-web
+            dockerfile: src/Web/Dockerfile
+            version-working-directory: src/Web
+          - target: worker
+            image: ghcr.io/arkaniscorporation/example-worker
+            dockerfile: src/Worker/Dockerfile
+            version-working-directory: src/Worker
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-dotnet.yml@v1
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'ubuntu-latest' }}
+      runs-on-self-hosted: false
+      image: ${{ matrix.image }}
+      context: .
+      dockerfile: ${{ matrix.dockerfile }}
+      version: ${{ needs.release.outputs.new-version }}
+      version-tag: ${{ needs.release.outputs.new-tag }}
+      version-channel: ${{ needs.release.outputs.new-channel }}
+      version-working-directory: ${{ matrix.version-working-directory }}
+      environment-name: publish-ghcr
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
 
 ## Repository Pipeline
 
