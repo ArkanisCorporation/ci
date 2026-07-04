@@ -22,12 +22,10 @@ Composite actions are optional step bundles for same-repository workflows or exp
 
 | Workflow | Purpose |
 |---|---|
-| `wf-setup-dotnet.yml` | Restore .NET dependencies with shared setup, metadata, and diagnostics. |
 | `wf-dotnet-format.yml` | Verify `dotnet format` without running tests. |
 | `wf-dotnet-test.yml` | Build, test, collect coverage, metadata, and diagnostics for .NET repositories. |
 | `wf-setup-dotnet-generated-code.yml` | Verify generated .NET source stays committed after codegen commands. |
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode produces no Git diff. |
-| `wf-setup-node.yml` | Install Node dependencies with shared setup, metadata, and diagnostics. |
 | `wf-node-lint.yml` | Run one Node lint script or command. |
 | `wf-node-test.yml` | Run one Node test script or command. |
 | `wf-node-build.yml` | Run one Node build script or command. |
@@ -69,18 +67,6 @@ on:
 permissions: {}
 
 jobs:
-  dotnet-setup:
-    name: .NET setup
-    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet.yml@v1
-    permissions:
-      contents: read
-    with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
-      enable-cache: true
-      global-json-file: global.json
-      solution: CitizenId.slnx
-
   dotnet-format:
     name: .NET format
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
@@ -121,20 +107,6 @@ on:
 permissions: {}
 
 jobs:
-  node-setup:
-    name: Node setup
-    uses: ArkanisCorporation/ci/.github/workflows/wf-setup-node.yml@v1
-    permissions:
-      contents: read
-    with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
-      node-version: 24.x
-      package-manager: pnpm
-      package-manager-version: "10"
-      working-directory: .
-      enable-cache: true
-
   node-lint:
     name: Node lint
     uses: ArkanisCorporation/ci/.github/workflows/wf-node-lint.yml@v1

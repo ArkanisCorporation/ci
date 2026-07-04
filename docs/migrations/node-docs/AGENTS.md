@@ -18,11 +18,10 @@ Keep Pages deployment, release creation, service orchestration, and package-mana
 
 ## Target Shape
 
-- Use `wf-setup-node.yml` for standard install.
 - Use `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` for expensive script lanes.
 - Use `package-manager-version` or package.json `packageManager` for pnpm and yarn.
 - Keep Pages deployment in a separate deploy job.
-- Keep service integration tests in repo-specific jobs that depend on setup verification.
+- Keep service integration tests in repo-specific jobs that depend on the relevant verification lane.
 - Keep package-manager matrix jobs only when compatibility is a product requirement.
 
 ## Rules
@@ -31,11 +30,11 @@ Keep Pages deployment, release creation, service orchestration, and package-mana
 - Do not mutate lockfiles in CI to make cache work.
 - Do not use old checkout/setup-node action majors.
 - Do not run dependency lifecycle scripts on untrusted pull requests unless the repository accepts that risk.
-- Do not hide service startup and teardown inside setup workflow inputs.
+- Do not hide service startup and teardown inside generic verification workflow inputs.
 
 ## Verification
 
-- Run `wf-setup-node.yml` with `enable-cache: false` once for cold-install confidence.
+- Run one lint, test, or build workflow with `enable-cache: false` once for cold-install confidence.
 - Run lint, test, and build workflows independently when the repository has those scripts.
 - Run app-specific service tests separately.
 - Verify Pages or release deploy jobs require appropriate permissions and protected refs.

@@ -13,13 +13,14 @@ Last verified: 2026-07-04.
 
 ## Decision
 
-Keep `wf-setup-dotnet.yml` as .NET setup and restore only.
+Remove public setup-only .NET and Node workflows.
+Keep shared setup as internal composite actions so the caller workflow job can continue with format, lint, test, or build steps after setup.
 Add `wf-dotnet-format.yml` for `dotnet format --verify-no-changes`.
 Add `wf-dotnet-test.yml` for build, test, coverage collection, and coverage report publishing.
-Keep `wf-setup-node.yml` as Node package-manager setup and install only.
 Add `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` for separate Node script lanes.
 Add `.github/actions/setup-node` so Node setup logic is shared by all Node workflows.
 Keep `.github/actions/setup-dotnet` as the shared .NET setup action.
+Keep runner contract validation, tool version recording, self-hosted preflight, cache setup, dependency restore, and install inside the shared setup composites where the format/test/lint/build jobs need the same behavior.
 
 ## Consequences
 
@@ -27,13 +28,14 @@ This is a breaking workflow contract change for callers that expected aggregate 
 Callers must opt into the separate verification workflows they need.
 Parallel jobs may repeat dependency setup, but caches keep the repeated work bounded.
 Each expensive lane now has its own timeout, permissions, diagnostics artifact, and summary.
+Composite-action setup keeps duplicated setup behavior out of the public workflow files without introducing a restore-only or install-only public job.
 
 ## Migration
 
-Replace a single .NET setup job with separate `wf-setup-dotnet.yml`, `wf-dotnet-format.yml`, and `wf-dotnet-test.yml` jobs when all lanes are required.
-Replace a single Node setup job with separate `wf-setup-node.yml`, `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` jobs when all lanes are required.
+Replace a single .NET setup job with separate `wf-dotnet-format.yml` and `wf-dotnet-test.yml` jobs when both lanes are required.
+Replace a single Node setup job with separate `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` jobs when all lanes are required.
 Grant `pull-requests: write` only to `wf-dotnet-test.yml` callers that enable `coverage-pr-comment`.
-Keep `contents: read` for setup, format, lint, test without PR comments, and build lanes.
+Keep `contents: read` for format, lint, test without PR comments, and build lanes.
 
 ## References
 

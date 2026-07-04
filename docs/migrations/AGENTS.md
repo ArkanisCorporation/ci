@@ -19,7 +19,7 @@ Keep migration work evidence-driven, reversible, and separated by trust zone.
 - Treat every broad permission, hardcoded runner, unguarded secret, and script-driven release side effect as a migration finding.
 - Use `runs-on`, `runs-on-json`, and `runs-on-self-hosted` instead of hardcoded runner labels.
 - Use `enable-cache: false` when debugging dependency cache behavior.
-- Keep lifecycle-sensitive steps such as signing, Pages deploy, VirusTotal upload, infrastructure apply, and production deploy outside setup workflows.
+- Keep lifecycle-sensitive steps such as signing, Pages deploy, VirusTotal upload, infrastructure apply, and production deploy outside verification workflows.
 
 ## Required Output
 

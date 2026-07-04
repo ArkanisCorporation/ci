@@ -139,6 +139,9 @@ jobs:
         id: setup-node
         uses: ./.ci/arkanis-ci/.github/actions/setup-node
         with:
+          runs-on: ${{ inputs.runs-on }}
+          runs-on-json: ${{ inputs.runs-on-json }}
+          runs-on-self-hosted: ${{ inputs.runs-on-self-hosted }}
           node-version: ${{ inputs.node-version }}
           package-manager: ${{ inputs.package-manager }}
           package-manager-version: ${{ inputs.package-manager-version }}
@@ -148,42 +151,6 @@ jobs:
           run-install: ${{ inputs.run-install }}
           install-command: ${{ inputs.install-command }}
           allow-lifecycle-scripts: ${{ inputs.allow-lifecycle-scripts }}
-
-      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
-        env:
-          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
-          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
-          ENABLE_CACHE: ${{ inputs.enable-cache }}
-          PACKAGE_MANAGER: ${{ inputs.package-manager }}
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        run: |
-          {
-            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
-            echo "Requested runner labels: ${RUNS_ON_JSON}"
-            echo "Package manager: ${PACKAGE_MANAGER}"
-            echo "Working directory: ${WORKING_DIRECTORY}"
-            echo "Package cache enabled: ${ENABLE_CACHE}"
-            echo "Package cache hit: ${{ steps.setup-node.outputs.cache-hit || 'false' }}"
-            echo "Runner OS: ${RUNNER_OS}"
-            echo "Runner arch: ${RUNNER_ARCH}"
-            echo "Workspace: ${GITHUB_WORKSPACE}"
-          } | tee artifacts/meta/runner-contract.txt
-
-      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
-        if: inputs.runs-on-self-hosted
-        env:
-          PACKAGE_MANAGER: ${{ inputs.package-manager }}
-        run: |
-          {
-            echo "## Self-hosted runner preflight"
-            echo
-            df -h .
-            echo
-            command -v git
-            command -v node
-            command -v npm
-            command -v "$PACKAGE_MANAGER"
-          } | tee artifacts/meta/self-hosted-preflight.txt
 
       - name: Lint ${{ inputs.working-directory }} @ ${{ inputs.lint-script }}
         env:
@@ -221,9 +188,7 @@ jobs:
         if: always()
         env:
           RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
-          NODE_VERSION: ${{ steps.setup-node.outputs.node-version }}
-          PACKAGE_MANAGER: ${{ inputs.package-manager }}
-          PACKAGE_MANAGER_VERSION: ${{ steps.setup-node.outputs.package-manager-version }}
+          TOOL_VERSIONS_JSON: ${{ steps.setup-node.outputs.tool-versions-json || '{}' }}
         run: |
           mkdir -p artifacts/meta
           cat > artifacts/meta/run-metadata.json <<JSON
@@ -241,10 +206,7 @@ jobs:
               "arch": "${RUNNER_ARCH}",
               "labels": ${RUNS_ON_JSON}
             },
-            "tool_versions": {
-              "node": "${NODE_VERSION}",
-              "${PACKAGE_MANAGER}": "${PACKAGE_MANAGER_VERSION}"
-            }
+            "tool_versions": ${TOOL_VERSIONS_JSON}
           }
           JSON
           echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"

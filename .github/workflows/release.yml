@@ -25,20 +25,6 @@ jobs:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
 
-  typescript-pnpm-setup:
-    name: typescript-pnpm setup @ ${{ github.head_ref || github.ref_name }}
-    uses: ./.github/workflows/wf-setup-node.yml
-    permissions:
-      contents: read
-    with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
-      node-version: 24.x
-      package-manager: pnpm
-      package-manager-version: "10"
-      working-directory: tests/fixtures/mock-projects/typescript-pnpm
-      enable-cache: false
-
   typescript-pnpm-lint:
     name: typescript-pnpm lint @ ${{ github.head_ref || github.ref_name }}
     uses: ./.github/workflows/wf-node-lint.yml
@@ -79,19 +65,6 @@ jobs:
       package-manager: pnpm
       package-manager-version: "10"
       working-directory: tests/fixtures/mock-projects/typescript-pnpm
-      enable-cache: false
-
-  dotnet-library-setup:
-    name: dotnet-nuget-library setup @ ${{ github.head_ref || github.ref_name }}
-    uses: ./.github/workflows/wf-setup-dotnet.yml
-    permissions:
-      contents: read
-    with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
-      dotnet-version: 10.0.x
-      solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
-      restore-locked-mode: true
       enable-cache: false
 
   dotnet-library-format:
@@ -163,11 +136,9 @@ jobs:
     name: repo @ verify
     needs:
       - selftest
-      - typescript-pnpm-setup
       - typescript-pnpm-lint
       - typescript-pnpm-test
       - typescript-pnpm-build
-      - dotnet-library-setup
       - dotnet-library-format
       - dotnet-library-test
       - dotnet-nuget
@@ -186,11 +157,9 @@ jobs:
     name: repo @ publish
     needs:
       - selftest
-      - typescript-pnpm-setup
       - typescript-pnpm-lint
       - typescript-pnpm-test
       - typescript-pnpm-build
-      - dotnet-library-setup
       - dotnet-library-format
       - dotnet-library-test
       - dotnet-nuget

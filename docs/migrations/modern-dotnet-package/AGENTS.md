@@ -14,11 +14,10 @@ Keep repository-specific package metadata and release channels intact.
 
 1. Read `_test.yaml`, `_release.yaml`, `main.yaml`, `pipeline-quality.yaml`, and any local setup action.
 2. Identify package projects, pack settings, release branches, NuGet publish mode, and backpropagation logic.
-3. Compare local setup action behavior against `wf-setup-dotnet.yml`.
+3. Compare local setup action behavior against the shared setup performed by `wf-dotnet-format.yml` and `wf-dotnet-test.yml`.
 
 ## Target Shape
 
-- Use `wf-setup-dotnet.yml` for restore verification.
 - Use `wf-dotnet-format.yml` and `wf-dotnet-test.yml` for format and test verification.
 - Use `wf-setup-dotnet-jetbrains.yml` only when the repository already gates JetBrains CleanupCode.
 - Use `wf-release-semantic.yml` for semantic-release metadata.

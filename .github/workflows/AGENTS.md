@@ -49,12 +49,10 @@ Recommended order:
 
 ## Current Public Workflows
 
-- `wf-setup-dotnet.yml` verifies .NET SDK setup, NuGet cache, local tools, restore, metadata, and diagnostics.
 - `wf-dotnet-format.yml` verifies `dotnet format`.
 - `wf-dotnet-test.yml` verifies .NET build, tests, coverage, and diagnostics.
 - `wf-setup-dotnet-generated-code.yml` verifies generated .NET source and fails when codegen commands create a Git diff.
 - `wf-setup-dotnet-jetbrains.yml` verifies JetBrains ReSharper CleanupCode and fails when cleanup creates a Git diff.
-- `wf-setup-node.yml` verifies Node.js package-manager setup, install, cache, metadata, and diagnostics.
 - `wf-node-lint.yml` verifies Node.js lint scripts.
 - `wf-node-test.yml` verifies Node.js test scripts.
 - `wf-node-build.yml` verifies Node.js build scripts.

@@ -979,11 +979,9 @@ void ValidateJobDisplayNameContract()
         ("wf-verify-publish-nuget.yml", "    name: ${{ inputs.version }} @ verify"),
         ("wf-verify-publish-container-dotnet.yml", "    name: ${{ inputs.version-tag || inputs.version }} @ verify"),
         ("wf-verify-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ verify"),
-        ("wf-setup-node.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-lint.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-test.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-build.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
-        ("wf-setup-dotnet.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-dotnet-format.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-dotnet-test.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-setup-dotnet-jetbrains.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
@@ -1018,11 +1016,9 @@ void ValidateJobDisplayNameContract()
         foreach (var expectedNameLine in new[]
                  {
                      "    name: platform @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: typescript-pnpm setup @ ${{ github.head_ref || github.ref_name }}",
                      "    name: typescript-pnpm lint @ ${{ github.head_ref || github.ref_name }}",
                      "    name: typescript-pnpm test @ ${{ github.head_ref || github.ref_name }}",
                      "    name: typescript-pnpm build @ ${{ github.head_ref || github.ref_name }}",
-                     "    name: dotnet-nuget-library setup @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-library format @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
@@ -1079,11 +1075,6 @@ void ValidateStepDisplayNameContract()
             "      - name: Validate deployment inputs (Dry Run) @ ${{ inputs.kubernetes-namespace }}",
             "      - name: Upload deployment artifacts (Dry Run) @ ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}",
         ],
-        ["wf-setup-node.yml"] =
-        [
-            "      - name: Setup Node.js @ ${{ inputs.node-version }} ${{ inputs.package-manager }}",
-            "      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}",
-        ],
         ["wf-node-lint.yml"] =
         [
             "      - name: Setup Node.js @ ${{ inputs.node-version }} ${{ inputs.package-manager }}",
@@ -1098,11 +1089,6 @@ void ValidateStepDisplayNameContract()
         [
             "      - name: Setup Node.js @ ${{ inputs.node-version }} ${{ inputs.package-manager }}",
             "      - name: Build ${{ inputs.working-directory }} @ ${{ inputs.build-script }}",
-        ],
-        ["wf-setup-dotnet.yml"] =
-        [
-            "      - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}",
-            "      - name: Restore ${{ inputs.solution }} with lock file",
         ],
         ["wf-dotnet-format.yml"] =
         [
@@ -1241,11 +1227,9 @@ void ValidateRepositoryPipelineContract()
     var releasePrerequisiteNeedsBlock =
         "needs:\n"
         + "      - selftest\n"
-        + "      - typescript-pnpm-setup\n"
         + "      - typescript-pnpm-lint\n"
         + "      - typescript-pnpm-test\n"
         + "      - typescript-pnpm-build\n"
-        + "      - dotnet-library-setup\n"
         + "      - dotnet-library-format\n"
         + "      - dotnet-library-test\n"
         + "      - dotnet-nuget\n"
@@ -1253,11 +1237,9 @@ void ValidateRepositoryPipelineContract()
     var repositoryPrerequisiteWorkflowUses = new[]
     {
         ("platform selftest", "uses: ./.github/workflows/wf-platform-selftest.yml"),
-        ("TypeScript pnpm setup fixture", "uses: ./.github/workflows/wf-setup-node.yml"),
         ("TypeScript pnpm lint fixture", "uses: ./.github/workflows/wf-node-lint.yml"),
         ("TypeScript pnpm test fixture", "uses: ./.github/workflows/wf-node-test.yml"),
         ("TypeScript pnpm build fixture", "uses: ./.github/workflows/wf-node-build.yml"),
-        (".NET library setup fixture", "uses: ./.github/workflows/wf-setup-dotnet.yml"),
         (".NET library format fixture", "uses: ./.github/workflows/wf-dotnet-format.yml"),
         (".NET library test fixture", "uses: ./.github/workflows/wf-dotnet-test.yml"),
         ("NuGet publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-nuget.yml"),

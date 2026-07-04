@@ -108,57 +108,14 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
+          runs-on: ${{ inputs.runs-on }}
+          runs-on-json: ${{ inputs.runs-on-json }}
+          runs-on-self-hosted: ${{ inputs.runs-on-self-hosted }}
           enable-cache: ${{ inputs.enable-cache }}
           nuget-packages: ${{ env.NUGET_PACKAGES }}
           restore-tools: "true"
-
-      - name: Record tool versions @ dotnet
-        id: tool-versions
-        run: |
-          mkdir -p artifacts/meta
-          dotnet --info | tee artifacts/meta/dotnet-info.txt
-          dotnet_version="$(dotnet --version)"
-          printf 'tool_versions_json={"dotnet":"%s"}\n' "$dotnet_version" >> "$GITHUB_OUTPUT"
-
-      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
-        env:
-          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
-          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
-          ENABLE_CACHE: ${{ inputs.enable-cache }}
-        run: |
-          {
-            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
-            echo "Requested runner labels: ${RUNS_ON_JSON}"
-            echo "NuGet cache enabled: ${ENABLE_CACHE}"
-            echo "NuGet cache hit: ${{ steps.setup-dotnet.outputs.cache-hit || 'false' }}"
-            echo "Runner OS: ${RUNNER_OS}"
-            echo "Runner arch: ${RUNNER_ARCH}"
-            echo "Workspace: ${GITHUB_WORKSPACE}"
-          } | tee artifacts/meta/runner-contract.txt
-
-      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
-        if: inputs.runs-on-self-hosted
-        run: |
-          {
-            echo "## Self-hosted runner preflight"
-            echo
-            df -h .
-            echo
-            command -v dotnet
-            command -v git
-          } | tee artifacts/meta/self-hosted-preflight.txt
-
-      - name: Restore ${{ inputs.solution }} with lock file
-        if: inputs.restore-locked-mode
-        env:
-          SOLUTION: ${{ inputs.solution }}
-        run: dotnet restore "$SOLUTION" --locked-mode
-
-      - name: Restore ${{ inputs.solution }}
-        if: ${{ !inputs.restore-locked-mode }}
-        env:
-          SOLUTION: ${{ inputs.solution }}
-        run: dotnet restore "$SOLUTION"
+          solution: ${{ inputs.solution }}
+          restore-locked-mode: ${{ inputs.restore-locked-mode }}
 
       - name: Verify formatting @ ${{ inputs.solution }}
         env:
@@ -170,7 +127,7 @@ jobs:
         if: always()
         env:
           RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
-          TOOL_VERSIONS_JSON: ${{ steps.tool-versions.outputs.tool_versions_json || '{}' }}
+          TOOL_VERSIONS_JSON: ${{ steps.setup-dotnet.outputs.tool-versions-json || '{}' }}
         run: |
           mkdir -p artifacts/meta
           cat > artifacts/meta/run-metadata.json <<JSON

@@ -6,22 +6,6 @@ on:
 permissions: {}
 
 jobs:
-  node-setup:
-    # Expected: success.
-    name: typescript-pnpm setup @ local
-    uses: ./.github/workflows/wf-setup-node.yml
-    permissions:
-      contents: read
-    with:
-      runs-on: ubuntu-latest
-      runs-on-self-hosted: false
-      node-version: 24.x
-      package-manager: pnpm
-      package-manager-version: "10"
-      working-directory: tests/fixtures/mock-projects/typescript-pnpm
-      enable-cache: false
-      upload-diagnostics: false
-
   node-lint:
     # Expected: success.
     name: typescript-pnpm lint @ local

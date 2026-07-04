@@ -5,8 +5,8 @@ They live under `tests/fixtures` so they can exercise the shared workflows witho
 
 | Fixture | Purpose | Workflows |
 |---|---|---|
-| `typescript-pnpm` | TypeScript package with pnpm lint, test, and build scripts. | `wf-setup-node.yml`, `wf-node-lint.yml`, `wf-node-test.yml`, `wf-node-build.yml` |
-| `dotnet-nuget-library` | .NET 10 library plus xUnit tests and package metadata. | `wf-setup-dotnet.yml`, `wf-dotnet-format.yml`, `wf-dotnet-test.yml`, `wf-verify-publish-nuget.yml` |
+| `typescript-pnpm` | TypeScript package with pnpm lint, test, and build scripts. | `wf-node-lint.yml`, `wf-node-test.yml`, `wf-node-build.yml` |
+| `dotnet-nuget-library` | .NET 10 library plus xUnit tests and package metadata. | `wf-dotnet-format.yml`, `wf-dotnet-test.yml`, `wf-verify-publish-nuget.yml` |
 | `dotnet-container-app` | Runnable .NET 10 ASP.NET Core app with Dockerfile. | `wf-verify-publish-container-dotnet.yml` |
 
 Local workflow callers live in `tests/fixtures/workflow-contract/*-local.yml`.

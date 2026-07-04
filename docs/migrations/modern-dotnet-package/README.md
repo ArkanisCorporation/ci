@@ -17,7 +17,7 @@ Backpropagation runs only after a real release.
 
 ## Checklist
 
-- Replace local setup action calls with `wf-setup-dotnet.yml`, `wf-dotnet-format.yml`, and `wf-dotnet-test.yml` when behavior matches.
+- Replace local setup action calls with `wf-dotnet-format.yml` and `wf-dotnet-test.yml` when behavior matches.
 - Add `wf-release-semantic.yml` with `allow-exec-plugin: false`.
 - Add `wf-publish-nuget.yml` gated on release output.
 - Preserve `runs-on`, `runs-on-json`, and `runs-on-self-hosted` inputs.
@@ -27,4 +27,4 @@ Backpropagation runs only after a real release.
 ## Rollback
 
 Keep old release workflow disabled until package publish dry run passes.
-Restore local setup action only if platform setup lacks a documented required behavior.
+Restore local setup steps only if the platform format or test workflow lacks a documented required behavior.

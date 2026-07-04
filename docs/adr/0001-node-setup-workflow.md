@@ -28,8 +28,7 @@ Generated install commands favor fork-PR safety over compatibility with lifecycl
 
 ## Migration
 
-Replace repeated checkout/setup/install jobs with `wf-setup-node.yml`.
-Use `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` for independent verification lanes.
+Replace repeated checkout/setup/install jobs with `wf-node-lint.yml`, `wf-node-test.yml`, and `wf-node-build.yml` independent verification lanes.
 Use `enable-cache: false` when debugging cache behavior.
 Use `install-command`, `lint-command`, `test-command`, or `build-command` when a repo needs custom commands.
 Keep Pages deployment and release publishing in separate jobs.

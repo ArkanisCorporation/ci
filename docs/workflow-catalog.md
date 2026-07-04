@@ -6,12 +6,10 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Purpose | Trust zone |
 |---|---|---|
-| `wf-setup-dotnet.yml` | .NET SDK setup, NuGet cache, tool restore, dependency restore, metadata, and diagnostics. | untrusted or trusted-build |
 | `wf-dotnet-format.yml` | Verify `dotnet format` without running tests. | untrusted or trusted-build |
 | `wf-dotnet-test.yml` | Build, test, collect coverage, metadata, and diagnostics for .NET repositories. | untrusted or trusted-build |
 | `wf-setup-dotnet-generated-code.yml` | Verify committed .NET generated source. | untrusted or trusted-build |
 | `wf-setup-dotnet-jetbrains.yml` | Verify JetBrains ReSharper CleanupCode creates no diff. | untrusted or trusted-build |
-| `wf-setup-node.yml` | Node package-manager setup, install, cache, metadata, and diagnostics. | untrusted or trusted-build |
 | `wf-node-lint.yml` | Run one Node lint script or command. | untrusted or trusted-build |
 | `wf-node-test.yml` | Run one Node test script or command. | untrusted or trusted-build |
 | `wf-node-build.yml` | Run one Node build script or command. | untrusted or trusted-build |
@@ -31,12 +29,10 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Minimum caller permissions | Main outputs |
 |---|---|---|
-| `wf-setup-dotnet.yml` | `contents: read` | restore diagnostics, metadata, manifest |
 | `wf-dotnet-format.yml` | `contents: read` | format diagnostics, metadata, manifest |
 | `wf-dotnet-test.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
 | `wf-setup-dotnet-generated-code.yml` | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
 | `wf-setup-dotnet-jetbrains.yml` | `contents: read` | cleanup log, changed-file list, diff stat, diff preview, manifest |
-| `wf-setup-node.yml` | `contents: read` | install logs, metadata, manifest |
 | `wf-node-lint.yml` | `contents: read` | install and lint logs, metadata, manifest |
 | `wf-node-test.yml` | `contents: read` | install and test logs, metadata, manifest |
 | `wf-node-build.yml` | `contents: read` | install and build logs, metadata, manifest |
@@ -429,49 +425,6 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-jetbrains.schema.json`.
 
 Outputs: schema does not define workflow outputs.
 
-### wf-setup-dotnet.yml
-
-Schema: `schemas/workflow-inputs/wf-setup-dotnet.schema.json`.
-
-| Input | Type | Required | Default | Details |
-|---|---|---|---|---|
-| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
-| `runs-on-json` | string | no | `""` | n/a |
-| `runs-on-self-hosted` | boolean | no | `false` | n/a |
-| `dotnet-version` | string | no | `"10.0.x"` | n/a |
-| `global-json-file` | string | no | `""` | n/a |
-| `solution` | string | yes | none | n/a |
-| `restore-locked-mode` | boolean | no | `true` | n/a |
-| `enable-cache` | boolean | no | `true` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
-| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
-
-Outputs: schema does not define workflow outputs.
-
-### wf-setup-node.yml
-
-Schema: `schemas/workflow-inputs/wf-setup-node.schema.json`.
-
-| Input | Type | Required | Default | Details |
-|---|---|---|---|---|
-| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
-| `runs-on-json` | string | no | `""` | n/a |
-| `runs-on-self-hosted` | boolean | no | `false` | n/a |
-| `node-version` | string | no | `"24.x"` | n/a |
-| `package-manager` | string | no | `"pnpm"` | Allowed: "npm", "pnpm", "yarn" |
-| `package-manager-version` | string | no | `""` | n/a |
-| `working-directory` | string | no | `"."` | n/a |
-| `cache-dependency-path` | string | no | `""` | n/a |
-| `enable-cache` | boolean | no | `true` | n/a |
-| `run-install` | boolean | no | `true` | n/a |
-| `install-command` | string | no | `""` | n/a |
-| `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
-| `upload-diagnostics` | boolean | no | `true` | n/a |
-| `timeout-minutes` | integer | no | `20` | Minimum: 1 |
-
-Outputs: schema does not define workflow outputs.
-
 ### wf-verify-deploy-k8s-aspire.yml
 
 Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
@@ -585,59 +538,6 @@ Decision and gate nodes are orange diamonds.
 Artifacts are purple slanted nodes.
 Workflow outputs are yellow circles.
 External services and caches are gray dashed nodes.
-
-## .NET Setup Workflow
-
-`wf-setup-dotnet.yml` checks out the caller repository.
-It checks out this CI platform repository for the shared `setup-dotnet` action.
-It sets up .NET, restores local tools, restores dependencies, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
-It does not format, build, test, collect coverage, publish, or deploy.
-
-Flow:
-
-```mermaid
-flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> platform[("CI platform checkout")]
-  platform --> setup[[setup-dotnet action]]
-  setup --> cache[("NuGet cache")]
-  cache --> versions[[Record tool versions]]
-  versions --> validate[[Validate runner contract]]
-  validate --> preflight{self-hosted?}
-  preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| restore[[Restore dependencies]]
-  sh --> restore
-  restore --> metadata[/run-metadata.json/]
-  metadata --> manifest[/artifact-manifest.json/]
-  manifest --> summary>Step summary]
-  summary --> diagnostics[/Diagnostics artifact/]
-  manifest --> outputs(("artifact-manifest, run-metadata"))
-  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
-  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
-  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
-  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
-  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
-  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
-  class caller,platform repo
-  class checkout,setup,versions,validate,sh,restore action
-  class preflight decision
-  class metadata,manifest,summary,diagnostics artifact
-  class outputs output
-  class cache external
-```
-
-Preconditions:
-
-- `solution` points to a solution or project in the caller repository.
-- Lock files exist when `restore-locked-mode` is true.
-- The selected runner can install or run the requested .NET SDK.
-
-Side effects:
-
-- Writes under `artifacts/`.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
-- Uploads diagnostics with `if: always()`.
-- Runs `dotnet tool restore` when local tools exist.
 
 ## .NET Format Workflow
 
@@ -933,61 +833,6 @@ jobs:
         src/CitizenId.Host.Web/Internal/Generated/WolverineHandlers
       run-commands-in-parallel: true
 ```
-
-## Node Setup Workflow
-
-`wf-setup-node.yml` checks out the caller repository.
-It checks out this CI platform repository for the shared `setup-node` action.
-It sets up Node.js, prepares npm/pnpm/yarn, restores package-manager cache when enabled, installs dependencies with strict lockfile behavior, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
-It does not run lint, test, build, publish, or deploy commands.
-
-Flow:
-
-```mermaid
-flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> platform[("CI platform checkout")]
-  platform --> setup[[setup-node action]]
-  setup --> store[("Package-manager cache")]
-  store --> install{run install?}
-  install -->|yes| deps[[Install dependencies]]
-  install -->|no| validate[[Validate runner contract]]
-  deps --> validate
-  validate --> preflight{self-hosted?}
-  preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| metadata[/run-metadata.json/]
-  sh --> metadata
-  metadata --> manifest[/artifact-manifest.json/]
-  manifest --> summary>Step summary]
-  summary --> diagnostics[/Diagnostics artifact/]
-  manifest --> outputs(("artifact-manifest, run-metadata"))
-  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
-  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
-  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
-  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
-  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
-  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
-  class caller,platform repo
-  class checkout,setup,validate,sh,deps action
-  class preflight,install decision
-  class metadata,manifest,summary,diagnostics artifact
-  class outputs output
-  class store external
-```
-
-Preconditions:
-
-- `working-directory` contains package.json.
-- A lockfile exists for the selected package manager unless `cache-dependency-path` points at matching lockfiles.
-- pnpm and yarn projects either set `package-manager-version` or include package.json `packageManager`.
-- Lifecycle scripts are blocked in the generated install command unless `allow-lifecycle-scripts` is true.
-
-Side effects:
-
-- Writes under `artifacts/`.
-- Writes Corepack shims and package-manager downloads under `RUNNER_TEMP`.
-- Reads and writes package-manager cache when `enable-cache` is true.
-- Uploads diagnostics with `if: always()` when `upload-diagnostics` is true.
 
 ## Node Lint Workflow
 
@@ -1631,7 +1476,7 @@ Set `NUGET_USER` as a caller repository, organization, or `publish-nuget` enviro
 Pass a named `NUGET_USER` secret only when the caller deliberately treats the NuGet owner as sensitive.
 Pass `nuget-user` only when a package needs to override that shared owner.
 
-The same pattern applies to `wf-verify-publish-container-dotnet.yml`, `wf-verify-publish-nuget.yml`, `wf-setup-dotnet.yml`, `wf-setup-node.yml`, and deployment workflows when each matrix child can run independently.
+The same pattern applies to `wf-verify-publish-container-dotnet.yml`, `wf-verify-publish-nuget.yml`, verification workflows, and deployment workflows when each matrix child can run independently.
 For deployment matrices, keep `environment-name`, namespaces, concurrency policy, and rollback ownership explicit per target.
 
 ## .NET Container Publish Verification Workflow

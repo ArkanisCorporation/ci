@@ -22,7 +22,7 @@ Signing and scan lanes remain explicit side-effect jobs.
 ## Checklist
 
 - Build a job map grouped by trust zone.
-- Use setup workflows for common .NET and Node verification.
+- Use `.NET` and Node verification workflows for common format, lint, test, and build lanes.
 - Use publish workflows for NuGet and container outputs.
 - Keep Windows runner needs explicit.
 - Keep self-hosted runner labels explicit.

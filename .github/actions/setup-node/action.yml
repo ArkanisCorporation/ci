@@ -1,14 +1,26 @@
 # Summary:
-#   Sets up Node.js, npm/pnpm/yarn, package-manager cache, and optional strict dependency install.
+#   Sets up Node.js, npm/pnpm/yarn, package-manager cache, runner diagnostics, and optional strict dependency install.
 # Remarks:
 #   This composite action expects Bash, package.json, a lockfile, and actions/setup-node.
 #   It calls runs-on/cache only when enable-cache is true.
 #   It does not run lint, test, or build scripts.
 
 name: Setup Node.js
-description: Sets up Node.js, package-manager tooling, dependency cache, and optional strict install.
+description: Sets up Node.js, package-manager tooling, dependency cache, runner diagnostics, and optional strict install.
 
 inputs:
+  runs-on:
+    description: Single runner label used when runs-on-json is empty.
+    required: false
+    default: ubuntu-latest
+  runs-on-json:
+    description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels.
+    required: false
+    default: ""
+  runs-on-self-hosted:
+    description: True when the effective runner selection targets self-hosted runners.
+    required: false
+    default: "false"
   node-version:
     description: Node.js version range installed by actions/setup-node.
     required: false
@@ -68,6 +80,9 @@ outputs:
   lockfiles:
     description: Newline-delimited selected lockfiles.
     value: ${{ steps.node-context.outputs.lockfiles }}
+  tool-versions-json:
+    description: JSON object with selected Node.js and package-manager versions.
+    value: ${{ steps.tool-versions.outputs.tool-versions-json }}
 
 runs:
   using: composite
@@ -235,7 +250,51 @@ runs:
         {
           echo "node-version=${node_version}"
           echo "package-manager-version=${package_manager_version}"
+          printf 'tool-versions-json={"node":"%s","%s":"%s"}\n' "$node_version" "$PACKAGE_MANAGER" "$package_manager_version"
         } >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Validate runner contract
+      env:
+        RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+        RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+        ENABLE_CACHE: ${{ inputs.enable-cache }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        {
+          echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+          echo "Requested runner labels: ${RUNS_ON_JSON}"
+          echo "Package manager: ${PACKAGE_MANAGER}"
+          echo "Working directory: ${WORKING_DIRECTORY}"
+          echo "Package cache enabled: ${ENABLE_CACHE}"
+          echo "Package cache hit: ${{ steps.node-cache.outputs.cache-hit || 'false' }}"
+          echo "Runner OS: ${RUNNER_OS}"
+          echo "Runner arch: ${RUNNER_ARCH}"
+          echo "Workspace: ${GITHUB_WORKSPACE}"
+        } | tee artifacts/meta/runner-contract.txt
+      shell: bash
+
+    - name: Self-hosted preflight
+      if: inputs.runs-on-self-hosted == 'true'
+      env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+      run: |
+        {
+          echo "## Self-hosted runner preflight"
+          echo
+          echo "Disk:"
+          df -h .
+          echo
+          echo "Temp:"
+          printf '%s\n' "${RUNNER_TEMP:-unset}"
+          echo
+          echo "Required tools:"
+          command -v git
+          command -v node
+          command -v npm
+          command -v "$PACKAGE_MANAGER"
+        } | tee artifacts/meta/self-hosted-preflight.txt
       shell: bash
 
     - name: Install ${{ inputs.package-manager }} dependencies
