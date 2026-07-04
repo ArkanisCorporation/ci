@@ -267,6 +267,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-node-build-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts
+          path: |
+            artifacts
+            ${{ runner.debug != '1' && '!artifacts/**/bin/**' || '' }}
+            ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

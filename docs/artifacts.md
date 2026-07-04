@@ -41,6 +41,11 @@ Schema: `schemas/artifact-manifest.schema.json`.
 Workflows that produce artifacts write `artifacts/artifact-manifest.json`.
 Release, publish, and deploy workflows fail closed when required artifacts are missing.
 
+## Diagnostic Size
+
+Whole-tree diagnostic uploads exclude `artifacts/**/bin/**` and `artifacts/**/obj/**` unless GitHub Actions debug logging sets `runner.debug` to `1`.
+Generated-code diagnostics also ignore `bin/` and `obj/` Git pathspecs unless `runner.debug` is enabled.
+
 ## Retention
 
 PR diagnostics should be short-lived.

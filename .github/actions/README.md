@@ -75,6 +75,7 @@ Side effects:
 
 - Runs commands that may modify workspace files.
 - Writes command logs, changed-file lists, diff stats, and diff previews under `artifacts/generated-code`.
+- Ignores `bin/` and `obj/` Git pathspecs unless GitHub Actions debug logging sets `runner.debug`.
 - Writes a short generated-code summary to `$GITHUB_STEP_SUMMARY`.
 
 Example:

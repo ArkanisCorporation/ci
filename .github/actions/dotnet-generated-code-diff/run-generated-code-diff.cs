@@ -31,6 +31,7 @@ static async Task<int> RunAsync()
     var failOnDiff = ParseBoolean("ACTION_INPUT_FAIL_ON_DIFF", defaultValue: true);
     var remediationMessage = EnvironmentOrDefault("ACTION_INPUT_REMEDIATION_MESSAGE", "Regenerate the listed source files locally and commit the resulting changes.");
     var diffPreviewLines = ParsePositiveInteger("ACTION_INPUT_DIFF_PREVIEW_LINES", defaultValue: 300);
+    var includeBuildOutputDiagnostics = RunnerDebugEnabled();
 
     if (commands.Length == 0)
     {
@@ -65,7 +66,7 @@ static async Task<int> RunAsync()
         return failedCommand.ExitCode;
     }
 
-    return await ReportDiffAsync(workingDirectory, artifactsPath, generatedPaths, remediationMessage, diffPreviewLines, failOnDiff);
+    return await ReportDiffAsync(workingDirectory, artifactsPath, generatedPaths, remediationMessage, diffPreviewLines, failOnDiff, includeBuildOutputDiagnostics);
 }
 
 static async Task<IReadOnlyList<GeneratedCommandResult>> RunCommandsInParallelAsync(
@@ -124,9 +125,15 @@ static async Task<int> ReportDiffAsync(
     IReadOnlyList<string> generatedPaths,
     string remediationMessage,
     int diffPreviewLines,
-    bool failOnDiff)
+    bool failOnDiff,
+    bool includeBuildOutputDiagnostics)
 {
-    var pathArgs = generatedPaths.Prepend("--").ToArray();
+    var pathArgs = BuildPathspecArgs(generatedPaths, includeBuildOutputDiagnostics);
+    if (!includeBuildOutputDiagnostics)
+    {
+        Console.WriteLine("Ignoring generated build outputs under bin/ and obj/. Re-run with debug logging to include them.");
+    }
+
     var diffQuiet = await RunCommandAsync("git", ["diff", "--quiet", .. pathArgs], workingDirectory, allowFailure: true, echoOutput: false);
     var untracked = await RunCommandAsync("git", ["ls-files", "--others", "--exclude-standard", .. pathArgs], workingDirectory, allowFailure: false, echoOutput: false);
     var hasUntracked = !string.IsNullOrWhiteSpace(untracked.StandardOutput);
@@ -209,6 +216,20 @@ static async Task<CommandRunResult> RunCommandAsync(
     return new CommandRunResult(result.ExitCode, result.StandardOutput, result.StandardError);
 }
 
+static string[] BuildPathspecArgs(IReadOnlyList<string> generatedPaths, bool includeBuildOutputs)
+{
+    var pathArgs = generatedPaths.Prepend("--").ToList();
+    if (!includeBuildOutputs)
+    {
+        pathArgs.Add(":(exclude)bin/**");
+        pathArgs.Add(":(exclude)obj/**");
+        pathArgs.Add(":(exclude)**/bin/**");
+        pathArgs.Add(":(exclude)**/obj/**");
+    }
+
+    return pathArgs.ToArray();
+}
+
 static IEnumerable<string> SplitLines(string value)
 {
     return value.ReplaceLineEndings("\n")
@@ -263,6 +284,12 @@ static int ParsePositiveInteger(string name, int defaultValue)
     }
 
     return value;
+}
+
+static bool RunnerDebugEnabled()
+{
+    var rawValue = Environment.GetEnvironmentVariable("ACTION_RUNNER_DEBUG");
+    return rawValue == "1" || string.Equals(rawValue, "true", StringComparison.OrdinalIgnoreCase);
 }
 
 static string ResolvePath(string path, string basePath)

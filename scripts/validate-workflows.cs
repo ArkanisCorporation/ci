@@ -34,6 +34,7 @@ var failures = new List<string>();
 ValidateWorkflowInputSchemas();
 ValidateWorkflowInputsMatchSchemas();
 ValidateWorkflows();
+ValidateArtifactUploadDebugExclusions();
 ValidateRunnerSelectionInputContract();
 ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
@@ -82,6 +83,37 @@ void ValidateWorkflowInputSchemas()
         if (!File.Exists(workflowPath))
         {
             AddFailure($"{schema}: workflow input schema must have matching public workflow {workflowPath}.");
+        }
+    }
+}
+
+void ValidateArtifactUploadDebugExclusions()
+{
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    if (!Directory.Exists(workflowRoot))
+    {
+        return;
+    }
+
+    foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
+    {
+        var workflowText = File.ReadAllText(workflowPath);
+        if (!workflowText.Contains("uses: actions/upload-artifact@v7", StringComparison.Ordinal))
+        {
+            continue;
+        }
+
+        if (Regex.IsMatch(workflowText, @"(?m)^\s+path:\s+artifacts\s*$"))
+        {
+            AddFailure($"{workflowPath}: whole-artifacts uploads must exclude artifacts/**/bin/** and artifacts/**/obj/** unless runner.debug is enabled.");
+        }
+
+        var uploadsWholeArtifacts = Regex.IsMatch(workflowText, @"(?ms)uses:\s+actions/upload-artifact@v7.*?path:\s+\|\s*\r?\n\s+artifacts\s*(?:\r?\n|$)");
+        if (uploadsWholeArtifacts
+            && (!workflowText.Contains("runner.debug != '1' && '!artifacts/**/bin/**'", StringComparison.Ordinal)
+                || !workflowText.Contains("runner.debug != '1' && '!artifacts/**/obj/**'", StringComparison.Ordinal)))
+        {
+            AddFailure($"{workflowPath}: whole-artifacts uploads must keep debug-only bin/obj exclusions.");
         }
     }
 }
@@ -1002,9 +1034,18 @@ void ValidateGeneratedCodeContract()
     {
         AddFailure($"{actionPath}: dotnet-generated-code-diff composite action is required.");
     }
-    else if (!File.ReadAllText(actionPath).Contains("dotnet run --file", StringComparison.Ordinal))
+    else
     {
-        AddFailure($"{actionPath}: dotnet-generated-code-diff action must delegate command logic to a .NET file script.");
+        var actionText = File.ReadAllText(actionPath);
+        if (!actionText.Contains("dotnet run --file", StringComparison.Ordinal))
+        {
+            AddFailure($"{actionPath}: dotnet-generated-code-diff action must delegate command logic to a .NET file script.");
+        }
+
+        if (!actionText.Contains("ACTION_RUNNER_DEBUG: ${{ runner.debug || '0' }}", StringComparison.Ordinal))
+        {
+            AddFailure($"{actionPath}: dotnet-generated-code-diff action must pass runner.debug to its file script.");
+        }
     }
 
     if (!File.Exists(scriptPath))
@@ -1014,7 +1055,7 @@ void ValidateGeneratedCodeContract()
     else
     {
         var scriptText = File.ReadAllText(scriptPath);
-        foreach (var requiredToken in new[] { "#:package CliWrap@", "git", "diff", "ls-files" })
+        foreach (var requiredToken in new[] { "#:package CliWrap@", "git", "diff", "ls-files", ":(exclude)**/bin/**", ":(exclude)**/obj/**" })
         {
             if (!scriptText.Contains(requiredToken, StringComparison.Ordinal))
             {

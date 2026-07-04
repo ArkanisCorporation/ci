@@ -17,6 +17,8 @@ Last verified: 2026-07-04.
 - GitHub secure use reference: https://docs.github.com/en/actions/reference/security/secure-use
 - GitHub artifacts: https://docs.github.com/en/actions/tutorials/store-and-share-data
 - GitHub artifact retention and removal: https://docs.github.com/actions/managing-workflow-runs/removing-workflow-artifacts
+- GitHub debug logging: https://docs.github.com/actions/managing-workflow-runs/enabling-debug-logging
+- actions/upload-artifact path patterns: https://github.com/actions/upload-artifact
 - GitHub dependency caching: https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
 - GitHub-hosted runners: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 - GitHub self-hosted runners: https://docs.github.com/en/actions/reference/runners/self-hosted-runners

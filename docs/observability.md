@@ -57,4 +57,5 @@ artifacts/
 ## Debug Rules
 
 Debug output may include resolved input values and tool versions.
+Debug output may include generated `bin/` and `obj/` build outputs when `runner.debug` is enabled.
 Debug output must not include secrets, kubeconfig content, registry tokens, OIDC tokens, full environment dumps, or credential files.

@@ -583,6 +583,7 @@ Side effects:
 
 - Writes under `artifacts/`.
 - Writes CleanupCode diagnostics under `artifacts/jetbrains-cleanupcode`.
+- Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
@@ -654,6 +655,7 @@ Requirements:
 Side effects:
 
 - Writes under `artifacts/`.
+- Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
@@ -725,6 +727,7 @@ Side effects:
 
 - Runs commands that may modify workspace files.
 - Writes under `artifacts/generated-code`.
+- Ignores `bin/` and `obj/` Git pathspecs and excludes uploaded `artifacts/**/bin/**` and `artifacts/**/obj/**` unless `runner.debug` is enabled.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Fails when generated paths change and `fail-on-diff` is true.
 

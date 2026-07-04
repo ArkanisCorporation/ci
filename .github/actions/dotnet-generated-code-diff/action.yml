@@ -71,3 +71,4 @@ runs:
         ACTION_INPUT_REMEDIATION_MESSAGE: ${{ inputs.remediation-message }}
         ACTION_INPUT_ARTIFACTS_PATH: ${{ inputs.artifacts-path }}
         ACTION_INPUT_DIFF_PREVIEW_LINES: ${{ inputs.diff-preview-lines }}
+        ACTION_RUNNER_DEBUG: ${{ runner.debug || '0' }}
