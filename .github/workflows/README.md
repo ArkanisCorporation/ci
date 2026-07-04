@@ -58,3 +58,4 @@ It runs actionlint with read-only repository permissions.
 
 `wf-release-backpropagation.yml` creates a release branch pull request back to the default branch.
 It can approve with `PR_AUTOMATION_PAT` and enable auto-merge with GitHub CLI.
+It binds the job to `environment-name` so the environment can provide `PR_AUTOMATION_PAT`.

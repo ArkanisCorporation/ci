@@ -26,6 +26,11 @@ on:
         type: boolean
         required: false
         default: false
+      environment-name:
+        description: GitHub environment that provides PR_AUTOMATION_PAT for optional PR approval.
+        type: string
+        required: false
+        default: release-backpropagation
       new-version:
         description: Version that was published by semantic-release.
         type: string
@@ -84,6 +89,7 @@ jobs:
     name: ${{ inputs.new-version }} @ ${{ inputs.default-branch }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment-name }}
     permissions:
       contents: write
       pull-requests: write

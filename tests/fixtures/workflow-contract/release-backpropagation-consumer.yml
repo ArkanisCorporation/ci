@@ -15,6 +15,7 @@ jobs:
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
+      environment-name: release-backpropagation
       new-version: 1.2.3
       release-ref-name: release/stable
       default-branch: main

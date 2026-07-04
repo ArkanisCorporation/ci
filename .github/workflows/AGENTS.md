@@ -59,7 +59,7 @@ Recommended order:
 - `wf-lint-github-actions.yml` lints caller GitHub Actions workflows with actionlint.
 - `wf-verify-release-semantic.yml` verifies semantic-release without publishing.
 - `wf-release-semantic.yml` runs semantic-release metadata without `@semantic-release/exec`.
-- `wf-release-backpropagation.yml` creates release branch backpropagation pull requests and can auto-merge them.
+- `wf-release-backpropagation.yml` creates environment-gated release branch backpropagation pull requests and can auto-merge them.
 - `wf-verify-publish-nuget.yml` packs NuGet packages without publishing.
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
 - `wf-verify-publish-container-dotnet.yml` stamps .NET versions and builds OCI images without pushing.

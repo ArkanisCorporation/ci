@@ -1155,6 +1155,11 @@ void ValidateReleaseBackpropagationContract()
         {
             AddFailure($"{workflowPath}: release backpropagation workflow must use release-backpropagation action and pass PR_AUTOMATION_PAT.");
         }
+
+        if (!Regex.IsMatch(workflowText, @"(?m)^\s*environment:\s*\$\{\{\s*inputs\.environment-name\s*\}\}\s*$"))
+        {
+            AddFailure($"{workflowPath}: release backpropagation workflow must bind the backpropagation job to inputs.environment-name.");
+        }
     }
 
     if (!File.Exists(schemaPath))

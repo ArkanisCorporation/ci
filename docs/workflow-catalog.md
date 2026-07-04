@@ -340,6 +340,7 @@ Schema: `schemas/workflow-inputs/wf-release-backpropagation.schema.json`.
 | `runs-on` | string | no | `"ubuntu-latest"` | n/a |
 | `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `environment-name` | string | no | `"release-backpropagation"` | GitHub environment that provides PR_AUTOMATION_PAT for optional PR approval. |
 | `new-version` | string | yes | none | n/a |
 | `release-ref-name` | string | yes | none | n/a |
 | `default-branch` | string | yes | none | n/a |
@@ -1117,6 +1118,7 @@ Side effects:
 
 `wf-release-backpropagation.yml` creates a pull request from a release branch back to the default branch.
 It can approve the PR using `PR_AUTOMATION_PAT` and enable auto-merge with GitHub CLI.
+It binds the backpropagation job to `environment-name` so the environment can provide `PR_AUTOMATION_PAT`.
 Use it only from trusted release workflows after semantic-release publishes a version.
 
 Flow:
@@ -1128,8 +1130,9 @@ flowchart TD
   tooling --> validate[[Validate runner contract]]
   validate --> preflight{self-hosted?}
   preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| platform[("CI platform checkout")]
-  sh --> platform
+  preflight -->|no| env[["Environment-gated backpropagation job"]]
+  sh --> env
+  env --> platform[("CI platform checkout")]
   platform --> backprop[[release-backpropagation action]]
   backprop --> approve{approve?}
   approve -->|yes| pat[("PR_AUTOMATION_PAT")]
@@ -1147,7 +1150,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,tooling,validate,sh,resolve,backprop,pr,merge action
+  class checkout,tooling,validate,sh,env,resolve,backprop,pr,merge action
   class preflight,approve,automerge decision
   class summary artifact
   class outputs output
@@ -1159,7 +1162,7 @@ Preconditions:
 - `new-version` is the semantic version that was published.
 - `release-ref-name` is the release branch to merge back.
 - `default-branch` is the target branch.
-- `approve` requires `PR_AUTOMATION_PAT`.
+- `approve` requires `PR_AUTOMATION_PAT` from `environment-name` or the caller secret mapping.
 - The selected runner has GitHub CLI and .NET 10 SDK.
 
 Side effects:
@@ -1181,6 +1184,7 @@ jobs:
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
+      environment-name: release-backpropagation
       new-version: ${{ needs.release.outputs.new-version }}
       release-ref-name: ${{ github.ref_name }}
       default-branch: ${{ github.event.repository.default_branch }}
