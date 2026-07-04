@@ -49,6 +49,12 @@ This separation keeps release metadata from becoming a privileged shell-script d
 
 Trusted Publishing is preferred over long-lived API keys.
 `wf-publish-nuget.yml` uses `NuGet/login` when `trusted-publishing` is true.
+The NuGet user resolves from `nuget-user`, then a caller `NUGET_USER` secret, then a caller repository, organization, or environment configuration variable named `NUGET_USER`.
+Prefer the input or configuration variable because NuGet profile and organization names are normally not secret.
+Use the secret only when the caller deliberately treats the NuGet owner as sensitive.
+Caller workflow `env` values do not cross the reusable workflow boundary.
+Named secrets must be passed with `jobs.<job_id>.secrets`, unless trusted same-organization callers intentionally use `secrets: inherit`.
+If the called publish job binds an environment that also has a `NUGET_USER` secret, GitHub environment-secret precedence can shadow a caller-passed secret with the same name.
 Only the Trusted Publishing job needs `id-token: write`.
 The API-key fallback job uses `contents: read` plus the explicit `NUGET_API_KEY` secret.
 

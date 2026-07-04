@@ -133,7 +133,7 @@ Naming: `wf-*` for public reusable workflows; `.github/actions/*` for private sh
 | `wf-setup-python.yml`         | Python lint/test/typecheck         | `python-version`, `package-manager`, `workspace`, `test-command`                                        | JUnit, coverage, env report                                       | use `setup-python` cache for pip/pipenv/poetry where applicable. ([GitHub][12])                                          |
 | `wf-setup-monorepo.yml`       | changed-project matrix             | `paths-config`, `force-all`, `max-parallel`                                                             | `changed-projects.json`, matrix artifact                          | avoid required-check deadlocks from event-level path filters; prefer always-run aggregator. ([Stack Overflow][13])       |
 | `wf-pack-dotnet-nuget.yml` | pack `.nupkg`/`.snupkg`            | `project`, `version`, `configuration`, `include-symbols`                                                | packages, package validation report, attestation                  | deterministic build, SourceLink, no publish.                                                                             |
-| `wf-publish-nuget.yml`     | publish packages                   | `source`, `trusted-publishing`, `skip-duplicate`                                                        | package IDs/versions, NuGet URLs                                  | OIDC Trusted Publishing first; API-key fallback. ([Microsoft for Developers][9])                                         |
+| `wf-publish-nuget.yml`     | publish packages                   | `project`, `version`, `source`, `trusted-publishing`, `nuget-user`, `skip-duplicate`                    | package IDs/versions, NuGet URLs                                  | OIDC Trusted Publishing first; `nuget-user` can fall back to caller `NUGET_USER` secret or variable; API-key fallback for legacy feeds. ([Microsoft for Developers][9]) |
 | `wf-publish-container-dotnet.yml`   | .NET OCI image publish                  | `context`, `dockerfile`, `image`, `platforms`, `version`, `version-tag`, `sdk-version`, `push`, `cache-mode`, `sbom`, `provenance` | digest, metadata JSON, SBOM, provenance, publish summary          | Docker Buildx, multi-platform, required .NET version stamping, registry/GHA cache, secret mounts. ([GitHub][14])         |
 | `wf-release.yml`           | version/changelog/GitHub Release   | `release-tool`, `package-kind`, `dry-run`                                                               | release notes, tag, release URL                                   | release-please for release PRs; semantic-release for full automation. ([GitHub][15])                                     |
 | `wf-deploy-k8s.yml`        | deploy chart/manifests             | `environment`, `namespace`, `image-digest`, `chart`, `values`, `timeout`                                | rollout report, rendered manifests, deploy URL                    | environment protection, OIDC cloud auth, `helm upgrade --install`, rollout status. ([GitHub Docs][16])                   |
@@ -401,8 +401,11 @@ Publish pattern:
 name: publish
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        required: true
 
 permissions: {}
 
@@ -414,10 +417,14 @@ jobs:
       contents: read
       id-token: write
     with:
-      source: "nuget.org"
+      project: src/Library/Library.csproj
+      version: ${{ inputs.version }}
       trusted-publishing: true
       enable-cache: true
-      artifact-name: "nuget-packages"
+      # Omit nuget-user when caller NUGET_USER secret or configuration variable is set.
+      # nuget-user: arkanis
+    # secrets:
+    #   NUGET_USER: ${{ secrets.NUGET_USER }}
 ```
 
 Container pattern:

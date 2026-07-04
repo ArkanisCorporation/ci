@@ -321,7 +321,7 @@ Schema: `schemas/workflow-inputs/wf-publish-nuget.schema.json`.
 | `enable-cache` | boolean | no | `true` | n/a |
 | `source` | string | no | `"https://api.nuget.org/v3/index.json"` | n/a |
 | `trusted-publishing` | boolean | no | `true` | n/a |
-| `nuget-user` | string | no | `""` | n/a |
+| `nuget-user` | string | no | `""` | NuGet profile or organization name used by NuGet/login. Falls back to the caller NUGET_USER secret, then configuration variable, when empty. |
 | `skip-duplicate` | boolean | no | `true` | n/a |
 | `include-symbols` | boolean | no | `true` | n/a |
 | `include-source` | boolean | no | `true` | n/a |
@@ -1407,6 +1407,10 @@ Side effects:
 
 `wf-publish-nuget.yml` restores and packs one project.
 It publishes packages from environment-gated jobs with NuGet Trusted Publishing by default.
+Trusted Publishing resolves the NuGet profile or organization from `nuget-user`, then caller secret `NUGET_USER`, then caller configuration variable `NUGET_USER`.
+Prefer `nuget-user` or a repository, organization, or environment configuration variable because NuGet profile and organization names are normally not secret.
+Use the secret fallback only when a caller deliberately treats the NuGet owner as sensitive.
+Caller workflow `env` values are not passed into reusable workflows.
 It can use `NUGET_API_KEY` when `trusted-publishing` is false.
 It runs `dotnet-setversion` before packing by default so package assemblies and package metadata use the same release version.
 It exposes `include-symbols` and `include-source` as independent package options.
@@ -1437,7 +1441,8 @@ flowchart TD
   packageArtifact --> auth{trusted publishing?}
   auth -->|yes| envOidc[["Environment-gated OIDC publish job"]]
   auth -->|no| envApi[["Environment-gated API-key publish job"]]
-  envOidc --> oidc[[NuGet/login OIDC]]
+  envOidc --> nugetUser[[Resolve nuget-user, NUGET_USER secret, or NUGET_USER variable]]
+  nugetUser --> oidc[[NuGet/login OIDC]]
   oidc --> trustedPush[[dotnet nuget push]]
   envApi --> apiKey[("NUGET_API_KEY")]
   apiKey --> keyPush[[dotnet nuget push]]
@@ -1452,7 +1457,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,dotnet,validate,sh,inputs,restore,setversion,pack,verify,envOidc,envApi,oidc,trustedPush,keyPush action
+  class checkout,dotnet,validate,sh,inputs,restore,setversion,pack,verify,envOidc,envApi,nugetUser,oidc,trustedPush,keyPush action
   class cache,preflight,stamp,auth decision
   class packageArtifact,manifest,summary artifact
   class outputs output
@@ -1465,6 +1470,7 @@ Preconditions:
 - `version` is the semantic version to pack.
 - `version` must be bare SemVer without a leading `v` when `dotnet-setversion` is true.
 - Trusted Publishing requires a nuget.org policy that matches the workflow requesting the OIDC token.
+- Trusted Publishing requires a NuGet profile or organization name from `nuget-user`, caller secret `NUGET_USER`, or caller variable `NUGET_USER`.
 - API-key fallback requires the `NUGET_API_KEY` secret.
 - Production publication binds the publish job to `environment-name`.
 
@@ -1615,7 +1621,15 @@ jobs:
       version: ${{ needs.release.outputs.new-version }}
       dotnet-setversion-working-directory: ${{ matrix.version-working-directory }}
       environment-name: publish-nuget
+      # Omit nuget-user when caller NUGET_USER secret or configuration variable is set.
+      # nuget-user: arkanis
+    # secrets:
+    #   NUGET_USER: ${{ secrets.NUGET_USER }}
 ```
+
+Set `NUGET_USER` as a caller repository, organization, or `publish-nuget` environment configuration variable to share one NuGet owner across matrix children.
+Pass a named `NUGET_USER` secret only when the caller deliberately treats the NuGet owner as sensitive.
+Pass `nuget-user` only when a package needs to override that shared owner.
 
 The same pattern applies to `wf-verify-publish-container-dotnet.yml`, `wf-verify-publish-nuget.yml`, `wf-setup-dotnet.yml`, `wf-setup-node.yml`, and deployment workflows when each matrix child can run independently.
 For deployment matrices, keep `environment-name`, namespaces, concurrency policy, and rollback ownership explicit per target.

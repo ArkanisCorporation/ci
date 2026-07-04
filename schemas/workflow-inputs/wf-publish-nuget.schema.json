@@ -57,6 +57,7 @@
     },
     "nuget-user": {
       "type": "string",
+      "description": "NuGet profile or organization name used by NuGet/login. Falls back to the caller NUGET_USER secret, then configuration variable, when empty.",
       "default": ""
     },
     "skip-duplicate": {

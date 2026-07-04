@@ -8,6 +8,7 @@ Last verified: 2026-07-04.
 - GitHub reusable workflow configuration comparison: https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations
 - GitHub workflow syntax: https://docs.github.com/actions/using-workflows/workflow-syntax-for-github-actions
 - GitHub contexts reference: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+- GitHub variables reference: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
 - GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax

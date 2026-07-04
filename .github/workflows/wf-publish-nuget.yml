@@ -72,7 +72,7 @@ on:
         required: false
         default: true
       nuget-user:
-        description: NuGet profile or organization name used by NuGet/login.
+        description: NuGet profile or organization name used by NuGet/login. Falls back to the caller NUGET_USER secret, then configuration variable, when empty.
         type: string
         required: false
         default: ""
@@ -129,6 +129,9 @@ on:
     secrets:
       NUGET_API_KEY:
         description: Long-lived NuGet API key used only when trusted-publishing is false.
+        required: false
+      NUGET_USER:
+        description: NuGet profile or organization name used by NuGet/login when trusted-publishing is true.
         required: false
     outputs:
       artifact-manifest:
@@ -383,26 +386,26 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.pack.outputs.package-artifact-name }}
-          path: artifacts
-
-      - name: Validate trusted publishing inputs @ ${{ inputs.nuget-user }}
+      - name: Validate trusted publishing inputs @ ${{ inputs.nuget-user || (secrets.NUGET_USER != '' && 'NUGET_USER secret') || vars.NUGET_USER }}
         env:
-          NUGET_USER: ${{ inputs.nuget-user }}
+          NUGET_USER: ${{ inputs.nuget-user || secrets.NUGET_USER || vars.NUGET_USER }}
         run: |
           if [[ -z "$NUGET_USER" ]]; then
             echo "nuget-user is required when trusted-publishing is true." >&2
             exit 2
           fi
 
-      - name: NuGet Trusted Publishing login @ ${{ inputs.nuget-user }}
+      - name: NuGet Trusted Publishing login @ ${{ inputs.nuget-user || (secrets.NUGET_USER != '' && 'NUGET_USER secret') || vars.NUGET_USER }}
         id: nuget-login
         uses: NuGet/login@v1
         with:
-          user: ${{ inputs.nuget-user }}
+          user: ${{ inputs.nuget-user || secrets.NUGET_USER || vars.NUGET_USER }}
+
+      - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.pack.outputs.package-artifact-name }}
+          path: artifacts
 
       - name: Publish packages via Trusted Publishing @ ${{ inputs.source }}
         env:
@@ -448,12 +451,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.pack.outputs.package-artifact-name }}
-          path: artifacts
-
       - name: Validate API key publishing inputs @ ${{ inputs.source }}
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -462,6 +459,12 @@ jobs:
             echo "NUGET_API_KEY secret is required when trusted-publishing is false." >&2
             exit 2
           fi
+
+      - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.pack.outputs.package-artifact-name }}
+          path: artifacts
 
       - name: Publish packages via API key @ ${{ inputs.source }}
         env:
