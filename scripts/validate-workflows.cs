@@ -54,6 +54,7 @@ ValidateDotNetJetBrainsContract();
 ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
 ValidateAspireAppHostInputContract();
+ValidateAspireDeployContract();
 ValidateRepositoryPipelineContract();
 ValidateLocalActContract();
 await ValidateDotNetActionFileScriptsAnalyzerCleanAsync();
@@ -1412,6 +1413,35 @@ void ValidateAspireAppHostInputContract()
         {
             AddFailure($"{schemaPath}: apphost-project must not define a repository-specific default.");
         }
+    }
+}
+
+void ValidateAspireDeployContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-deploy-k8s-aspire.yml");
+    if (!File.Exists(workflowPath))
+    {
+        return;
+    }
+
+    var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
+    foreach (var requiredToken in new[]
+             {
+                 "    permissions:\n      contents: read\n      packages: write",
+                 "      - name: Login to GitHub Container Registry @ ghcr.io\n        uses: docker/login-action@v4\n        with:\n          registry: ghcr.io\n          username: ${{ github.actor }}\n          password: ${{ github.token }}\n          logout: true",
+             })
+    {
+        if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: Aspire deploy workflow must request package write access and log in to GHCR before deployment.");
+        }
+    }
+
+    var loginStep = workflowText.IndexOf("      - name: Login to GitHub Container Registry @ ghcr.io", StringComparison.Ordinal);
+    var checkoutStep = workflowText.IndexOf("      - name: Checkout caller @", StringComparison.Ordinal);
+    if (loginStep >= 0 && checkoutStep >= 0 && loginStep > checkoutStep)
+    {
+        AddFailure($"{workflowPath}: Aspire deploy workflow must log in to GHCR at the beginning of the deploy job.");
     }
 }
 

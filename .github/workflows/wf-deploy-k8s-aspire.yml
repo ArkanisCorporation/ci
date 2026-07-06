@@ -3,6 +3,7 @@
 # Remarks:
 #   This workflow runs in the caller repository context.
 #   It assumes the runner already has cluster network access and either a current kube context or a KUBE_CONFIG secret.
+#   It logs into GHCR before checkout and tool setup so Aspire can push or pull registry content during deployment.
 #   It creates the target namespace when missing and then runs `dotnet tool run aspire -- deploy`.
 #   Use wf-verify-deploy-k8s-aspire.yml for deployment input verification without cluster mutation.
 #   It calls runs-on/cache only when enable-cache is true.
@@ -113,6 +114,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      packages: write
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}
     defaults:
@@ -121,6 +123,14 @@ jobs:
     env:
       HAS_KUBE_CONFIG: ${{ secrets.KUBE_CONFIG != '' }}
     steps:
+      - name: Login to GitHub Container Registry @ ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+          logout: true
+
       - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:

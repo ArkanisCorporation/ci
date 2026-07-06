@@ -31,6 +31,7 @@ jobs:
     pull-requests: write
   deploy:
     contents: read
+    packages: write
 forbidden:
   - write-all
   - read-all

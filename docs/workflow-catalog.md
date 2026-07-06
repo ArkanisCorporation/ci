@@ -43,7 +43,7 @@ Audience: consumers and platform maintainers.
 | `wf-verify-publish-container-dotnet.yml` | `contents: read` | Buildx metadata, manifest |
 | `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
 | `wf-verify-deploy-k8s-aspire.yml` | `contents: read` | verification manifest |
-| `wf-deploy-k8s-aspire.yml` | `contents: read` | deploy output, manifest |
+| `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
 
 ## Repository Workflows
@@ -1643,13 +1643,15 @@ Side effects:
 `wf-deploy-k8s-aspire.yml` deploys with `dotnet tool run aspire -- deploy`.
 It accepts an optional `KUBE_CONFIG` secret.
 If `KUBE_CONFIG` is omitted, the runner must already have a valid kube context.
+It logs into GHCR before checkout and tool setup so Aspire deployment can push or pull registry content with the job token.
 It serializes deployments per `environment-name` and `kubernetes-namespace` with `cancel-in-progress: false`.
 
 Flow:
 
 ```mermaid
 flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  caller[("Caller repository")] --> login[[Login to GHCR]]
+  login --> checkout[[Checkout caller]]
   checkout --> dotnet[[Setup .NET]]
   dotnet --> cache{enable cache?}
   cache -->|yes| nugetCache[("NuGet cache")]
@@ -1679,7 +1681,7 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
-  class checkout,dotnet,tools,kubectl,helm,validate,sh,context,inputs,namespace,aspire action
+  class login,checkout,dotnet,tools,kubectl,helm,validate,sh,context,inputs,namespace,aspire action
   class cache,preflight,kube decision
   class manifest,summary,deployArtifact artifact
   class outputs output
@@ -1689,12 +1691,15 @@ flowchart TD
 Preconditions:
 
 - The runner can reach the Kubernetes API.
+- The caller grants `contents: read` and `packages: write` to the reusable workflow job.
+- GitHub Actions has write access to the GHCR package namespace used by the Aspire deployment.
 - The AppHost project exists.
 - The target namespace is a valid Kubernetes namespace.
 - Production deployment binds the deploy job to `environment-name`.
 
 Side effects:
 
+- Logs in to `ghcr.io` with the job `GITHUB_TOKEN` and logs out during action cleanup.
 - Creates the namespace when missing.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Applies deployment changes.

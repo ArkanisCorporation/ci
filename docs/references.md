@@ -1,6 +1,6 @@
 # References
 
-Last verified: 2026-07-04.
+Last verified: 2026-07-06.
 
 ## Primary Docs
 
@@ -11,6 +11,7 @@ Last verified: 2026-07-04.
 - GitHub contexts reference: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
 - GitHub variables reference: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
 - GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
+- GitHub Packages with Actions: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - GitHub OIDC with reusable workflows: https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax
@@ -25,6 +26,7 @@ Last verified: 2026-07-04.
 - GitHub self-hosted runners: https://docs.github.com/en/actions/reference/runners/self-hosted-runners
 - actions/setup-node: https://github.com/actions/setup-node
 - Docker build-push action: https://github.com/docker/build-push-action
+- Docker login action: https://github.com/docker/login-action
 - dotnet tool install: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install
 - dotnet-setversion NuGet package: https://www.nuget.org/packages/dotnet-setversion
 - JetBrains ReSharper command line tools: https://www.jetbrains.com/help/resharper/ReSharper_Command_Line_Tools.html
