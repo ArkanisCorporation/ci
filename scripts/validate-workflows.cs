@@ -40,6 +40,7 @@ ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
 ValidateStepDisplayNameContract();
 ValidateCompositeActions();
+ValidateDotNetActionFileScriptBuildIsolation();
 ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
 ValidateNuGetCompositeActionsContract();
@@ -508,6 +509,37 @@ void ValidateDotNetJetBrainsContract()
             {
                 AddFailure($"{actionScriptPath}: dotnet-jetbrains-cleanupcode script must contain {requiredToken}.");
             }
+        }
+    }
+}
+
+void ValidateDotNetActionFileScriptBuildIsolation()
+{
+    var actionsRoot = Path.Combine(repoRoot, ".github", "actions");
+    if (!Directory.Exists(actionsRoot))
+    {
+        return;
+    }
+
+    foreach (var actionPath in Directory.EnumerateFiles(actionsRoot, "action.yml", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+    {
+        var actionText = File.ReadAllText(actionPath);
+        if (!actionText.Contains("dotnet run --file", StringComparison.Ordinal))
+        {
+            continue;
+        }
+
+        var buildPropsPath = Path.Combine(Path.GetDirectoryName(actionPath)!, "Directory.Build.props");
+        if (!File.Exists(buildPropsPath))
+        {
+            AddFailure($"{buildPropsPath}: .NET file-script actions must isolate from caller Directory.Build.props.");
+            continue;
+        }
+
+        var buildPropsText = File.ReadAllText(buildPropsPath);
+        if (!buildPropsText.Contains("<ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>", StringComparison.Ordinal))
+        {
+            AddFailure($"{buildPropsPath}: .NET file-script actions must disable caller Directory.Build.targets import.");
         }
     }
 }
@@ -1012,6 +1044,7 @@ void ValidateGeneratedCodeContract()
     var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-setup-dotnet-generated-code.yml");
     var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", "wf-setup-dotnet-generated-code.schema.json");
     var actionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-generated-code-diff", "action.yml");
+    var scriptBuildPropsPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-generated-code-diff", "Directory.Build.props");
     var scriptPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-generated-code-diff", "run-generated-code-diff.cs");
 
     if (!File.Exists(workflowPath))
@@ -1063,6 +1096,19 @@ void ValidateGeneratedCodeContract()
             {
                 AddFailure($"{scriptPath}: dotnet-generated-code-diff script must contain {requiredToken}.");
             }
+        }
+    }
+
+    if (!File.Exists(scriptBuildPropsPath))
+    {
+        AddFailure($"{scriptBuildPropsPath}: dotnet-generated-code-diff must isolate its .NET file script from caller Directory.Build.props.");
+    }
+    else
+    {
+        var scriptBuildPropsText = File.ReadAllText(scriptBuildPropsPath);
+        if (!scriptBuildPropsText.Contains("<ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>", StringComparison.Ordinal))
+        {
+            AddFailure($"{scriptBuildPropsPath}: dotnet-generated-code-diff must disable caller Directory.Build.targets import.");
         }
     }
 }
