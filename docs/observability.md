@@ -58,4 +58,5 @@ artifacts/
 
 Debug output may include resolved input values and tool versions.
 Debug output may include generated `bin/` and `obj/` build outputs when `runner.debug` is enabled.
+.NET test workflows can upload `test-results/` or `coverage/` trees through the `upload-test-results` and `upload-coverage` inputs, and debug reruns may include them when those files are needed for investigation.
 Debug output must not include secrets, kubeconfig content, registry tokens, OIDC tokens, full environment dumps, or credential files.

@@ -91,6 +91,8 @@ jobs:
       global-json-file: global.json
       solution: CitizenId.slnx
       coverage-pr-comment: true
+      upload-test-results: false
+      upload-coverage: false
 ```
 
 ## Private NuGet Restore

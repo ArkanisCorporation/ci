@@ -74,6 +74,16 @@ on:
         type: boolean
         required: false
         default: true
+      upload-test-results:
+        description: Includes artifacts/test-results in the diagnostics artifact. Defaults false to limit Actions storage.
+        type: boolean
+        required: false
+        default: false
+      upload-coverage:
+        description: Includes artifacts/coverage in the diagnostics artifact. Defaults false to limit Actions storage.
+        type: boolean
+        required: false
+        default: false
       coverage-reporttypes:
         description: Semicolon-delimited ReportGenerator output types.
         type: string
@@ -98,7 +108,7 @@ on:
         description: Diagnostic artifact retention in days.
         type: number
         required: false
-        default: 14
+        default: 7
       timeout-minutes:
         description: Test job timeout.
         type: number
@@ -306,6 +316,8 @@ jobs:
           COVERAGE: ${{ inputs.coverage }}
           COVERAGE_REPORT: ${{ inputs.coverage-report }}
           COVERAGE_PR_COMMENT: ${{ inputs.coverage-pr-comment }}
+          UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
+          UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
         run: |
           {
             echo "# .NET test"
@@ -319,6 +331,8 @@ jobs:
             echo "| Coverage | \`${COVERAGE}\` |"
             echo "| Coverage report | \`${COVERAGE_REPORT}\` |"
             echo "| Coverage PR comment | \`${COVERAGE_PR_COMMENT}\` |"
+            echo "| Upload test results | \`${UPLOAD_TEST_RESULTS}\` |"
+            echo "| Upload coverage | \`${UPLOAD_COVERAGE}\` |"
             echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
             echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -332,5 +346,7 @@ jobs:
             artifacts
             ${{ runner.debug != '1' && '!artifacts/**/bin/**' || '' }}
             ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
+            ${{ runner.debug != '1' && !inputs.upload-test-results && '!artifacts/test-results/**' || '' }}
+            ${{ runner.debug != '1' && !inputs.upload-coverage && '!artifacts/coverage/**' || '' }}
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

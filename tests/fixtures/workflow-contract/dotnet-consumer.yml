@@ -31,3 +31,5 @@ jobs:
       coverage: true
       coverage-report: true
       coverage-pr-comment: true
+      upload-test-results: false
+      upload-coverage: false

@@ -44,6 +44,8 @@ jobs:
       coverage: true
       coverage-report: true
       coverage-pr-comment: false
+      upload-test-results: false
+      upload-coverage: false
     secrets:
       NUGET_AUTH_JSON: >-
         {"version":1,"sources":[{"name":"github","source":"https://nuget.pkg.github.com/ArkanisCorporation/index.json","username":"github://actor","password":"github://token","validAuthenticationTypes":"Basic"}]}

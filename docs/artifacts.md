@@ -44,6 +44,9 @@ Release, publish, and deploy workflows fail closed when required artifacts are m
 ## Diagnostic Size
 
 Whole-tree diagnostic uploads exclude `artifacts/**/bin/**` and `artifacts/**/obj/**` unless GitHub Actions debug logging sets `runner.debug` to `1`.
+The .NET test workflow also excludes `artifacts/test-results/**` and `artifacts/coverage/**` from normal diagnostics uploads because coverage reports and TRX attachments can dominate Actions artifact storage.
+Callers can set `upload-test-results` or `upload-coverage` to `true` when those directories are needed without enabling all debug output.
+Enable GitHub Actions debug logging when those bulky test or coverage files are needed for a one-off investigation.
 Generated-code diagnostics also ignore `bin/` and `obj/` Git pathspecs unless `runner.debug` is enabled.
 
 ## Retention

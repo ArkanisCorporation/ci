@@ -158,11 +158,13 @@ Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
 | `coverage` | boolean | no | `true` | n/a |
 | `coverage-report` | boolean | no | `true` | n/a |
 | `coverage-pr-comment` | boolean | no | `true` | n/a |
+| `upload-test-results` | boolean | no | `false` | n/a |
+| `upload-coverage` | boolean | no | `false` | n/a |
 | `coverage-reporttypes` | string | no | `"HtmlInline;Cobertura;MarkdownSummaryGithub;TextSummary"` | n/a |
 | `coverage-assemblyfilters` | string | no | `"+*;-*.UnitTests;-*.IntegrationTests"` | n/a |
 | `coverage-report-custom-settings` | string | no | `""` | n/a |
 | `coverage-report-tool-version` | string | no | `"5.5.10"` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
@@ -730,6 +732,7 @@ Side effects:
 
 - Writes under `artifacts/`.
 - Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
+- Excludes `artifacts/test-results/**` and `artifacts/coverage/**` unless `runner.debug` is enabled or the matching `upload-test-results` / `upload-coverage` input is true.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
 - Optionally configures private NuGet restore credentials from `NUGET_AUTH_JSON`.
 - Uploads diagnostics with `if: always()`.
