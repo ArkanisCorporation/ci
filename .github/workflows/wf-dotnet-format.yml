@@ -113,6 +113,13 @@ on:
         type: number
         required: false
         default: 20
+    secrets:
+      NUGET_AUTH_JSON:
+        description: Optional JSON credentials for private NuGet package sources used during restore.
+        required: false
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: Optional 1Password service account token used when NUGET_AUTH_JSON contains op:// references.
+        required: false
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
@@ -136,6 +143,9 @@ jobs:
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}
       run-metadata: ${{ steps.metadata.outputs.path }}
+    env:
+      NUGET_AUTH_JSON_PRESENT: ${{ secrets.NUGET_AUTH_JSON != '' }}
+      OP_SERVICE_ACCOUNT_TOKEN_PRESENT: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
     defaults:
       run:
         shell: bash
@@ -160,12 +170,15 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/setup-dotnet
+            .github/actions/setup-nuget-auth
             .github/actions/dotnet-jetbrains-cleanupcode
           sparse-checkout-cone-mode: false
 
       - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
         id: setup-dotnet
         uses: ./.ci/arkanis-ci/.github/actions/setup-dotnet
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
@@ -178,6 +191,8 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           solution: ${{ inputs.solution }}
           restore-locked-mode: ${{ inputs.restore-locked-mode }}
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Verify formatting @ ${{ inputs.solution }}
         id: dotnet-format

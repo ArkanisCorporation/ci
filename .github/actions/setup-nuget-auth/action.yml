@@ -1,0 +1,78 @@
+# Summary:
+#   Prepares, applies, or cleans up private NuGet restore credentials from NUGET_AUTH_JSON.
+# Remarks:
+#   This action reads secret inputs through environment variables passed to a .NET file script.
+#   It writes only masked credentials to GITHUB_ENV and non-sensitive metadata to GITHUB_OUTPUT.
+
+name: Setup NuGet Auth
+description: Prepares, applies, or cleans up private NuGet restore credentials.
+
+inputs:
+  nuget-auth-json:
+    description: Optional NUGET_AUTH_JSON document containing private package source credentials.
+    required: false
+    default: ""
+  phase:
+    description: Credential lifecycle phase.
+    required: false
+    default: apply
+  credential-mode:
+    description: Credential output mode for apply phase.
+    required: false
+    default: env
+  op-env-file:
+    description: Temporary 1Password env file path under RUNNER_TEMP.
+    required: false
+    default: ""
+  op-map-file:
+    description: Temporary 1Password variable map file path under RUNNER_TEMP.
+    required: false
+    default: ""
+  docker-config-path:
+    description: Temporary Docker BuildKit NuGet.Config secret file path under RUNNER_TEMP.
+    required: false
+    default: ""
+  configured-source-names:
+    description: Comma-delimited source names to clear during cleanup.
+    required: false
+    default: ""
+
+outputs:
+  configured:
+    description: True when credentials were applied.
+    value: ${{ steps.configure.outputs.configured }}
+  op-required:
+    description: True when NUGET_AUTH_JSON contains op:// references.
+    value: ${{ steps.configure.outputs.op-required }}
+  source-count:
+    description: Number of credential sources in NUGET_AUTH_JSON.
+    value: ${{ steps.configure.outputs.source-count }}
+  source-names:
+    description: Comma-delimited non-secret source names.
+    value: ${{ steps.configure.outputs.source-names }}
+  op-env-file:
+    description: Temporary 1Password env file path.
+    value: ${{ steps.configure.outputs.op-env-file }}
+  op-map-file:
+    description: Temporary 1Password variable map file path.
+    value: ${{ steps.configure.outputs.op-map-file }}
+  docker-config-path:
+    description: Temporary generated NuGet.Config path for BuildKit secret-files.
+    value: ${{ steps.configure.outputs.docker-config-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure NuGet auth
+      id: configure
+      run: dotnet run --file "$GITHUB_ACTION_PATH/configure-nuget-auth.cs" --no-launch-profile
+      shell: bash
+      env:
+        NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_PHASE: ${{ inputs.phase }}
+        NUGET_AUTH_CREDENTIAL_MODE: ${{ inputs.credential-mode }}
+        NUGET_AUTH_OP_ENV_FILE: ${{ inputs.op-env-file }}
+        NUGET_AUTH_OP_MAP_FILE: ${{ inputs.op-map-file }}
+        NUGET_AUTH_DOCKER_CONFIG_PATH: ${{ inputs.docker-config-path }}
+        NUGET_AUTH_CONFIGURED_SOURCE_NAMES: ${{ inputs.configured-source-names }}
+        GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}

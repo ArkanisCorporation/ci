@@ -97,6 +97,11 @@ on:
         type: string
         required: false
         default: ""
+      nuget-build-secret:
+        description: Mounts a generated NuGet.Config as a BuildKit secret for Dockerfile restore.
+        type: boolean
+        required: false
+        default: false
       sdk-version:
         description: .NET SDK version used by the dotnet-setversion action.
         type: string
@@ -171,6 +176,12 @@ on:
       REGISTRY_TOKEN:
         description: Registry token; defaults to github.token when omitted.
         required: false
+      NUGET_AUTH_JSON:
+        description: Optional JSON credentials for private NuGet package sources used during Dockerfile restore.
+        required: false
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: Optional 1Password service account token used when NUGET_AUTH_JSON contains op:// references.
+        required: false
     outputs:
       digest:
         description: Image digest produced by docker/build-push-action.
@@ -202,6 +213,9 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       metadata: ${{ steps.build.outputs.metadata }}
       artifact-manifest: ${{ steps.manifest.outputs.path }}
+    env:
+      NUGET_AUTH_JSON_PRESENT: ${{ secrets.NUGET_AUTH_JSON != '' }}
+      OP_SERVICE_ACCOUNT_TOKEN_PRESENT: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
     defaults:
       run:
         shell: bash
@@ -272,6 +286,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/dotnet-setversion
+            .github/actions/setup-nuget-auth
           sparse-checkout-cone-mode: false
 
       - name: Stamp .NET projects @ ${{ inputs.version }}
@@ -284,6 +299,66 @@ jobs:
           recursive: ${{ inputs.version-recursive }}
           project: ${{ inputs.version-project }}
           tool-version: ${{ inputs.version-tool-version }}
+
+      - name: Require private NuGet auth JSON
+        if: inputs.nuget-build-secret && env.NUGET_AUTH_JSON_PRESENT != 'true'
+        run: |
+          echo "::error::NUGET_AUTH_JSON is required when nuget-build-secret is true."
+          exit 2
+
+      - name: Prepare private NuGet auth references
+        id: nuget-auth-prepare
+        if: inputs.nuget-build-secret
+        uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
+        with:
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          phase: prepare
+          op-env-file: ${{ runner.temp }}/nuget-auth/op.env
+          op-map-file: ${{ runner.temp }}/nuget-auth/op-map.json
+
+      - name: Require private NuGet 1Password token
+        if: steps.nuget-auth-prepare.outputs.op-required == 'true' && env.OP_SERVICE_ACCOUNT_TOKEN_PRESENT != 'true'
+        run: |
+          echo "::error::OP_SERVICE_ACCOUNT_TOKEN is required when NUGET_AUTH_JSON contains op:// references."
+          exit 2
+
+      - name: Load private NuGet auth values from 1Password
+        if: steps.nuget-auth-prepare.outputs.op-required == 'true'
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+
+      - name: Generate private NuGet BuildKit secret config
+        id: nuget-auth
+        if: inputs.nuget-build-secret
+        uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
+        with:
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          phase: apply
+          credential-mode: docker-config
+          docker-config-path: ${{ runner.temp }}/nuget-auth/NuGet.Config
+          op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
+
+      - name: Resolve private NuGet BuildKit secret files
+        id: nuget-secret-files
+        env:
+          NUGET_BUILD_SECRET: ${{ inputs.nuget-build-secret }}
+          NUGET_CONFIG_PATH: ${{ steps.nuget-auth.outputs.docker-config-path }}
+        run: |
+          {
+            echo "value<<SECRET_FILES"
+            if [[ "$NUGET_BUILD_SECRET" == "true" ]]; then
+              printf 'nuget_config=%s\n' "$NUGET_CONFIG_PATH"
+            fi
+            echo "SECRET_FILES"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx @ local
         if: inputs.buildkit-endpoint == ''
@@ -421,10 +496,21 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ inputs.labels }}
           build-args: ${{ steps.build-args.outputs.value }}
+          secret-files: ${{ steps.nuget-secret-files.outputs.value }}
           cache-from: ${{ steps.build-cache.outputs.cache_from }}
           cache-to: ${{ steps.build-cache.outputs.cache_to }}
           sbom: ${{ inputs.sbom }}
           provenance: ${{ inputs.provenance }}
+
+      - name: Clear private NuGet BuildKit secret config
+        if: always() && steps.nuget-auth.outputs.configured == 'true'
+        uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
+        with:
+          phase: cleanup
+          op-env-file: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+          op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
+          docker-config-path: ${{ steps.nuget-auth.outputs.docker-config-path }}
+          configured-source-names: ${{ steps.nuget-auth.outputs.source-names }}
 
       - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}
         id: manifest

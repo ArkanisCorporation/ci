@@ -127,6 +127,12 @@ on:
         required: false
         default: 30
     secrets:
+      NUGET_AUTH_JSON:
+        description: Optional JSON credentials for private NuGet package sources used during restore.
+        required: false
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: Optional 1Password service account token used when NUGET_AUTH_JSON contains op:// references.
+        required: false
       NUGET_API_KEY:
         description: Long-lived NuGet API key used only when trusted-publishing is false.
         required: false
@@ -150,6 +156,9 @@ jobs:
     outputs:
       artifact-manifest: ${{ steps.pack.outputs.artifact-manifest }}
       package-artifact-name: ${{ steps.package-artifact.outputs.name }}
+    env:
+      NUGET_AUTH_JSON_PRESENT: ${{ secrets.NUGET_AUTH_JSON != '' }}
+      OP_SERVICE_ACCOUNT_TOKEN_PRESENT: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
     defaults:
       run:
         shell: bash
@@ -169,11 +178,14 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/dotnet-pack-nuget
+            .github/actions/setup-nuget-auth
           sparse-checkout-cone-mode: false
 
       - name: Pack ${{ inputs.project }} @ ${{ inputs.version }}
         id: pack
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-pack-nuget
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           project: ${{ inputs.project }}
           version: ${{ inputs.version }}
@@ -193,6 +205,8 @@ jobs:
           artifact-name: ${{ github.event.repository.name }}-nuget-${{ inputs.version }}
           artifact-retention-days: ${{ inputs.artifact-retention-days }}
           workflow-name: wf-publish-nuget
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Resolve package artifact @ ${{ inputs.version }}
         id: package-artifact

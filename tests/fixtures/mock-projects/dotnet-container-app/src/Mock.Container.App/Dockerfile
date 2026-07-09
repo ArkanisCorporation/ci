@@ -1,10 +1,13 @@
+# syntax=docker/dockerfile:1
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 ARG VERSION=0.0.0-local
 WORKDIR /src
 
 COPY src/Mock.Container.App/Mock.Container.App.csproj src/Mock.Container.App/
-RUN dotnet restore src/Mock.Container.App/Mock.Container.App.csproj
+RUN --mount=type=secret,id=nuget_config,target=/root/.nuget/NuGet/NuGet.Config,required=false \
+    dotnet restore src/Mock.Container.App/Mock.Container.App.csproj
 
 COPY . .
 RUN dotnet publish src/Mock.Container.App/Mock.Container.App.csproj \

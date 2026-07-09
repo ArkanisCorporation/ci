@@ -23,3 +23,6 @@ jobs:
         src/CitizenId.Host.Discord/Internal/Generated/WolverineHandlers
         src/CitizenId.Host.Web/Internal/Generated/WolverineHandlers
       run-commands-in-parallel: true
+    secrets:
+      NUGET_AUTH_JSON: ${{ secrets.NUGET_AUTH_JSON }}
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

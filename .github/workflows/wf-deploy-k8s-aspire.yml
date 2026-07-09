@@ -93,6 +93,12 @@ on:
       KUBE_CONFIG:
         description: Optional kubeconfig content written to RUNNER_TEMP.
         required: false
+      NUGET_AUTH_JSON:
+        description: Optional JSON credentials for private NuGet package sources used during restore.
+        required: false
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: Optional 1Password service account token used when NUGET_AUTH_JSON contains op:// references.
+        required: false
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
@@ -122,6 +128,8 @@ jobs:
         shell: bash
     env:
       HAS_KUBE_CONFIG: ${{ secrets.KUBE_CONFIG != '' }}
+      NUGET_AUTH_JSON_PRESENT: ${{ secrets.NUGET_AUTH_JSON != '' }}
+      OP_SERVICE_ACCOUNT_TOKEN_PRESENT: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
     steps:
       - name: Login to GitHub Container Registry @ ghcr.io
         uses: docker/login-action@v4
@@ -141,6 +149,57 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
+
+      - name: Checkout platform NuGet auth action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
+        uses: actions/checkout@v7
+        with:
+          # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
+          repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
+          ref: ${{ fromJSON(toJSON(job)).workflow_sha }}
+          path: .ci/arkanis-ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/setup-nuget-auth
+          sparse-checkout-cone-mode: false
+
+      - name: Prepare private NuGet auth references
+        id: nuget-auth-prepare
+        if: env.NUGET_AUTH_JSON_PRESENT == 'true'
+        uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
+        with:
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          phase: prepare
+          op-env-file: ${{ runner.temp }}/nuget-auth/op.env
+          op-map-file: ${{ runner.temp }}/nuget-auth/op-map.json
+
+      - name: Require private NuGet 1Password token
+        if: steps.nuget-auth-prepare.outputs.op-required == 'true' && env.OP_SERVICE_ACCOUNT_TOKEN_PRESENT != 'true'
+        run: |
+          echo "::error::OP_SERVICE_ACCOUNT_TOKEN is required when NUGET_AUTH_JSON contains op:// references."
+          exit 2
+
+      - name: Load private NuGet auth values from 1Password
+        if: steps.nuget-auth-prepare.outputs.op-required == 'true'
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+
+      - name: Apply private NuGet auth credentials
+        id: nuget-auth
+        if: env.NUGET_AUTH_JSON_PRESENT == 'true'
+        uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
+        with:
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          phase: apply
+          credential-mode: env
+          op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
 
       - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache
@@ -248,6 +307,15 @@ jobs:
             --pipeline-log-level debug \
             --include-exception-details \
             --debug
+
+      - name: Clear private NuGet auth credentials
+        if: always() && steps.nuget-auth.outputs.configured == 'true'
+        uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
+        with:
+          phase: cleanup
+          op-env-file: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+          op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
+          configured-source-names: ${{ steps.nuget-auth.outputs.source-names }}
 
       - name: Remove temporary kubeconfig @ ${{ inputs.environment-name }}
         if: always() && env.HAS_KUBE_CONFIG == 'true'

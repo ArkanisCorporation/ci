@@ -72,6 +72,21 @@ The `NuGet/login` output is a short-lived API key for subsequent steps in that j
 Do not pass that value through job outputs or artifacts.
 If reusable platform packaging is desired, call `dotnet-pack-nuget` earlier in the same job before requesting the short-lived key.
 
+## Private NuGet Restore Credentials
+
+Private restore credentials are allowed only when the caller explicitly passes `NUGET_AUTH_JSON`.
+Workflows also accept `OP_SERVICE_ACCOUNT_TOKEN` when any `NUGET_AUTH_JSON` value starts with `op://`.
+The 1Password service account token is only for trusted workflows and is never passed to Docker Buildx.
+The workflow resolves `op://` values through `1password/load-secrets-action@v4`.
+The workflow must not invoke the 1Password `op` CLI directly.
+The workflow resolves `github://actor` from `github.actor`.
+The workflow resolves `github://token` from `github.token`, passed into auth setup as `GITHUB_TOKEN_FOR_NUGET_AUTH`.
+For host restore, credentials are written as masked `NuGetPackageSourceCredentials_{name}` environment variables.
+For Dockerfile restore, credentials are written to a temporary `NuGet.Config` under `RUNNER_TEMP` and mounted with Docker BuildKit `secret-files`.
+Do not run private-feed credentialed jobs on untrusted fork pull requests.
+Do not use `pull_request_target` to run fork code with private feed credentials.
+Do not write `NUGET_AUTH_JSON`, `OP_SERVICE_ACCOUNT_TOKEN`, `NuGetPackageSourceCredentials_*`, `NUGET_AUTH_OP_*`, generated 1Password env files, or generated Docker NuGet configs to logs, summaries, outputs, artifacts, cache keys, Docker labels, Docker build args, or image metadata.
+
 ## Secrets
 
 Do not print secrets.

@@ -97,6 +97,13 @@ on:
         type: number
         required: false
         default: 30
+    secrets:
+      NUGET_AUTH_JSON:
+        description: Optional JSON credentials for private NuGet package sources used during restore.
+        required: false
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: Optional 1Password service account token used when NUGET_AUTH_JSON contains op:// references.
+        required: false
     outputs:
       artifact-manifest:
         description: Path to the generated artifact manifest.
@@ -113,6 +120,9 @@ jobs:
       contents: read
     outputs:
       artifact-manifest: ${{ steps.pack.outputs.artifact-manifest }}
+    env:
+      NUGET_AUTH_JSON_PRESENT: ${{ secrets.NUGET_AUTH_JSON != '' }}
+      OP_SERVICE_ACCOUNT_TOKEN_PRESENT: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
     defaults:
       run:
         shell: bash
@@ -132,11 +142,14 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/dotnet-pack-nuget
+            .github/actions/setup-nuget-auth
           sparse-checkout-cone-mode: false
 
       - name: Pack ${{ inputs.project }} @ ${{ inputs.version }}
         id: pack
         uses: ./.ci/arkanis-ci/.github/actions/dotnet-pack-nuget
+        env:
+          GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           project: ${{ inputs.project }}
           version: ${{ inputs.version }}
@@ -156,6 +169,8 @@ jobs:
           artifact-name: ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}
           artifact-retention-days: ${{ inputs.artifact-retention-days }}
           workflow-name: wf-verify-publish-nuget
+          nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Upload package artifacts @ ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
         if: always()

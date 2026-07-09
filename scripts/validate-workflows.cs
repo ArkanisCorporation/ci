@@ -44,6 +44,7 @@ ValidateDotNetActionFileScriptBuildIsolation();
 ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
 ValidateNuGetCompositeActionsContract();
+ValidatePrivateNuGetCredentialContract();
 ValidateNuGetPackSymbolContract();
 ValidateCoverageReportContract();
 ValidateGeneratedCodeContract();
@@ -885,6 +886,208 @@ void ValidateNuGetCompositeActionsContract()
         {
             AddFailure($"{verifyWorkflowPath}: NuGet verification workflow must delegate package creation to dotnet-pack-nuget.");
         }
+    }
+}
+
+void ValidatePrivateNuGetCredentialContract()
+{
+    var authActionPath = Path.Combine(repoRoot, ".github", "actions", "setup-nuget-auth", "action.yml");
+    var authScriptPath = Path.Combine(repoRoot, ".github", "actions", "setup-nuget-auth", "configure-nuget-auth.cs");
+    var hostRestoreWorkflows = new[]
+    {
+        "wf-dotnet-format.yml",
+        "wf-dotnet-test.yml",
+        "wf-setup-dotnet-generated-code.yml",
+        "wf-verify-publish-nuget.yml",
+        "wf-publish-nuget.yml",
+        "wf-verify-deploy-k8s-aspire.yml",
+        "wf-deploy-k8s-aspire.yml",
+    };
+    var containerWorkflows = new[]
+    {
+        "wf-verify-publish-container-dotnet.yml",
+        "wf-publish-container-dotnet.yml",
+    };
+
+    if (!File.Exists(authActionPath))
+    {
+        AddFailure($"{authActionPath}: setup-nuget-auth composite action is required for private NuGet restore credentials.");
+    }
+    else
+    {
+        var actionText = File.ReadAllText(authActionPath);
+        foreach (var requiredInput in new[] { "nuget-auth-json", "phase", "credential-mode", "op-env-file", "op-map-file", "docker-config-path", "configured-source-names" })
+        {
+            if (!ActionDefinesInput(authActionPath, requiredInput))
+            {
+                AddFailure($"{authActionPath}: setup-nuget-auth action must expose {requiredInput} input.");
+            }
+        }
+
+        foreach (var requiredToken in new[] { "dotnet run --file", "configure-nuget-auth.cs", "NUGET_AUTH_JSON_INPUT", "GITHUB_TOKEN_FOR_NUGET_AUTH" })
+        {
+            if (!actionText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{authActionPath}: setup-nuget-auth action must contain {requiredToken}.");
+            }
+        }
+    }
+
+    if (!File.Exists(authScriptPath))
+    {
+        AddFailure($"{authScriptPath}: setup-nuget-auth .NET file script is required.");
+    }
+    else
+    {
+        var scriptText = File.ReadAllText(authScriptPath);
+        foreach (var requiredToken in new[] { "NuGetPackageSourceCredentials_", "github://actor", "github://token", "op://", "ClearTextPassword", "::add-mask::" })
+        {
+            if (!scriptText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{authScriptPath}: setup-nuget-auth script must contain {requiredToken}.");
+            }
+        }
+
+        if (Regex.IsMatch(scriptText, @"(?m)(^|\s)op(\.exe)?\s+", RegexOptions.CultureInvariant))
+        {
+            AddFailure($"{authScriptPath}: setup-nuget-auth script must not invoke the 1Password op CLI.");
+        }
+    }
+
+    foreach (var workflowName in hostRestoreWorkflows)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            continue;
+        }
+
+        var workflowText = File.ReadAllText(workflowPath);
+        RequireWorkflowSecret(workflowPath, "NUGET_AUTH_JSON");
+        RequireWorkflowSecret(workflowPath, "OP_SERVICE_ACCOUNT_TOKEN");
+
+        if (!workflowText.Contains("GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: private NuGet auth must pass github.token through GITHUB_TOKEN_FOR_NUGET_AUTH.");
+        }
+
+        if (!workflowText.Contains("NUGET_AUTH_JSON_PRESENT", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: private NuGet auth must derive a non-secret NUGET_AUTH_JSON_PRESENT flag for conditionals.");
+        }
+
+        if (!workflowText.Contains("OP_SERVICE_ACCOUNT_TOKEN_PRESENT", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: private NuGet auth must derive a non-secret OP_SERVICE_ACCOUNT_TOKEN_PRESENT flag for conditionals.");
+        }
+
+        if (Regex.IsMatch(workflowText, @"(?m)^\s*if:\s*.*secrets\.(NUGET_AUTH_JSON|OP_SERVICE_ACCOUNT_TOKEN)", RegexOptions.CultureInvariant))
+        {
+            AddFailure($"{workflowPath}: private NuGet auth must not reference secrets directly in if conditionals.");
+        }
+
+        if (Regex.IsMatch(workflowText, @"(?m)(^|\s)op(\.exe)?\s+", RegexOptions.CultureInvariant))
+        {
+            AddFailure($"{workflowPath}: workflows must not invoke the 1Password op CLI directly.");
+        }
+    }
+
+    var setupDotnetActionPath = Path.Combine(repoRoot, ".github", "actions", "setup-dotnet", "action.yml");
+    if (File.Exists(setupDotnetActionPath))
+    {
+        foreach (var requiredInput in new[] { "nuget-auth-json", "op-service-account-token" })
+        {
+            if (!ActionDefinesInput(setupDotnetActionPath, requiredInput))
+            {
+                AddFailure($"{setupDotnetActionPath}: setup-dotnet action must expose {requiredInput} input.");
+            }
+        }
+    }
+
+    var packActionPath = Path.Combine(repoRoot, ".github", "actions", "dotnet-pack-nuget", "action.yml");
+    if (File.Exists(packActionPath))
+    {
+        foreach (var requiredInput in new[] { "nuget-auth-json", "op-service-account-token" })
+        {
+            if (!ActionDefinesInput(packActionPath, requiredInput))
+            {
+                AddFailure($"{packActionPath}: dotnet-pack-nuget action must expose {requiredInput} input.");
+            }
+        }
+    }
+
+    foreach (var workflowName in containerWorkflows)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(workflowPath))
+        {
+            continue;
+        }
+
+        var workflowText = File.ReadAllText(workflowPath);
+        var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", Path.ChangeExtension(workflowName, ".schema.json"));
+        RequireWorkflowSecret(workflowPath, "NUGET_AUTH_JSON");
+        RequireWorkflowSecret(workflowPath, "OP_SERVICE_ACCOUNT_TOKEN");
+
+        var nugetBuildSecretInput = ReadWorkflowInputs(workflowPath).GetValueOrDefault("nuget-build-secret");
+        if (nugetBuildSecretInput is null)
+        {
+            AddFailure($"{workflowPath}: container workflows must expose nuget-build-secret input.");
+        }
+        else if (!string.Equals(NormalizeWorkflowInputType(nugetBuildSecretInput.Type), "boolean", StringComparison.Ordinal)
+            || !string.Equals(NormalizeWorkflowDefault(nugetBuildSecretInput), "boolean:false", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: nuget-build-secret must be a boolean input defaulting to false.");
+        }
+
+        if (File.Exists(schemaPath))
+        {
+            var schema = ReadWorkflowInputSchema(schemaPath);
+            if (!schema.Inputs.TryGetValue("nuget-build-secret", out var schemaInput)
+                || schemaInput.Required
+                || !schemaInput.HasDefault
+                || !string.Equals(schemaInput.DefaultValue, "boolean:false", StringComparison.Ordinal))
+            {
+                AddFailure($"{schemaPath}: nuget-build-secret must be optional and default to false.");
+            }
+        }
+
+        foreach (var requiredToken in new[]
+                 {
+                     "uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth",
+                     "1password/load-secrets-action@v4",
+                     "id: nuget-secret-files",
+                     "secret-files:",
+                     "secret-files: ${{ steps.nuget-secret-files.outputs.value }}",
+                     "printf 'nuget_config=%s\\n' \"$NUGET_CONFIG_PATH\"",
+                     "phase: cleanup",
+                     "GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}",
+                 })
+        {
+            if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: container private NuGet auth must contain {requiredToken}.");
+            }
+        }
+
+        if (!workflowText.Contains("NUGET_AUTH_JSON_PRESENT", StringComparison.Ordinal)
+            || !workflowText.Contains("OP_SERVICE_ACCOUNT_TOKEN_PRESENT", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: container private NuGet auth must derive non-secret presence flags for conditionals.");
+        }
+
+        if (Regex.IsMatch(workflowText, @"(?m)^\s*if:\s*.*secrets\.(NUGET_AUTH_JSON|OP_SERVICE_ACCOUNT_TOKEN)", RegexOptions.CultureInvariant))
+        {
+            AddFailure($"{workflowPath}: container private NuGet auth must not reference secrets directly in if conditionals.");
+        }
+    }
+}
+
+void RequireWorkflowSecret(string workflowPath, string secretName)
+{
+    if (!WorkflowDefinesSecret(workflowPath, secretName))
+    {
+        AddFailure($"{workflowPath}: workflow_call must expose optional secret {secretName}.");
     }
 }
 
@@ -1790,6 +1993,9 @@ void ValidateCacheOptOutContract(string file, string text, string[] lines, bool 
 Dictionary<string, WorkflowInput> ReadWorkflowInputs(string workflowPath) =>
     ReadWorkflowFile(workflowPath).On?.WorkflowCall?.Inputs ?? new Dictionary<string, WorkflowInput>(StringComparer.Ordinal);
 
+Dictionary<string, WorkflowSecret> ReadWorkflowSecrets(string workflowPath) =>
+    ReadWorkflowFile(workflowPath).On?.WorkflowCall?.Secrets ?? new Dictionary<string, WorkflowSecret>(StringComparer.Ordinal);
+
 Dictionary<string, WorkflowInput> ReadActionInputs(string actionPath) =>
     ReadActionFile(actionPath).Inputs ?? new Dictionary<string, WorkflowInput>(StringComparer.Ordinal);
 
@@ -1874,6 +2080,9 @@ static string ReadSchemaType(JsonElement definition)
 
 bool WorkflowDefinesInput(string workflowPath, string inputName) =>
     ReadWorkflowInputs(workflowPath).ContainsKey(inputName);
+
+bool WorkflowDefinesSecret(string workflowPath, string secretName) =>
+    ReadWorkflowSecrets(workflowPath).TryGetValue(secretName, out var secret) && !secret.Required;
 
 bool ActionDefinesInput(string actionPath, string inputName) =>
     ReadActionInputs(actionPath).ContainsKey(inputName);
@@ -2122,12 +2331,21 @@ sealed class WorkflowCall
 {
     [YamlMember(Alias = "inputs", ApplyNamingConventions = false)]
     public Dictionary<string, WorkflowInput> Inputs { get; set; } = new(StringComparer.Ordinal);
+
+    [YamlMember(Alias = "secrets", ApplyNamingConventions = false)]
+    public Dictionary<string, WorkflowSecret> Secrets { get; set; } = new(StringComparer.Ordinal);
 }
 
 sealed class ActionFile
 {
     [YamlMember(Alias = "inputs", ApplyNamingConventions = false)]
     public Dictionary<string, WorkflowInput> Inputs { get; set; } = new(StringComparer.Ordinal);
+}
+
+sealed class WorkflowSecret
+{
+    [YamlMember(Alias = "required", ApplyNamingConventions = false)]
+    public bool Required { get; set; }
 }
 
 sealed class WorkflowInput

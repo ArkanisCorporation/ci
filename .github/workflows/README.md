@@ -27,6 +27,13 @@ Use `.github/actions/dotnet-pack-nuget` and `.github/actions/dotnet-publish-nuge
 The consumer workflow should run `NuGet/login` between those two actions in the same protected job.
 `wf-publish-nuget.yml` remains available for environment-gated workflow reuse and API-key fallback, but caller-owned Trusted Publishing is the safer default for nuget.org policies.
 
+## Private NuGet Restore
+
+.NET reusable workflows accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
+`NUGET_AUTH_JSON` may contain multiple package source credentials, including literal values, `op://` 1Password references, `github://actor`, and `github://token`.
+Container workflows only pass private restore credentials to Docker BuildKit when `nuget-build-secret` is true.
+Dockerfiles that need the generated config should mount the `nuget_config` secret during restore.
+
 ## .NET Container Publish
 
 `wf-publish-container-dotnet.yml` is the reusable .NET container publishing workflow.

@@ -23,5 +23,9 @@ jobs:
       sdk-version: 10.0.x
       version-working-directory: tests/fixtures/mock-projects/dotnet-container-app
       enable-cache: false
+      nuget-build-secret: true
       labels: |
         org.opencontainers.image.source=https://github.com/ArkanisCorporation/ci
+    secrets:
+      NUGET_AUTH_JSON: >-
+        {"version":1,"sources":[{"name":"github","source":"https://nuget.pkg.github.com/ArkanisCorporation/index.json","username":"github://actor","password":"github://token","validAuthenticationTypes":"Basic"}]}

@@ -93,6 +93,83 @@ jobs:
       coverage-pr-comment: true
 ```
 
+## Private NuGet Restore
+
+.NET workflows accept an optional `NUGET_AUTH_JSON` secret for private package source credentials.
+The caller repository should commit non-secret package sources in `NuGet.Config`.
+The `name` values in `NUGET_AUTH_JSON` must match the package source keys in `NuGet.Config`.
+Multiple credentials are provided by adding more entries to the `sources` array.
+
+Literal single-feed shape:
+
+```json
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "internal",
+      "source": "https://nuget.example.com/v3/index.json",
+      "username": "ci",
+      "password": "PRIVATE_TOKEN_STORED_IN_THE_SECRET",
+      "validAuthenticationTypes": "Basic",
+      "protocolVersion": "3"
+    }
+  ]
+}
+```
+
+Mixed GitHub Packages and 1Password shape:
+
+```json
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "github",
+      "source": "https://nuget.pkg.github.com/ArkanisCorporation/index.json",
+      "username": "github://actor",
+      "password": "github://token",
+      "validAuthenticationTypes": "Basic",
+      "protocolVersion": "3"
+    },
+    {
+      "name": "internal",
+      "source": "https://nuget.example.com/v3/index.json",
+      "username": "op://ci-nuget/internal-feed/username",
+      "password": "op://ci-nuget/internal-feed/token",
+      "validAuthenticationTypes": "Basic",
+      "protocolVersion": "3"
+    }
+  ]
+}
+```
+
+Reusable workflow call shape:
+
+```yaml
+jobs:
+  dotnet-test:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      solution: CitizenId.slnx
+      dotnet-version: 10.0.x
+    secrets:
+      NUGET_AUTH_JSON: ${{ secrets.ARKANIS_NUGET_AUTH_JSON }}
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+```
+
+Container workflows require `nuget-build-secret: true` when Dockerfile restore needs private feeds.
+The Dockerfile must mount the generated BuildKit secret instead of copying a credentialed config into the image.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+RUN --mount=type=secret,id=nuget_config,target=/root/.nuget/NuGet/NuGet.Config \
+    dotnet restore src/App/App.csproj --locked-mode
+```
+
 Node projects use the same runner model.
 
 ```yaml

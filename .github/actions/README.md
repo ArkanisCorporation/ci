@@ -17,6 +17,7 @@ Keep each action narrow; prefer more small actions over one flag-heavy action.
 | `dotnet-setversion` | Installs `dotnet-setversion` and applies a bare SemVer value to .NET project files. | Modifies matched `.csproj` files. |
 | `release-backpropagation` | Creates, approves, and optionally auto-merges release backpropagation PRs. | May create PRs, approve them, and enable auto-merge. |
 | `setup-dotnet` | Sets up .NET SDK, NuGet cache, optional local tools, and optional restore. | Writes `NUGET_PACKAGES` and restores cache/tools/dependencies. |
+| `setup-nuget-auth` | Prepares, applies, or cleans up private NuGet restore credentials. | Writes masked NuGet env credentials or a temporary BuildKit secret config. |
 | `setup-node` | Sets up Node.js, package-manager tooling, cache, and optional install. | Writes Corepack state, cache metadata, and optional install logs. |
 
 ## dotnet-coverage-report
@@ -131,6 +132,7 @@ steps:
 
 Use `dotnet-pack-nuget` in caller-owned workflows that need reusable NuGet packaging without moving OIDC token ownership into a reusable workflow.
 The action restores the project, optionally stamps `.csproj` versions with `dotnet-setversion`, packs `.nupkg` and `.snupkg` files, and writes an artifact manifest.
+When `nuget-auth-json` is set, it configures private NuGet restore credentials before `dotnet restore` and clears them afterward.
 
 Preconditions:
 
@@ -143,6 +145,7 @@ Side effects:
 
 - Installs the requested .NET SDK through `actions/setup-dotnet`.
 - Optionally uses `runs-on/cache` for NuGet packages.
+- Optionally writes masked private NuGet credentials to `GITHUB_ENV` during restore.
 - Optionally modifies matched `.csproj` files before packing.
 - Writes package files under `package-directory`, defaulting to `artifacts/nuget`.
 
@@ -159,6 +162,65 @@ steps:
       project: src/Library/Library.csproj
       version: ${{ needs.release.outputs.new-version }}
       dotnet-setversion-working-directory: src/Library
+```
+
+## setup-nuget-auth
+
+Use `setup-nuget-auth` when a workflow needs to restore from private NuGet feeds.
+Host restore uses `NuGetPackageSourceCredentials_{name}` environment variables.
+Dockerfile restore uses a temporary `NuGet.Config` passed to Docker Buildx as a BuildKit secret file.
+The action supports literal values, `op://` 1Password references, `github://actor`, and `github://token` inside `NUGET_AUTH_JSON`.
+The surrounding workflow is responsible for running `1password/load-secrets-action@v4` between `phase: prepare` and `phase: apply` when `op-required` is true.
+
+Preconditions:
+
+- The runner has Bash and .NET 10 SDK.
+- `nuget-auth-json` is a version 1 JSON document with one or more `sources`.
+- Source names match committed `NuGet.Config` package source keys.
+- `GITHUB_TOKEN_FOR_NUGET_AUTH` is set when any field uses `github://token`.
+- `OP_SERVICE_ACCOUNT_TOKEN` is set in the workflow when any field starts with `op://`.
+
+Side effects:
+
+- Masks resolved passwords and complete NuGet credential strings.
+- Writes `NuGetPackageSourceCredentials_*` values to `GITHUB_ENV` in `credential-mode: env`.
+- Writes a temporary `NuGet.Config` under `RUNNER_TEMP` in `credential-mode: docker-config`.
+- Writes temporary 1Password env and map files under `RUNNER_TEMP` during `phase: prepare`.
+- Deletes generated files and clears generated environment variables during `phase: cleanup`.
+
+Example:
+
+```yaml
+steps:
+  - name: Prepare NuGet auth references
+    id: nuget-auth-prepare
+    uses: ArkanisCorporation/ci/.github/actions/setup-nuget-auth@v1
+    env:
+      GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
+    with:
+      nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+      phase: prepare
+      op-env-file: ${{ runner.temp }}/nuget-auth/op.env
+      op-map-file: ${{ runner.temp }}/nuget-auth/op-map.json
+
+  - name: Load NuGet auth values from 1Password
+    if: steps.nuget-auth-prepare.outputs.op-required == 'true'
+    uses: 1password/load-secrets-action@v4
+    with:
+      export-env: true
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+      OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+
+  - name: Apply NuGet auth credentials
+    uses: ArkanisCorporation/ci/.github/actions/setup-nuget-auth@v1
+    env:
+      GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
+    with:
+      nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+      phase: apply
+      credential-mode: env
+      op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
 ```
 
 ## dotnet-publish-nuget

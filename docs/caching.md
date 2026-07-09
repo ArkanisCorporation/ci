@@ -11,6 +11,7 @@ Audience: workflow implementer.
 - Every reusable workflow that uses `runs-on/cache` must expose `enable-cache`.
 - Set `enable-cache` to false for cold-restore validation, cache incident isolation, or runners without cache service access.
 - Never cache secrets, credentials, kubeconfigs, `.npmrc` with token, NuGet API keys.
+- Never cache `NUGET_AUTH_JSON`, `OP_SERVICE_ACCOUNT_TOKEN`, `GITHUB_ENV`, `RUNNER_TEMP`, generated `NuGetPackageSourceCredentials_*` values, generated `NUGET_AUTH_OP_*` values, generated 1Password env files, or generated Docker NuGet configs.
 
 ## .NET
 
@@ -21,6 +22,8 @@ nuget-{os}-{arch}-{dotnet-version}-{global-json-hash}-{packages-lock-hash}
 ```
 
 Use locked restore in CI.
+Private NuGet restore credentials come from environment variables during restore only.
+Do not cache generated NuGet auth files or temporary credential maps.
 
 ## Node
 
@@ -55,3 +58,4 @@ Prefer isolated venv; cache package download/build cache, not global interpreter
 - The generated cache scope is based on image, build context, Dockerfile, and platforms so independent container targets do not share one cache namespace.
 - Set `enable-cache` to false for cold image-build validation or runners without GitHub cache service access.
 - Set `cache-from` and `cache-to` when the caller needs registry cache, remote BuildKit portability, or a dedicated cache scope.
+- When `nuget-build-secret` is true, the generated `NuGet.Config` is a BuildKit secret file and must not be included in cache keys, artifacts, build args, or image layers.

@@ -76,6 +76,11 @@
       "type": "string",
       "default": ""
     },
+    "nuget-build-secret": {
+      "type": "boolean",
+      "default": false,
+      "description": "Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore."
+    },
     "sdk-version": {
       "type": "string",
       "default": "10.0.x"

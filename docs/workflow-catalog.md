@@ -294,6 +294,7 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `registry-username` | string | no | `""` | n/a |
 | `buildkit-endpoint` | string | no | `""` | n/a |
 | `build-args` | string | no | `""` | n/a |
+| `nuget-build-secret` | boolean | no | `false` | Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore. |
 | `sdk-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
 | `version-working-directory` | string | no | `"."` | n/a |
@@ -453,6 +454,7 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `extra-tags` | string | no | `""` | n/a |
 | `buildkit-endpoint` | string | no | `""` | n/a |
 | `build-args` | string | no | `""` | n/a |
+| `nuget-build-secret` | boolean | no | `false` | Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore. |
 | `sdk-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
 | `version-working-directory` | string | no | `"."` | n/a |
@@ -524,6 +526,75 @@ Artifacts are purple slanted nodes.
 Workflow outputs are yellow circles.
 External services and caches are gray dashed nodes.
 
+## Private NuGet Restore Credentials
+
+.NET workflows that restore packages accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
+`NUGET_AUTH_JSON` is a versioned JSON document with one or more `sources`.
+Each `name` must match a package source key in the caller repository's committed `NuGet.Config`.
+Host restore uses NuGet's `NuGetPackageSourceCredentials_{name}` environment variable convention.
+Dockerfile restore uses a generated `NuGet.Config` mounted through Docker Buildx `secret-files`.
+The generated Docker config is temporary secret material under `RUNNER_TEMP`.
+It must not be cached, uploaded, copied into images, written to summaries, or passed through Docker build args.
+
+Supported credential value forms:
+
+| Value form | Meaning |
+|---|---|
+| literal string | Stored directly inside the caller's `NUGET_AUTH_JSON` secret. |
+| `op://vault/item/field` | Resolved by `1password/load-secrets-action@v4` with `OP_SERVICE_ACCOUNT_TOKEN`. |
+| `github://actor` | Resolves to the current workflow `github.actor`. |
+| `github://token` | Resolves to the current workflow `github.token`. |
+
+Example `NUGET_AUTH_JSON`:
+
+```json
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "github",
+      "source": "https://nuget.pkg.github.com/ArkanisCorporation/index.json",
+      "username": "github://actor",
+      "password": "github://token",
+      "validAuthenticationTypes": "Basic",
+      "protocolVersion": "3"
+    },
+    {
+      "name": "internal",
+      "source": "https://nuget.example.com/v3/index.json",
+      "username": "op://ci-nuget/internal-feed/username",
+      "password": "op://ci-nuget/internal-feed/token",
+      "validAuthenticationTypes": "Basic",
+      "protocolVersion": "3"
+    }
+  ]
+}
+```
+
+Example reusable workflow call:
+
+```yaml
+jobs:
+  dotnet-test:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      solution: src/Product.slnx
+    secrets:
+      NUGET_AUTH_JSON: ${{ secrets.ARKANIS_NUGET_AUTH_JSON }}
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+```
+
+Container workflows require `nuget-build-secret: true` when package restore happens inside the Dockerfile.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+RUN --mount=type=secret,id=nuget_config,target=/root/.nuget/NuGet/NuGet.Config \
+    dotnet restore src/Product/Product.csproj --locked-mode
+```
+
 ## .NET Format Workflow
 
 `wf-dotnet-format.yml` checks out the caller repository.
@@ -587,6 +658,7 @@ Side effects:
 - Writes CleanupCode diagnostics under `artifacts/jetbrains-cleanupcode`.
 - Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Optionally configures private NuGet restore credentials from `NUGET_AUTH_JSON`.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
 - Runs CleanupCode, which may modify workspace files before the Git diff gate.
@@ -659,6 +731,7 @@ Side effects:
 - Writes under `artifacts/`.
 - Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
 - Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Optionally configures private NuGet restore credentials from `NUGET_AUTH_JSON`.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
 - Checks out this CI platform repository under `.ci/arkanis-ci`.
@@ -1468,7 +1541,8 @@ Side effects:
 
 - Builds container layers without pushing them.
 - Reads and writes BuildKit cache when `enable-cache` is true.
-- Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.
+- Checks out this CI platform repository under `.ci/arkanis-ci`.
+- Optionally passes a generated NuGet config to Docker Buildx through `secret-files` when `nuget-build-secret` is true.
 - Modifies matched `.csproj` files before Docker Buildx runs.
 - Passes Docker build args to BuildKit; never put secrets in `build-args`.
 
@@ -1553,7 +1627,8 @@ Side effects:
 - Reads and writes BuildKit cache when `enable-cache` is true.
 - Pushes registry tags.
 - May create mutable channel tags, channel-latest tags, and extra tags when configured.
-- Checks out this CI platform repository under `.ci/arkanis-ci`, then removes that checkout before Docker Buildx runs.
+- Checks out this CI platform repository under `.ci/arkanis-ci`.
+- Optionally passes a generated NuGet config to Docker Buildx through `secret-files` when `nuget-build-secret` is true.
 - Modifies matched `.csproj` files before Docker Buildx runs.
 - Passes Docker build args to BuildKit; never put secrets in `build-args`.
 - Emits a digest output for downstream deploys.

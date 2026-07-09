@@ -86,6 +86,14 @@ inputs:
     description: Producer workflow name written into the artifact manifest. Defaults to GITHUB_WORKFLOW.
     required: false
     default: ""
+  nuget-auth-json:
+    description: Optional NUGET_AUTH_JSON document containing private package source credentials.
+    required: false
+    default: ""
+  op-service-account-token:
+    description: Optional 1Password service account token used when nuget-auth-json contains op:// references.
+    required: false
+    default: ""
 
 outputs:
   artifact-manifest:
@@ -178,6 +186,46 @@ runs:
         dotnet-version: ${{ inputs.dotnet-version }}
         global-json-file: ${{ inputs.global-json-file }}
 
+    - name: Prepare private NuGet auth references
+      id: nuget-auth-prepare
+      if: inputs.nuget-auth-json != ''
+      run: dotnet run --file "$GITHUB_ACTION_PATH/../setup-nuget-auth/configure-nuget-auth.cs" --no-launch-profile
+      shell: bash
+      env:
+        NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_PHASE: prepare
+        NUGET_AUTH_OP_ENV_FILE: ${{ runner.temp }}/nuget-auth/op.env
+        NUGET_AUTH_OP_MAP_FILE: ${{ runner.temp }}/nuget-auth/op-map.json
+        GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
+
+    - name: Require private NuGet 1Password token
+      if: steps.nuget-auth-prepare.outputs.op-required == 'true' && inputs.op-service-account-token == ''
+      run: |
+        echo "::error::op-service-account-token is required when nuget-auth-json contains op:// references."
+        exit 2
+      shell: bash
+
+    - name: Load private NuGet auth values from 1Password
+      if: steps.nuget-auth-prepare.outputs.op-required == 'true'
+      uses: 1password/load-secrets-action@v4
+      with:
+        export-env: true
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-service-account-token }}
+        OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+
+    - name: Apply private NuGet auth credentials
+      id: nuget-auth
+      if: inputs.nuget-auth-json != ''
+      run: dotnet run --file "$GITHUB_ACTION_PATH/../setup-nuget-auth/configure-nuget-auth.cs" --no-launch-profile
+      shell: bash
+      env:
+        NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_PHASE: apply
+        NUGET_AUTH_CREDENTIAL_MODE: env
+        NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
+        GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
+
     - name: Cache NuGet packages
       if: inputs.enable-cache == 'true'
       uses: runs-on/cache@v5.0.7
@@ -225,6 +273,16 @@ runs:
       env:
         PROJECT: ${{ inputs.project }}
         NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    - name: Clear private NuGet auth credentials
+      if: always() && steps.nuget-auth.outputs.configured == 'true'
+      run: dotnet run --file "$GITHUB_ACTION_PATH/../setup-nuget-auth/configure-nuget-auth.cs" --no-launch-profile
+      shell: bash
+      env:
+        NUGET_AUTH_PHASE: cleanup
+        NUGET_AUTH_OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
+        NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
+        NUGET_AUTH_CONFIGURED_SOURCE_NAMES: ${{ steps.nuget-auth.outputs.source-names }}
 
     - name: Install dotnet-setversion
       if: ${{ inputs.dotnet-setversion == 'true' }}
@@ -402,6 +460,8 @@ runs:
           echo "| Include symbols | \`${INCLUDE_SYMBOLS}\` |"
           echo "| Include source | \`${INCLUDE_SOURCE}\` |"
           echo "| Dotnet setversion | \`${DOTNET_SETVERSION}\` |"
+          echo "| Private NuGet auth | \`${{ steps.nuget-auth.outputs.configured || 'false' }}\` |"
+          echo "| Private NuGet auth sources | \`${{ steps.nuget-auth.outputs.source-count || '0' }}\` |"
           echo "| Package directory | \`${PACKAGE_DIRECTORY}\` |"
           echo "| Manifest | \`${ARTIFACT_MANIFEST}\` |"
         } >> "$GITHUB_STEP_SUMMARY"

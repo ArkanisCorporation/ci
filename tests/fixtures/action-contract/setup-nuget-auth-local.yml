@@ -1,0 +1,235 @@
+name: setup-nuget-auth local smoke fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  env-credentials:
+    # Expected: success.
+    name: Setup NuGet auth env credentials
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GITHUB_TOKEN_FOR_NUGET_AUTH: fake-github-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Apply fake NuGet auth
+        id: auth
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          nuget-auth-json: |
+            {
+              "version": 1,
+              "sources": [
+                {
+                  "name": "github",
+                  "source": "https://nuget.pkg.github.com/ArkanisCorporation/index.json",
+                  "username": "github://actor",
+                  "password": "github://token",
+                  "validAuthenticationTypes": "Basic"
+                },
+                {
+                  "name": "internal_feed",
+                  "source": "https://nuget.example.invalid/v3/index.json",
+                  "username": "ci",
+                  "password": "literal-fixture-token",
+                  "validAuthenticationTypes": "Basic"
+                }
+              ]
+            }
+
+      - name: Verify fake NuGet auth outputs
+        env:
+          CONFIGURED: ${{ steps.auth.outputs.configured }}
+          SOURCE_COUNT: ${{ steps.auth.outputs.source-count }}
+          SOURCE_NAMES: ${{ steps.auth.outputs.source-names }}
+        run: |
+          test "$CONFIGURED" = "true"
+          test "$SOURCE_COUNT" = "2"
+          test "$SOURCE_NAMES" = "github,internal_feed"
+          case "${NuGetPackageSourceCredentials_github:-}" in
+            Username=*\;Password=*\;ValidAuthenticationTypes=Basic) ;;
+            *) echo "github credential env var missing or malformed" >&2; exit 1 ;;
+          esac
+          case "${NuGetPackageSourceCredentials_internal_feed:-}" in
+            Username=ci\;Password=*\;ValidAuthenticationTypes=Basic) ;;
+            *) echo "internal_feed credential env var missing or malformed" >&2; exit 1 ;;
+          esac
+        shell: bash
+
+      - name: Cleanup fake NuGet auth
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: cleanup
+          configured-source-names: ${{ steps.auth.outputs.source-names }}
+
+      - name: Verify fake NuGet auth cleanup
+        run: |
+          test -z "${NuGetPackageSourceCredentials_github:-}"
+          test -z "${NuGetPackageSourceCredentials_internal_feed:-}"
+        shell: bash
+
+  op-placeholders:
+    # Expected: success.
+    name: Setup NuGet auth op placeholders
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NUGET_AUTH_OP_S1_USERNAME: fixture-op-user
+      NUGET_AUTH_OP_S1_PASSWORD: fixture-op-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Prepare fake 1Password references
+        id: prepare
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: prepare
+          nuget-auth-json: |
+            {
+              "version": 1,
+              "sources": [
+                {
+                  "name": "internal_feed",
+                  "source": "https://nuget.example.invalid/v3/index.json",
+                  "username": "op://ci-nuget/internal-feed/username",
+                  "password": "op://ci-nuget/internal-feed/token",
+                  "validAuthenticationTypes": "Basic"
+                }
+              ]
+            }
+          op-env-file: ${{ runner.temp }}/nuget-auth/op.env
+          op-map-file: ${{ runner.temp }}/nuget-auth/op-map.json
+
+      - name: Verify fake 1Password reference files
+        env:
+          OP_REQUIRED: ${{ steps.prepare.outputs.op-required }}
+          SOURCE_COUNT: ${{ steps.prepare.outputs.source-count }}
+          OP_ENV_FILE: ${{ steps.prepare.outputs.op-env-file }}
+          OP_MAP_FILE: ${{ steps.prepare.outputs.op-map-file }}
+        run: |
+          test "$OP_REQUIRED" = "true" || { echo "op-required output was not true" >&2; exit 1; }
+          test "$SOURCE_COUNT" = "1" || { echo "source-count output was not 1" >&2; exit 1; }
+          test -f "$OP_ENV_FILE" || { echo "op env file missing" >&2; exit 1; }
+          test -f "$OP_MAP_FILE" || { echo "op map file missing" >&2; exit 1; }
+          grep -q '^NUGET_AUTH_OP_S1_USERNAME=op://ci-nuget/internal-feed/username$' "$OP_ENV_FILE" || { echo "op username reference missing" >&2; exit 1; }
+          grep -q '^NUGET_AUTH_OP_S1_PASSWORD=op://ci-nuget/internal-feed/token$' "$OP_ENV_FILE" || { echo "op password reference missing" >&2; exit 1; }
+        shell: bash
+
+      - name: Apply fake 1Password values
+        id: auth
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: apply
+          nuget-auth-json: |
+            {
+              "version": 1,
+              "sources": [
+                {
+                  "name": "internal_feed",
+                  "source": "https://nuget.example.invalid/v3/index.json",
+                  "username": "op://ci-nuget/internal-feed/username",
+                  "password": "op://ci-nuget/internal-feed/token",
+                  "validAuthenticationTypes": "Basic"
+                }
+              ]
+            }
+          op-map-file: ${{ steps.prepare.outputs.op-map-file }}
+
+      - name: Cleanup fake 1Password NuGet auth
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: cleanup
+          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          op-env-file: ${{ steps.prepare.outputs.op-env-file }}
+          op-map-file: ${{ steps.prepare.outputs.op-map-file }}
+
+      - name: Verify fake 1Password cleanup
+        env:
+          OP_ENV_FILE: ${{ steps.prepare.outputs.op-env-file }}
+          OP_MAP_FILE: ${{ steps.prepare.outputs.op-map-file }}
+        run: |
+          test ! -e "$OP_ENV_FILE"
+          test ! -e "$OP_MAP_FILE"
+          test -z "${NuGetPackageSourceCredentials_internal_feed:-}"
+          test -z "${NUGET_AUTH_OP_S1_USERNAME:-}"
+          test -z "${NUGET_AUTH_OP_S1_PASSWORD:-}"
+        shell: bash
+
+  docker-config:
+    # Expected: success.
+    name: Setup NuGet auth Docker config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GITHUB_TOKEN_FOR_NUGET_AUTH: fake-github-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Generate fake NuGet BuildKit config
+        id: auth
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: apply
+          credential-mode: docker-config
+          docker-config-path: ${{ runner.temp }}/nuget-auth/NuGet.Config
+          nuget-auth-json: |
+            {
+              "version": 1,
+              "sources": [
+                {
+                  "name": "github",
+                  "source": "https://nuget.pkg.github.com/ArkanisCorporation/index.json",
+                  "username": "github://actor",
+                  "password": "github://token",
+                  "validAuthenticationTypes": "Basic"
+                }
+              ]
+            }
+
+      - name: Verify fake NuGet BuildKit config
+        env:
+          NUGET_CONFIG_PATH: ${{ steps.auth.outputs.docker-config-path }}
+        run: |
+          test -f "$NUGET_CONFIG_PATH"
+          grep -q '<add key="github" value="https://nuget.pkg.github.com/ArkanisCorporation/index.json" />' "$NUGET_CONFIG_PATH"
+          grep -q '<add key="ClearTextPassword" value=' "$NUGET_CONFIG_PATH"
+        shell: bash
+
+      - name: Cleanup fake NuGet BuildKit config
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: cleanup
+          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          docker-config-path: ${{ steps.auth.outputs.docker-config-path }}
+
+      - name: Verify fake NuGet BuildKit cleanup
+        env:
+          NUGET_CONFIG_PATH: ${{ steps.auth.outputs.docker-config-path }}
+        run: |
+          test ! -e "$NUGET_CONFIG_PATH"
+        shell: bash

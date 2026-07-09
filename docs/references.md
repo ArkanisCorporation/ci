@@ -1,6 +1,6 @@
 # References
 
-Last verified: 2026-07-06.
+Last verified: 2026-07-09.
 
 ## Primary Docs
 
@@ -26,8 +26,12 @@ Last verified: 2026-07-06.
 - GitHub self-hosted runners: https://docs.github.com/en/actions/reference/runners/self-hosted-runners
 - actions/setup-node: https://github.com/actions/setup-node
 - Docker build-push action: https://github.com/docker/build-push-action
+- Docker Buildx secrets in GitHub Actions: https://docs.docker.com/build/ci/github-actions/secrets/
 - Docker login action: https://github.com/docker/login-action
+- NuGet authenticated feeds: https://learn.microsoft.com/en-us/nuget/consume-packages/consuming-packages-authenticated-feeds
+- NuGet config reference: https://learn.microsoft.com/en-us/nuget/reference/nuget-config-file
 - dotnet tool install: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install
+- dotnet tool restore: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-restore
 - dotnet-setversion NuGet package: https://www.nuget.org/packages/dotnet-setversion
 - JetBrains ReSharper command line tools: https://www.jetbrains.com/help/resharper/ReSharper_Command_Line_Tools.html
 - JetBrains CleanupCode: https://www.jetbrains.com/help/resharper/CleanupCode.html
@@ -44,6 +48,9 @@ Last verified: 2026-07-06.
 - GitHub local reusable workflow reference changelog: https://github.blog/changelog/2022-01-25-github-actions-reusable-workflows-can-be-referenced-locally/
 - NuGet Trusted Publishing: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
 - NuGet/login action: https://github.com/NuGet/login
+- actions/setup-dotnet: https://github.com/actions/setup-dotnet
+- 1Password GitHub Actions integration: https://www.1password.dev/ci-cd/github-actions
+- 1Password load-secrets-action: https://github.com/1Password/load-secrets-action
 - nektos/act: https://github.com/nektos/act
 - actionlint: https://github.com/rhysd/actionlint
 - raven-actions/actionlint: https://github.com/raven-actions/actionlint
@@ -64,6 +71,7 @@ Last verified: 2026-07-06.
 - Local composite actions resolve against the checked-out caller workspace: https://github.com/actions/runner/issues/1348
 - NuGet Trusted Publishing with shared workflows can require careful policy ownership: https://github.com/NuGet/login/issues/6
 - NuGet Trusted Publishing and shared workflow discussion: https://github.com/orgs/community/discussions/179952
+- actions/setup-dotnet multiple source request: https://github.com/actions/setup-dotnet/issues/167
 - semantic-release major tag update request: https://github.com/semantic-release/semantic-release/issues/1515
 - semantic-release dry-run still checks push permissions: https://github.com/semantic-release/semantic-release/issues/2232
 - actionlint `queue` key support gap: https://github.com/rhysd/actionlint/issues/657
