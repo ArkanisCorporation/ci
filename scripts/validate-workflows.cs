@@ -102,7 +102,7 @@ void ValidateArtifactUploadDebugExclusions()
     foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
     {
         var workflowText = File.ReadAllText(workflowPath);
-        if (!workflowText.Contains("uses: actions/upload-artifact@v7", StringComparison.Ordinal))
+        if (!ContainsActionRef(workflowText, "actions/upload-artifact"))
         {
             continue;
         }
@@ -112,7 +112,7 @@ void ValidateArtifactUploadDebugExclusions()
             AddFailure($"{workflowPath}: whole-artifacts uploads must exclude artifacts/**/bin/** and artifacts/**/obj/** unless runner.debug is enabled.");
         }
 
-        var uploadsWholeArtifacts = Regex.IsMatch(workflowText, @"(?ms)uses:\s+actions/upload-artifact@v7.*?path:\s+\|\s*\r?\n\s+artifacts\s*(?:\r?\n|$)");
+        var uploadsWholeArtifacts = Regex.IsMatch(workflowText, @"(?ms)uses:\s+actions/upload-artifact@v\d+.*?path:\s+\|\s*\r?\n\s+artifacts\s*(?:\r?\n|$)");
         if (uploadsWholeArtifacts
             && (!workflowText.Contains("runner.debug != '1' && '!artifacts/**/bin/**'", StringComparison.Ordinal)
                 || !workflowText.Contains("runner.debug != '1' && '!artifacts/**/obj/**'", StringComparison.Ordinal)))
@@ -1052,10 +1052,14 @@ void ValidatePrivateNuGetCredentialContract()
             }
         }
 
+        if (!ContainsActionRef(workflowText, "1password/load-secrets-action"))
+        {
+            AddFailure($"{workflowPath}: container private NuGet auth must contain 1password/load-secrets-action.");
+        }
+
         foreach (var requiredToken in new[]
                  {
                      "uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth",
-                     "1password/load-secrets-action@v4",
                      "id: nuget-secret-files",
                      "secret-files:",
                      "secret-files: ${{ steps.nuget-secret-files.outputs.value }}",
@@ -1328,7 +1332,10 @@ void ValidateWorkflowLintContract()
     else
     {
         var workflowText = File.ReadAllText(workflowPath);
-        foreach (var requiredToken in new[] { "actions/setup-node@v6", "node-version: \"24.x\"", "package-manager-cache: false", "raven-actions/actionlint@v2", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
+        // setup-node and raven-actions/actionlint presence are enforced major-agnostically
+        // by the ordering check below (both indices must be >= 0). ActionlintVersion stays a
+        // literal on purpose -- it pins the actionlint binary, not the wrapper action major.
+        foreach (var requiredToken in new[] { "node-version: \"24.x\"", "package-manager-cache: false", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
         {
             if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
             {
@@ -1336,8 +1343,8 @@ void ValidateWorkflowLintContract()
             }
         }
 
-        var setupNodeIndex = workflowText.IndexOf("uses: actions/setup-node@v6", StringComparison.Ordinal);
-        var actionlintIndex = workflowText.IndexOf("uses: raven-actions/actionlint@v2", StringComparison.Ordinal);
+        var setupNodeIndex = UsesActionRefIndex(workflowText, "actions/setup-node");
+        var actionlintIndex = UsesActionRefIndex(workflowText, "raven-actions/actionlint");
         if (setupNodeIndex < 0 || actionlintIndex < 0 || setupNodeIndex > actionlintIndex)
         {
             AddFailure($"{workflowPath}: GitHub Actions lint workflow must set up Node.js before raven-actions/actionlint.");
@@ -1368,12 +1375,15 @@ void ValidatePlatformSelftestContract()
     }
 
     var workflowText = File.ReadAllText(workflowPath);
-    var setupPythonIndex = workflowText.IndexOf("uses: actions/setup-python@v6", StringComparison.Ordinal);
-    var setupNodeIndex = workflowText.IndexOf("uses: actions/setup-node@v6", StringComparison.Ordinal);
-    var actionlintIndex = workflowText.IndexOf("uses: raven-actions/actionlint@v2", StringComparison.Ordinal);
+    var setupPythonIndex = UsesActionRefIndex(workflowText, "actions/setup-python");
+    var setupNodeIndex = UsesActionRefIndex(workflowText, "actions/setup-node");
+    var actionlintIndex = UsesActionRefIndex(workflowText, "raven-actions/actionlint");
     var validatorIndex = workflowText.IndexOf("dotnet run --file scripts/validate-workflows.cs", StringComparison.Ordinal);
 
-    foreach (var requiredToken in new[] { "actions/setup-python@v6", "python-version: \"3.14\"", "pip-install: \"pipx\"", "actions/setup-node@v6", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pipx --version", "node --version", "npm --version", "- Python: \\`", "- pipx: \\`", "- Node: \\`", "- npm: \\`" })
+    // setup-python and setup-node presence is enforced major-agnostically by the ordering
+    // checks below (setupPythonIndex / setupNodeIndex must be >= 0), so their `uses:` refs
+    // are intentionally absent from this literal token list.
+    foreach (var requiredToken in new[] { "python-version: \"3.14\"", "pip-install: \"pipx\"", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pipx --version", "node --version", "npm --version", "- Python: \\`", "- pipx: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -1674,16 +1684,18 @@ void ValidateAspireDeployContract()
     }
 
     var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
-    foreach (var requiredToken in new[]
-             {
-                 "    permissions:\n      contents: read\n      packages: write",
-                 "      - name: Login to GitHub Container Registry @ ghcr.io\n        uses: docker/login-action@v4\n        with:\n          registry: ghcr.io\n          username: ${{ github.actor }}\n          password: ${{ github.token }}\n          logout: true",
-             })
+
+    // The GHCR login step is asserted structurally, but docker/login-action's major is
+    // Renovate-managed, so match it major-agnostically (Regex.Escape each half around @vN).
+    var ghcrLoginStepPattern =
+        Regex.Escape("      - name: Login to GitHub Container Registry @ ghcr.io\n        uses: docker/login-action")
+        + @"@v\d+"
+        + Regex.Escape("\n        with:\n          registry: ghcr.io\n          username: ${{ github.actor }}\n          password: ${{ github.token }}\n          logout: true");
+
+    if (!workflowText.Contains("    permissions:\n      contents: read\n      packages: write", StringComparison.Ordinal)
+        || !Regex.IsMatch(workflowText, ghcrLoginStepPattern))
     {
-        if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
-        {
-            AddFailure($"{workflowPath}: Aspire deploy workflow must request package write access and log in to GHCR before deployment.");
-        }
+        AddFailure($"{workflowPath}: Aspire deploy workflow must request package write access and log in to GHCR before deployment.");
     }
 
     var loginStep = workflowText.IndexOf("      - name: Login to GitHub Container Registry @ ghcr.io", StringComparison.Ordinal);
@@ -2153,6 +2165,30 @@ static string FormatSchemaDisplayDefault(JsonElement value) =>
 
 static string NormalizeLineEndings(string text) =>
     text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal);
+
+/*
+ * Summary:
+ *   Matches a `<owner>/<action>@vN` reference for any major version.
+ *
+ * Remarks:
+ *   Renovate rolls action majors in `uses:` refs (e.g. actions/setup-node@v6 -> @v7).
+ *   These contracts assert an action's presence, ordering, and inputs -- never the
+ *   specific major -- so they match major-agnostically and let Renovate bump versions
+ *   without turning the validator red and blocking the PR. Deliberate pins that couple
+ *   code to an exact version (e.g. the actionlint binary ActionlintVersion, whose
+ *   fromJSON(toJSON(job)) rationale is documented above) are intentionally NOT matched
+ *   this way and stay literal so a bump is surfaced for review.
+ */
+static bool ContainsActionRef(string text, string action) =>
+    Regex.IsMatch(text, Regex.Escape(action) + @"@v\d+");
+
+// Index of the first `uses: <action>@vN` reference (any major), or -1 when absent.
+// Used for ordering checks that previously relied on IndexOf of a version-pinned literal.
+static int UsesActionRefIndex(string text, string action)
+{
+    var match = Regex.Match(text, @"uses:\s+" + Regex.Escape(action) + @"@v\d+");
+    return match.Success ? match.Index : -1;
+}
 
 void ValidateUsesReferences(string file, string[] lines)
 {
