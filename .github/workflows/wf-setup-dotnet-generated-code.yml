@@ -133,7 +133,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET action tooling @ 10.0.x
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -151,13 +151,13 @@ jobs:
 
       - name: Setup .NET @ ${{ inputs.global-json-file }}
         if: inputs.global-json-file != ''
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: ${{ inputs.global-json-file }}
 
       - name: Setup .NET @ ${{ inputs.dotnet-version }}
         if: inputs.global-json-file == ''
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
