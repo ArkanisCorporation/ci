@@ -182,7 +182,7 @@ jobs:
 
       - name: Load private NuGet auth values from 1Password
         if: steps.nuget-auth-prepare.outputs.op-required == 'true'
-        uses: 1password/load-secrets-action@v4
+        uses: 1password/load-secrets-action@v5
         with:
           export-env: true
         env:
