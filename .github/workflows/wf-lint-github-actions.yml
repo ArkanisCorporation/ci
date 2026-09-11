@@ -56,11 +56,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14 + pipx
+      # `pip-install` is not an input of actions/setup-python - the runner logged
+      # "Unexpected input(s) 'pip-install'" and installed nothing. pipx was therefore present
+      # only when an earlier job on the same daedalus replica had left it in the tool-cache
+      # Python, so actionlint's `pipx install pyflakes` fallback failed on any replica that
+      # had not. Installing pyflakes directly puts it on PATH, the action skips pipx, and the
+      # outcome stops depending on which replica picks the job up. Bump it with actionlint.
+      - name: Set up Python 3.14
         uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-          pip-install: "pipx"
+
+      - name: Install pyflakes 3.4.0 for actionlint
+        run: python -m pip install --disable-pip-version-check "pyflakes==3.4.0"
 
       - name: Set up Node.js 24 + npm
         uses: actions/setup-node@v7
@@ -76,11 +84,11 @@ jobs:
         run: |
           mkdir -p artifacts/meta
           python_path="$(command -v python || true)"
-          pipx_path="$(command -v pipx || true)"
+          pyflakes_path="$(command -v pyflakes || true)"
           node_path="$(command -v node || true)"
           npm_path="$(command -v npm || true)"
           python_version="$([[ -n "$python_path" ]] && python --version 2>&1 || echo unavailable)"
-          pipx_version="$([[ -n "$pipx_path" ]] && pipx --version 2>&1 || echo unavailable)"
+          pyflakes_version="$([[ -n "$pyflakes_path" ]] && pyflakes --version 2>&1 || echo unavailable)"
           node_version="$([[ -n "$node_path" ]] && node --version 2>&1 || echo unavailable)"
           npm_version="$([[ -n "$npm_path" ]] && npm --version 2>&1 || echo unavailable)"
 
@@ -92,8 +100,8 @@ jobs:
             echo "Runner arch: ${RUNNER_ARCH}"
             echo "Python path: ${python_path:-unavailable}"
             echo "Python version: ${python_version}"
-            echo "pipx path: ${pipx_path:-unavailable}"
-            echo "pipx version: ${pipx_version}"
+            echo "pyflakes path: ${pyflakes_path:-unavailable}"
+            echo "pyflakes version: ${pyflakes_version}"
             echo "Node path: ${node_path:-unavailable}"
             echo "Node version: ${node_version}"
             echo "npm path: ${npm_path:-unavailable}"
@@ -124,7 +132,7 @@ jobs:
         if: always()
         run: |
           python_version="$(command -v python >/dev/null 2>&1 && python --version 2>&1 || echo unavailable)"
-          pipx_version="$(command -v pipx >/dev/null 2>&1 && pipx --version 2>&1 || echo unavailable)"
+          pyflakes_version="$(command -v pyflakes >/dev/null 2>&1 && pyflakes --version 2>&1 || echo unavailable)"
           node_version="$(command -v node >/dev/null 2>&1 && node --version 2>&1 || echo unavailable)"
           npm_version="$(command -v npm >/dev/null 2>&1 && npm --version 2>&1 || echo unavailable)"
 
@@ -136,7 +144,7 @@ jobs:
             echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
             echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
             echo "| Python | \`${python_version}\` |"
-            echo "| pipx | \`${pipx_version}\` |"
+            echo "| pyflakes | \`${pyflakes_version}\` |"
             echo "| Node | \`${node_version}\` |"
             echo "| npm | \`${npm_version}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

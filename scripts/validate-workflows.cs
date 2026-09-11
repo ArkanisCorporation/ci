@@ -1430,11 +1430,11 @@ void ValidateWorkflowLintContract()
             AddFailure($"{workflowPath}: GitHub Actions lint workflow must set up Node.js before raven-actions/actionlint.");
         }
 
-        foreach (var requiredReportingToken in new[] { "Set up Python 3.14 + pipx", "Set up Node.js 24 + npm", "python --version", "pipx --version", "node --version", "npm --version", "| Python |", "| pipx |", "| Node |", "| npm |" })
+        foreach (var requiredReportingToken in new[] { "Set up Python 3.14", "Set up Node.js 24 + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
         {
             if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
             {
-                AddFailure($"{workflowPath}: GitHub Actions lint workflow must report {requiredReportingToken} after setting up Python, pipx, Node.js, and npm.");
+                AddFailure($"{workflowPath}: GitHub Actions lint workflow must report {requiredReportingToken} after setting up Python, pyflakes, Node.js, and npm.");
             }
         }
     }
@@ -1463,7 +1463,7 @@ void ValidatePlatformSelftestContract()
     // setup-python and setup-node presence is enforced major-agnostically by the ordering
     // checks below (setupPythonIndex / setupNodeIndex must be >= 0), so their `uses:` refs
     // are intentionally absent from this literal token list.
-    foreach (var requiredToken in new[] { "python-version: \"3.14\"", "pip-install: \"pipx\"", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pipx --version", "node --version", "npm --version", "- Python: \\`", "- pipx: \\`", "- Node: \\`", "- npm: \\`" })
+    foreach (var requiredToken in new[] { "python-version: \"3.14\"", "pyflakes==3.4.0", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -1477,7 +1477,7 @@ void ValidatePlatformSelftestContract()
     }
     else if (setupPythonIndex < 0 || setupPythonIndex > actionlintIndex)
     {
-        AddFailure($"{workflowPath}: platform selftest must set up Python and pipx before raven-actions/actionlint.");
+        AddFailure($"{workflowPath}: platform selftest must set up Python and pyflakes before raven-actions/actionlint.");
     }
     else if (setupNodeIndex < 0 || setupNodeIndex > actionlintIndex)
     {
@@ -1644,7 +1644,7 @@ void ValidateStepDisplayNameContract()
         ],
         ["wf-lint-github-actions.yml"] =
         [
-            "      - name: Set up Python 3.14 + pipx",
+            "      - name: Set up Python 3.14",
             "      - name: Actionlint @ caller workflows",
         ],
     };
