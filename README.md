@@ -172,6 +172,25 @@ RUN --mount=type=secret,id=nuget_config,target=/root/.nuget/NuGet/NuGet.Config \
     dotnet restore src/App/App.csproj --locked-mode
 ```
 
+## Private Git Submodules
+
+`wf-dotnet-format.yml` and `wf-dotnet-test.yml` default `checkout-submodules` to `"false"` for backward compatibility.
+Set it to `"true"` for top-level submodules or `"recursive"` only when nested submodules are required.
+For private submodules, pass `SUBMODULES_TOKEN` as a least-privilege GitHub App installation token or fine-grained token with `Contents: read` access to every required repository.
+The workflows otherwise use `github.token`, which is only suitable when it can read all selected submodules.
+Fork pull requests cannot receive `SUBMODULES_TOKEN` and fail before checkout when submodules are requested.
+
+```yaml
+jobs:
+  dotnet-test:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
+    with:
+      solution: Product.slnx
+      checkout-submodules: "true"
+    secrets:
+      SUBMODULES_TOKEN: ${{ secrets.SUBMODULES_TOKEN }}
+```
+
 Node projects use the same runner model.
 
 ```yaml

@@ -120,6 +120,7 @@ Schema: `schemas/workflow-inputs/wf-dotnet-format.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `checkout-submodules` | string | no | `"false"` | Allowed: "false", "true", "recursive" |
 | `solution` | string | yes | none | n/a |
 | `working-directory` | string | no | `"."` | n/a |
 | `restore-locked-mode` | boolean | no | `true` | n/a |
@@ -150,6 +151,7 @@ Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `checkout-submodules` | string | no | `"false"` | Allowed: "false", "true", "recursive" |
 | `solution` | string | yes | none | n/a |
 | `configuration` | string | no | `"Release"` | n/a |
 | `restore-locked-mode` | boolean | no | `true` | n/a |
@@ -597,9 +599,40 @@ RUN --mount=type=secret,id=nuget_config,target=/root/.nuget/NuGet/NuGet.Config \
     dotnet restore src/Product/Product.csproj --locked-mode
 ```
 
+## Private Git Submodule Checkout
+
+`wf-dotnet-format.yml` and `wf-dotnet-test.yml` expose the same opt-in caller-checkout contract.
+`checkout-submodules` is a string enum with `"false"` as the backward-compatible default, `"true"` for top-level submodules, and `"recursive"` for nested submodules.
+The optional `SUBMODULES_TOKEN` is used only as the caller checkout token and otherwise falls back to `github.token`.
+A caller selecting submodules must provide a least-privilege GitHub App installation token or fine-grained token with `Contents: read` access to every private repository in the selected submodule graph.
+The workflows fail before .NET setup when the selected submodule checkout cannot authenticate.
+Fork pull requests selecting submodules fail before checkout because Actions secrets are withheld for forks.
+No workflow uses `pull_request_target` or `secrets: inherit` for this contract.
+
+```yaml
+jobs:
+  format:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
+    permissions:
+      contents: read
+    with:
+      solution: Product.slnx
+      checkout-submodules: "true"
+    secrets:
+      SUBMODULES_TOKEN: ${{ secrets.SUBMODULES_TOKEN }}
+```
+
+Follow-up options, intentionally not part of this interface:
+
+- A path-scoped mode when cloning all top-level submodules is unnecessarily slow or broadens repository access.
+- A `checkout-fetch-depth` input when a consumer needs tags or full history.
+- An SSH-key variant only if the organization standardizes deploy-key ownership and rotation.
+- Immutable release-SHA workflow references instead of a mutable major tag.
+- A shared preflight action to centralize mode and access diagnostics.
+
 ## .NET Format Workflow
 
-`wf-dotnet-format.yml` checks out the caller repository.
+`wf-dotnet-format.yml` validates the requested submodule mode and checks out the caller repository, optionally including submodules.
 It installs .NET 10 action tooling for CleanupCode file scripts, checks out this CI platform repository for shared actions, sets up .NET, restores dependencies, optionally runs `dotnet format --verify-no-changes`, always runs JetBrains CleanupCode, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
 It does not build, test, collect coverage, publish, or deploy.
 The default CleanupCode profile is `Built-in: Reformat & Apply Syntax Style`.
@@ -609,7 +642,10 @@ Flow:
 
 ```mermaid
 flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  caller[("Caller repository")] --> checkoutInput[[Validate caller checkout inputs]]
+  checkoutInput --> fork{Fork PR with submodules?}
+  fork -->|yes| checkoutFailure[/Checkout remediation/]
+  fork -->|no| checkout[[Checkout caller and optional submodules]]
   checkout --> tooling[[Setup .NET action tooling]]
   tooling --> platform[("CI platform checkout")]
   platform --> setup[[setup-dotnet action]]
@@ -638,9 +674,9 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,tooling,setup,validate,sh,restore,dotnetFormat,cleanup action
-  class preflight,format,diff decision
-  class fail,metadata,manifest,summary,diagnostics artifact
+  class checkoutInput,checkout,tooling,setup,validate,sh,restore,dotnetFormat,cleanup action
+  class fork,preflight,format,diff decision
+  class checkoutFailure,fail,metadata,manifest,summary,diagnostics artifact
   class outputs output
   class cache external
 ```
@@ -653,6 +689,7 @@ Preconditions:
 - The selected runner can install .NET 10 SDK for the CleanupCode action file script.
 - Local tool restore requires `JetBrains.ReSharper.GlobalTools` in `.config/dotnet-tools.json`.
 - `install-tool` requires network access to NuGet and should set `tool-version` for repeatability.
+- Private submodules require `SUBMODULES_TOKEN` with `Contents: read` access when `github.token` cannot read their repositories.
 
 Side effects:
 
@@ -670,7 +707,7 @@ Side effects:
 
 ## .NET Test Workflow
 
-`wf-dotnet-test.yml` checks out the caller repository.
+`wf-dotnet-test.yml` validates the requested submodule mode and checks out the caller repository, optionally including submodules.
 It installs .NET 10 action tooling for coverage report file scripts, checks out this CI platform repository for shared actions, sets up the project SDK, restores dependencies, builds with a binlog, runs tests, optionally collects coverage, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
 When `coverage-report` is true, it generates ReportGenerator HTML, Cobertura, Markdown, and text output from collected coverage.
 When `coverage-pr-comment` is true on pull requests, it updates one coverage comment with the Markdown summary.
@@ -680,7 +717,10 @@ Flow:
 
 ```mermaid
 flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  caller[("Caller repository")] --> checkoutInput[[Validate caller checkout inputs]]
+  checkoutInput --> fork{Fork PR with submodules?}
+  fork -->|yes| checkoutFailure[/Checkout remediation/]
+  fork -->|no| checkout[[Checkout caller and optional submodules]]
   checkout --> tooling[[Setup .NET action tooling]]
   tooling --> platform[("CI platform checkout")]
   platform --> setup[[setup-dotnet action]]
@@ -707,9 +747,9 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller,platform repo
-  class checkout,tooling,setup,validate,sh,restore,build,test,report action
-  class preflight,coverage decision
-  class metadata,manifest,summary,diagnostics artifact
+  class checkoutInput,checkout,tooling,setup,validate,sh,restore,build,test,report action
+  class fork,preflight,coverage decision
+  class checkoutFailure,metadata,manifest,summary,diagnostics artifact
   class outputs output
   class cache external
 ```
@@ -720,6 +760,7 @@ Preconditions:
 - Lock files exist when `restore-locked-mode` is true.
 - The selected runner can install or run the requested .NET SDK.
 - Coverage report generation requires .NET 10 action tooling and NuGet access for `dotnet-reportgenerator-globaltool`.
+- Private submodules require `SUBMODULES_TOKEN` with `Contents: read` access when `github.token` cannot read their repositories.
 
 Requirements:
 

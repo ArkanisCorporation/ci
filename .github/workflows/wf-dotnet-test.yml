@@ -35,6 +35,11 @@ on:
         type: string
         required: false
         default: ""
+      checkout-submodules:
+        description: "Caller checkout submodule mode: false, true, or recursive."
+        type: string
+        required: false
+        default: "false"
       solution:
         description: Solution or project path to restore, build, and test.
         type: string
@@ -115,6 +120,9 @@ on:
         required: false
         default: 30
     secrets:
+      SUBMODULES_TOKEN:
+        description: Optional least-privilege token for private caller submodules.
+        required: false
       NUGET_AUTH_JSON:
         description: Optional JSON credentials for private NuGet package sources used during restore.
         required: false
@@ -152,10 +160,38 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Validate caller checkout inputs
+        env:
+          CHECKOUT_SUBMODULES: ${{ inputs.checkout-submodules }}
+        run: |
+          case "$CHECKOUT_SUBMODULES" in
+            false|true|recursive) ;;
+            *)
+              echo "::error title=Invalid checkout-submodules input::checkout-submodules must be one of \"false\", \"true\", or \"recursive\"."
+              exit 1
+              ;;
+          esac
+
+      - name: Reject private submodule checkout from fork pull requests
+        if: inputs.checkout-submodules != 'false' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
+        run: |
+          echo "::error title=Private submodule checkout unavailable from fork pull requests::GitHub Actions does not provide repository secrets to fork pull requests. Run validation from a trusted branch or ask a maintainer to run it."
+          exit 1
+
       - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
+        id: checkout-caller
         uses: actions/checkout@v7
+        continue-on-error: ${{ inputs.checkout-submodules != 'false' }}
         with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          submodules: ${{ inputs.checkout-submodules }}
           persist-credentials: false
+
+      - name: Report private submodule checkout failure
+        if: inputs.checkout-submodules != 'false' && steps.checkout-caller.outcome == 'failure'
+        run: |
+          echo "::error title=Private submodule checkout failed::Provide SUBMODULES_TOKEN as a least-privilege GitHub App installation token or fine-grained token with Contents read access to every required private submodule repository."
+          exit 1
 
       - name: Setup .NET action tooling @ 10.0.x
         uses: actions/setup-dotnet@v6

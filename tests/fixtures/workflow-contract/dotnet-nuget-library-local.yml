@@ -16,6 +16,7 @@ jobs:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
+      checkout-submodules: "true"
       working-directory: tests/fixtures/mock-projects/dotnet-nuget-library
       solution: Mock.NuGet.Library.slnx
       restore-locked-mode: true
@@ -38,6 +39,7 @@ jobs:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
+      checkout-submodules: "true"
       solution: tests/fixtures/mock-projects/dotnet-nuget-library/Mock.NuGet.Library.slnx
       restore-locked-mode: true
       enable-cache: false

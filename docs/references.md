@@ -1,6 +1,6 @@
 # References
 
-Last verified: 2026-07-09.
+Last verified: 2026-09-11.
 
 ## Primary Docs
 
@@ -11,6 +11,7 @@ Last verified: 2026-07-09.
 - GitHub contexts reference: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
 - GitHub variables reference: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
 - GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
+- GitHub fork pull request workflow restrictions: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
 - GitHub Packages with Actions: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - GitHub OIDC with reusable workflows: https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
@@ -49,6 +50,7 @@ Last verified: 2026-07-09.
 - NuGet Trusted Publishing: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
 - NuGet/login action: https://github.com/NuGet/login
 - actions/setup-dotnet: https://github.com/actions/setup-dotnet
+- actions/checkout: https://github.com/actions/checkout
 - 1Password GitHub Actions integration: https://www.1password.dev/ci-cd/github-actions
 - 1Password load-secrets-action: https://github.com/1Password/load-secrets-action
 - nektos/act: https://github.com/nektos/act

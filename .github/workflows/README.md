@@ -34,6 +34,14 @@ The consumer workflow should run `NuGet/login` between those two actions in the 
 Container workflows only pass private restore credentials to Docker BuildKit when `nuget-build-secret` is true.
 Dockerfiles that need the generated config should mount the `nuget_config` secret during restore.
 
+## Private Git Submodules
+
+`wf-dotnet-format.yml` and `wf-dotnet-test.yml` expose `checkout-submodules` with the `false`, `true`, and `recursive` modes.
+The default is `"false"`.
+Use `SUBMODULES_TOKEN` only as the caller checkout token when the default GitHub token cannot read private submodule repositories.
+The workflows do not persist checkout credentials or inherit secrets.
+Fork pull requests requesting submodules fail before checkout because repository secrets are unavailable.
+
 ## .NET Container Publish
 
 `wf-publish-container-dotnet.yml` is the reusable .NET container publishing workflow.

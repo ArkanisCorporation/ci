@@ -45,6 +45,7 @@ ValidateContainerPublishContract();
 ValidateNuGetPublishContract();
 ValidateNuGetCompositeActionsContract();
 ValidatePrivateNuGetCredentialContract();
+ValidatePrivateSubmoduleCheckoutContract();
 ValidateNuGetPackSymbolContract();
 ValidateCoverageReportContract();
 ValidateGeneratedCodeContract();
@@ -1092,6 +1093,84 @@ void RequireWorkflowSecret(string workflowPath, string secretName)
     if (!WorkflowDefinesSecret(workflowPath, secretName))
     {
         AddFailure($"{workflowPath}: workflow_call must expose optional secret {secretName}.");
+    }
+}
+
+void ValidatePrivateSubmoduleCheckoutContract()
+{
+    // The caller checkout is the security boundary for private submodules.
+    // Keep the opt-in contract identical across the shared .NET verification workflows.
+    const string checkoutSubmodulesInput = "checkout-submodules";
+    const string checkoutTokenExpression = "token: ${{ secrets.SUBMODULES_TOKEN || github.token }}";
+    const string checkoutSubmodulesExpression = "submodules: ${{ inputs.checkout-submodules }}";
+    const string invalidModeMessage = "checkout-submodules must be one of \\\"false\\\", \\\"true\\\", or \\\"recursive\\\".";
+    const string checkoutFailureMessage = "Private submodule checkout failed";
+    var requiredModes = new[] { "false", "true", "recursive" };
+    var workflowNames = new[] { "wf-dotnet-format.yml", "wf-dotnet-test.yml" };
+
+    foreach (var workflowName in workflowNames)
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        var schemaPath = Path.Combine(repoRoot, "schemas", "workflow-inputs", Path.ChangeExtension(workflowName, ".schema.json"));
+        if (!File.Exists(workflowPath))
+        {
+            AddFailure($"{workflowPath}: .NET workflow is required for private submodule checkout validation.");
+            continue;
+        }
+
+        var workflowInputs = ReadWorkflowInputs(workflowPath);
+        var checkoutSubmodules = workflowInputs.GetValueOrDefault(checkoutSubmodulesInput);
+        if (checkoutSubmodules is null
+            || !string.Equals(NormalizeWorkflowInputType(checkoutSubmodules.Type), "string", StringComparison.Ordinal)
+            || checkoutSubmodules.Required
+            || !checkoutSubmodules.HasDefault
+            || !string.Equals(NormalizeWorkflowDefault(checkoutSubmodules), "string:false", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: checkout-submodules must be an optional string input defaulting to false.");
+        }
+
+        RequireWorkflowSecret(workflowPath, "SUBMODULES_TOKEN");
+
+        var workflowText = File.ReadAllText(workflowPath);
+        foreach (var requiredToken in new[]
+                 {
+                     checkoutTokenExpression,
+                     checkoutSubmodulesExpression,
+                     "persist-credentials: false",
+                     invalidModeMessage,
+                     checkoutFailureMessage,
+                     "github.event.pull_request.head.repo.fork",
+                 })
+        {
+            if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: private submodule checkout must contain '{requiredToken}'.");
+            }
+        }
+
+        if (workflowText.Contains("secrets: inherit", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: private submodule checkout must not inherit caller secrets.");
+        }
+
+        if (!File.Exists(schemaPath))
+        {
+            AddFailure($"{schemaPath}: checkout-submodules schema is required.");
+            continue;
+        }
+
+        using var schema = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        if (!schema.RootElement.TryGetProperty("properties", out var properties)
+            || !properties.TryGetProperty(checkoutSubmodulesInput, out var inputDefinition)
+            || !inputDefinition.TryGetProperty("enum", out var enumDefinition)
+            || enumDefinition.ValueKind != JsonValueKind.Array
+            || !enumDefinition.EnumerateArray()
+                .Where(value => value.ValueKind == JsonValueKind.String)
+                .Select(value => value.GetString())
+                .SequenceEqual(requiredModes, StringComparer.Ordinal))
+        {
+            AddFailure($"{schemaPath}: checkout-submodules must enumerate false, true, and recursive in that order.");
+        }
     }
 }
 

@@ -28,6 +28,15 @@
       "type": "string",
       "default": ""
     },
+    "checkout-submodules": {
+      "type": "string",
+      "enum": [
+        "false",
+        "true",
+        "recursive"
+      ],
+      "default": "false"
+    },
     "solution": {
       "type": "string"
     },
