@@ -18,5 +18,6 @@ Audience: agents + maintainers.
 | Cache poisoning concern | Exact keys, no secret cache, trusted warmers |
 | Release rerun duplicates | Idempotent publish flags + digest check |
 | Release/publish/deploy race | Job-level concurrency by protected target |
+| Obsolete queued main validation | Per-lane concurrency replaces only the prior pending job; running validation and release work continue |
 | K8s deploy race | Environment and namespace concurrency group |
 | Queued concurrency backlog | Add `queue: max` after pinned actionlint supports it |

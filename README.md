@@ -308,6 +308,7 @@ This repository dogfoods its platform workflows.
 The repository pipeline jobs use `vars.RUNNER_DEFAULT` for runner selection and fall back to `daedalus`.
 Pull requests call `wf-verify-release-semantic.yml` after the fixture jobs pass.
 Main pushes and manual dispatches call `wf-release-semantic.yml` after the fixture jobs pass.
+For main pushes, each fixture lane replaces only its obsolete pending job; running validations and release publication are never cancelled by a newer push.
 [release.config.cjs](release.config.cjs) publishes GitHub release metadata and updates mutable major version tags such as `v1`.
 It intentionally excludes `@semantic-release/exec` and `@semantic-release/npm`.
 The repository release workflow installs `semantic-release-major-tag@0.3.2` so dry-runs load the same semantic-release configuration as production.

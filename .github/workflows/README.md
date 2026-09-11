@@ -12,6 +12,7 @@ Start each workflow from `AGENTS.md` contract, then add schema in `schemas/workf
 On pull requests, it runs `wf-platform-selftest.yml`, split TypeScript pnpm lint/test/build fixtures, split .NET format/test fixtures, the .NET NuGet fixture, and the .NET container fixture before calling `wf-verify-release-semantic.yml`.
 On main pushes and manual dispatches, it runs the same fixture dogfood series before calling `wf-release-semantic.yml` for trusted publication paths.
 Each repository pipeline job passes `runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}` and `runs-on-self-hosted: true` into the reusable workflows.
+Each main-push fixture lane replaces only an obsolete pending validation job; running validation and release publication continue uninterrupted.
 It publishes GitHub release metadata and updates mutable major version tags such as `v1`.
 
 ## Verification Workflows

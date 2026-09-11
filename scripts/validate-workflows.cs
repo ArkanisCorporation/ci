@@ -53,6 +53,7 @@ ValidateWorkflowLintContract();
 ValidatePlatformSelftestContract();
 ValidateReleaseBackpropagationContract();
 ValidateStateChangingWorkflowConcurrencyContract();
+ValidateRepositoryMainValidationConcurrencyContract();
 ValidateDotNetJetBrainsContract();
 ValidatePlatformActionSourceContext();
 ValidateSplitVerificationWorkflowsContract();
@@ -1961,6 +1962,40 @@ void ValidateStateChangingWorkflowConcurrencyContract()
         if (!workflowText.Contains(expectedText, StringComparison.Ordinal))
         {
             AddFailure($"{workflowPath}: state-changing workflows must serialize shared release, publish, or deploy side effects with '{expectedText}'.");
+        }
+    }
+}
+
+void ValidateRepositoryMainValidationConcurrencyContract()
+{
+    // Main-push validation jobs may discard only obsolete queued work.
+    // Release publication has a distinct concurrency contract and must never join these groups.
+    var releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+    if (!File.Exists(releaseWorkflowPath))
+    {
+        AddFailure($"{releaseWorkflowPath}: repository release workflow is required for main validation concurrency validation.");
+        return;
+    }
+
+    const string mainPushGroupPrefix = "main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-";
+    var releaseText = NormalizeLineEndings(File.ReadAllText(releaseWorkflowPath));
+    foreach (var jobId in new[]
+             {
+                 "selftest",
+                 "typescript-pnpm-lint",
+                 "typescript-pnpm-test",
+                 "typescript-pnpm-build",
+                 "dotnet-library-format",
+                 "dotnet-library-test",
+                 "dotnet-nuget",
+                 "dotnet-container",
+             })
+    {
+        var expectedGroup = Regex.Escape(mainPushGroupPrefix + jobId);
+        var jobPattern = $@"(?ms)^  {Regex.Escape(jobId)}:\n(?:(?!^  [A-Za-z0-9-]+:).)*?^    concurrency:\n      group: {expectedGroup}\n      cancel-in-progress: false\s*$";
+        if (!Regex.IsMatch(releaseText, jobPattern))
+        {
+            AddFailure($"{releaseWorkflowPath}: {jobId} must replace only stale pending main-push validation jobs without cancelling running work.");
         }
     }
 }

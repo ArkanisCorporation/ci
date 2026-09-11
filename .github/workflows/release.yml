@@ -15,9 +15,14 @@ on:
 
 permissions: {}
 
+# Each validation lane retains only its newest queued main-push job.
+# Release publication keeps its own non-cancelling concurrency boundary.
 jobs:
   selftest:
     name: platform @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-selftest
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-platform-selftest.yml
     permissions:
       contents: read
@@ -27,6 +32,9 @@ jobs:
 
   typescript-pnpm-lint:
     name: typescript-pnpm lint @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-typescript-pnpm-lint
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-node-lint.yml
     permissions:
       contents: read
@@ -41,6 +49,9 @@ jobs:
 
   typescript-pnpm-test:
     name: typescript-pnpm test @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-typescript-pnpm-test
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-node-test.yml
     permissions:
       contents: read
@@ -55,6 +66,9 @@ jobs:
 
   typescript-pnpm-build:
     name: typescript-pnpm build @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-typescript-pnpm-build
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-node-build.yml
     permissions:
       contents: read
@@ -69,6 +83,9 @@ jobs:
 
   dotnet-library-format:
     name: dotnet-nuget-library format @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-dotnet-library-format
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-dotnet-format.yml
     permissions:
       contents: read
@@ -86,6 +103,9 @@ jobs:
 
   dotnet-library-test:
     name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-dotnet-library-test
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-dotnet-test.yml
     permissions:
       contents: read
@@ -103,6 +123,9 @@ jobs:
 
   dotnet-nuget:
     name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-dotnet-nuget
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-verify-publish-nuget.yml
     permissions:
       contents: read
@@ -117,6 +140,9 @@ jobs:
 
   dotnet-container:
     name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-dotnet-container
+      cancel-in-progress: false
     uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml
     permissions:
       contents: read
