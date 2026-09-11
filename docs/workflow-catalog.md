@@ -992,7 +992,7 @@ flowchart TD
 
 ## GitHub Actions Lint Workflow
 
-`wf-lint-github-actions.yml` checks out the caller repository, sets up Python with pipx, sets up Node.js with npm, records toolchain versions, and runs actionlint.
+`wf-lint-github-actions.yml` checks out the caller repository, sets up Python with pyflakes, sets up Node.js with npm, records toolchain versions, and runs actionlint.
 Use it to replace repository-local workflow lint jobs during migration.
 
 Flow:
@@ -1000,7 +1000,7 @@ Flow:
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> checkout[[Checkout caller]]
-  checkout --> python[[Set up Python and pipx]]
+  checkout --> python[[Set up Python and pyflakes]]
   python --> node[[Set up Node.js and npm]]
   node --> validate[[Validate runner contract]]
   validate --> preflight{self-hosted?}
@@ -1025,7 +1025,7 @@ flowchart TD
 Preconditions:
 
 - Caller workflows live under `.github/workflows`.
-- The selected runner can run `actions/setup-python@v6` and install pipx.
+- The selected runner can run `actions/setup-python@v7` and install pyflakes with pip.
 - The selected runner can run `actions/setup-node@v6` or has Node.js 24 in the Actions tool cache.
 - The selected runner can run `raven-actions/actionlint@v2`.
 
@@ -1033,7 +1033,7 @@ Side effects:
 
 - Reads workflow YAML files.
 - Reads and writes the actionlint binary cache when `enable-cache` is true.
-- Records Python, pipx, Node.js, and npm versions in diagnostics and the step summary.
+- Records Python, pyflakes, Node.js, and npm versions in diagnostics and the step summary.
 - Writes a short step summary.
 
 Example:
@@ -1835,7 +1835,7 @@ Flow:
 ```mermaid
 flowchart TD
   platform[("CI platform repository")] --> checkout[[Checkout platform]]
-  checkout --> python[[Set up Python and pipx]]
+  checkout --> python[[Set up Python and pyflakes]]
   python --> node[[Set up Node.js and npm]]
   node --> actionlint[[actionlint 1.7.12]]
   actionlint --> dotnet[[Setup .NET 10]]
@@ -1859,7 +1859,7 @@ Preconditions:
 
 - The repository contains `.github/workflows`, `.github/actions`, `schemas/workflow-inputs`, policy files, fixtures, and docs.
 - The selected runner can install or run .NET 10.
-- The selected runner can run `actions/setup-python@v6` and install pipx.
+- The selected runner can run `actions/setup-python@v7` and install pyflakes with pip.
 - The selected runner can run `actions/setup-node@v6` or has Node.js 24 in the Actions tool cache.
 - The selected runner can run `raven-actions/actionlint@v2` with actionlint `1.7.12`.
 - Local validator runs still use a system `actionlint` when available.
@@ -1867,7 +1867,7 @@ Preconditions:
 Side effects:
 
 - Reads workflow, action, schema, fixture, policy, and doc files.
-- Records Python, pipx, Node.js, and npm versions in the step summary.
+- Records Python, pyflakes, Node.js, and npm versions in the step summary.
 - Writes a step summary.
 - Does not publish, deploy, or request secrets.
 
