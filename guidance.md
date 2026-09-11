@@ -520,11 +520,15 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
+      # Cache NuGet's own default folder, written as a literal `~/...`. The cache `version` is a
+      # hash of this path string, so a `${{ github.workspace }}` path - which expands to a
+      # different literal on every self-hosted replica - splits the cache into one namespace per
+      # replica, each ageing independently (ARK-502).
       - name: Cache NuGet packages
         if: inputs.enable-cache
         uses: runs-on/cache@v5
         with:
-          path: ${{ github.workspace }}/.nuget/packages
+          path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
           restore-keys: |
             ${{ runner.os }}-nuget-

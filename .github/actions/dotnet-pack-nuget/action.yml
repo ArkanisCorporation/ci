@@ -226,11 +226,15 @@ runs:
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
         GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
 
+    # `~/.nuget/packages`, NuGet's own default folder, rather than a workspace path: the cache
+    # `version` is a hash of this literal string, and a workspace path expands to a different
+    # literal on every daedalus replica, which splits the cache into one namespace per replica
+    # (ARK-502). The tilde is expanded later, at save and restore time.
     - name: Cache NuGet packages
       if: inputs.enable-cache == 'true'
       uses: runs-on/cache@v5.0.7
       with:
-        path: ${{ github.workspace }}/.nuget/packages
+        path: ~/.nuget/packages
         key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
         restore-keys: |
           ${{ runner.os }}-nuget-
@@ -272,7 +276,6 @@ runs:
       shell: bash
       env:
         PROJECT: ${{ inputs.project }}
-        NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     - name: Clear private NuGet auth credentials
       if: always() && steps.nuget-auth.outputs.configured == 'true'
@@ -311,7 +314,6 @@ runs:
       shell: bash
       env:
         TOOL_VERSION: ${{ inputs.dotnet-setversion-tool-version }}
-        NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     - name: Stamp .NET projects
       if: ${{ inputs.dotnet-setversion == 'true' }}
@@ -373,7 +375,6 @@ runs:
         INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
         INCLUDE_SOURCE: ${{ inputs.include-source }}
         PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
-        NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     - name: Verify package output
       id: verify

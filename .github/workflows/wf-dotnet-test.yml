@@ -139,9 +139,6 @@ on:
 
 permissions: {}
 
-env:
-  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
-
 jobs:
   test:
     name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}
@@ -224,7 +221,6 @@ jobs:
           runs-on-json: ${{ inputs.runs-on-json }}
           runs-on-self-hosted: ${{ inputs.runs-on-self-hosted }}
           enable-cache: ${{ inputs.enable-cache }}
-          nuget-packages: ${{ env.NUGET_PACKAGES }}
           restore-tools: "true"
           solution: ${{ inputs.solution }}
           restore-locked-mode: ${{ inputs.restore-locked-mode }}

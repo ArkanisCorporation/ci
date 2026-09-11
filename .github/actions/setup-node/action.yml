@@ -197,9 +197,19 @@ runs:
           exit 2
         fi
 
+        # Keep any path inside the workspace expressed relative to it. The cache `version` is a
+        # hash of this literal string, and each daedalus replica has its own workspace, so an
+        # absolute path under it yields one cache namespace per replica (ARK-502). A relative path
+        # is resolved by the cache action against its working directory, which is the workspace.
+        # Yarn Berry's default `.yarn/cache` is the realistic way to arrive here.
         if [[ "$cache_path" != /* ]]; then
-          cache_path="${GITHUB_WORKSPACE}/${WORKING_DIRECTORY}/${cache_path}"
+          if [[ -n "$WORKING_DIRECTORY" && "$WORKING_DIRECTORY" != "." ]]; then
+            cache_path="${WORKING_DIRECTORY%/}/${cache_path}"
+          fi
+        elif [[ "$cache_path" == "${GITHUB_WORKSPACE}/"* ]]; then
+          cache_path="${cache_path#"${GITHUB_WORKSPACE}/"}"
         fi
+        cache_path="${cache_path#./}"
 
         mapfile -d '' sorted_lockfiles < <(printf '%s\0' "${lockfiles[@]}" | sort -z)
         lock_hash="$(sha256sum "${sorted_lockfiles[@]}" | sha256sum | cut -d ' ' -f 1)"

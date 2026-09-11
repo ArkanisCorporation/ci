@@ -2,7 +2,10 @@
 #   Sets up .NET SDK, NuGet cache, local tools, runner diagnostics, and optional restore.
 # Remarks:
 #   This composite action expects Bash and actions/setup-dotnet.
-#   It writes NUGET_PACKAGES to GITHUB_ENV when nuget-packages is not empty.
+#   It leaves NuGet's default global-packages folder in place unless nuget-packages is set, in
+#   which case that value is written to GITHUB_ENV. Keep it unset: the cache `version` is a hash of
+#   the literal path string, and a workspace path expands to a different literal on every daedalus
+#   replica, which splits the cache into one namespace per replica (ARK-502).
 #   It calls runs-on/cache only when enable-cache is true.
 #   It does not run format, build, test, publish, or deploy commands.
 #   Reusable workflows from this repository should not call it by relative path when consumed externally unless the platform repository has been checked out into that path first.
@@ -40,9 +43,13 @@ inputs:
     required: false
     default: "true"
   nuget-packages:
-    description: Optional NUGET_PACKAGES path written to GITHUB_ENV before setup.
+    description: >-
+      Optional NUGET_PACKAGES override, written to GITHUB_ENV before setup and cached in place of
+      the default folder. Leave empty unless a job genuinely needs packages elsewhere - an absolute
+      path shards the cache per runner replica (ARK-502). A value is used verbatim, so it cannot
+      start with `~`: NuGet does not expand a tilde the way the cache action does.
     required: false
-    default: ${{ github.workspace }}/.nuget/packages
+    default: ""
   restore-tools:
     description: Restores local .NET tools with one retry for first-use SDK home races.
     required: false
@@ -140,12 +147,16 @@ runs:
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
         GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
 
+    # `~/.nuget/packages` rather than the resolved home directory: the cache `version` is a hash of
+    # this literal string, so the tilde form yields one namespace across every runner - self-hosted
+    # replicas and the ubuntu-latest fallback alike - while the expansion happens later, at save and
+    # restore time (ARK-502).
     - name: Cache NuGet packages
       if: inputs.enable-cache == 'true'
       id: nuget-cache
       uses: runs-on/cache@v5.0.7
       with:
-        path: ${{ inputs.nuget-packages }}
+        path: ${{ inputs.nuget-packages || '~/.nuget/packages' }}
         key: ${{ runner.os }}-nuget-${{ hashFiles(inputs.cache-dependency-path, '.config/dotnet-tools.json') }}
         restore-keys: |
           ${{ runner.os }}-nuget-
