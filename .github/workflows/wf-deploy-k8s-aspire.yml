@@ -106,9 +106,6 @@ on:
 
 permissions: {}
 
-env:
-  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
-
 jobs:
   deploy:
     name: ${{ inputs.image-tag || inputs.kubernetes-namespace }} @ ${{ inputs.environment-name }}
@@ -201,11 +198,15 @@ jobs:
           credential-mode: env
           op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
 
+      # `~/.nuget/packages`, NuGet's own default folder, rather than a workspace path: the cache
+      # `version` is a hash of this literal string, and a workspace path expands to a different
+      # literal on every daedalus replica, which splits the cache into one namespace per replica
+      # (ARK-502). The tilde is expanded later, at save and restore time.
       - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache
         uses: runs-on/cache@v5.0.7
         with:
-          path: ${{ env.NUGET_PACKAGES }}
+          path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
           restore-keys: |
             ${{ runner.os }}-nuget-
