@@ -696,7 +696,7 @@ Side effects:
 - Writes under `artifacts/`.
 - Writes CleanupCode diagnostics under `artifacts/jetbrains-cleanupcode`.
 - Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Optionally configures private NuGet restore credentials from `NUGET_AUTH_JSON`.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
@@ -774,7 +774,7 @@ Side effects:
 - Writes under `artifacts/`.
 - Excludes `artifacts/**/bin/**` and `artifacts/**/obj/**` from diagnostics uploads unless `runner.debug` is enabled.
 - Excludes `artifacts/test-results/**` and `artifacts/coverage/**` unless `runner.debug` is enabled or the matching `upload-test-results` / `upload-coverage` input is true.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Optionally configures private NuGet restore credentials from `NUGET_AUTH_JSON`.
 - Uploads diagnostics with `if: always()`.
 - Runs `dotnet tool restore` when local tools exist.
@@ -847,7 +847,7 @@ Side effects:
 - Runs commands that may modify workspace files.
 - Writes under `artifacts/generated-code`.
 - Ignores `bin/` and `obj/` Git pathspecs and excludes uploaded `artifacts/**/bin/**` and `artifacts/**/obj/**` unless `runner.debug` is enabled.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Fails when generated paths change and `fail-on-diff` is true.
 
 Example:
@@ -1290,7 +1290,7 @@ Preconditions:
 Side effects:
 
 - Creates packages under `artifacts/nuget`.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Checks out this CI platform repository under `.ci/arkanis-ci` for the `dotnet-pack-nuget` action.
 - The pack action modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
 - Does not publish packages.
@@ -1363,7 +1363,7 @@ Preconditions:
 Side effects:
 
 - Creates packages under `artifacts/nuget`.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Checks out this CI platform repository under `.ci/arkanis-ci` for the pack and publish composite actions.
 - The pack action modifies matched `.csproj` files before packing when `dotnet-setversion` is true.
 - Publishes packages from the selected environment-gated publish job.
@@ -1753,7 +1753,7 @@ Preconditions:
 
 Side effects:
 
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Writes a verification manifest.
 - Does not configure kube credentials, create namespaces, deploy, or use GitHub environments.
 
@@ -1820,7 +1820,7 @@ Side effects:
 
 - Logs in to `ghcr.io` with the job `GITHUB_TOKEN` and logs out during action cleanup.
 - Creates the namespace when missing.
-- Reads and writes NuGet dependency cache when `enable-cache` is true.
+- Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Applies deployment changes.
 - Writes deploy output under `output-path/environment-name`.
 

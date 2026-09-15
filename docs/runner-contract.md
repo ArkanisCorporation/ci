@@ -60,6 +60,23 @@ Self-hosted preflight should record disk, workspace, OS, arch, and required tool
 | `buildkit-remote` | Remote BuildKit endpoint reachable. |
 | `k8s` | Kubernetes API reachable and kubectl/helm usable. |
 
+## Runner-Advertised Capabilities
+
+Some capabilities belong to a runner rather than to a caller, so the runner advertises them through
+its own environment instead of a workflow input. Workflows treat them as optimisations only: an
+absent variable means the portable default, never a failure.
+
+| Variable | Set by | Effect |
+|---|---|---|
+| `ARKANIS_PERSISTENT_NUGET_PACKAGES=true` | daedalus workers (`ArkanisCorporation/ci-runners`, ARK-528) | NuGet's default global-packages folder (`~/.nuget/packages`) lives on disk that persists across jobs, so `setup-dotnet`, `dotnet-pack-nuget`, `wf-setup-dotnet-generated-code.yml` and the Aspire deploy workflows skip the NuGet `runs-on/cache` step. Ignored when `NUGET_PACKAGES` points elsewhere. |
+
+Why not `runs-on-self-hosted`: ARC runners are self-hosted too but start every job with an empty
+home directory, so gating on it would make them restore cold. Why not an input: every caller would
+have to know which runner pool keeps its packages, and the runner already knows.
+
+The runner's machine environment is not part of the `env` expression context, so a workflow reads
+such a variable in a shell step and gates later steps on that step's output.
+
 ## Remote BuildKit
 
 `wf-publish-container-dotnet.yml` accepts `buildkit-endpoint`.

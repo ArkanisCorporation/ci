@@ -2113,6 +2113,33 @@ void ValidateCacheOptOutContract(string file, string text, string[] lines, bool 
         {
             AddFailure($"{file}:{index + 1}: runs-on/cache step must be gated with '{expectedIf}'.");
         }
+
+        ValidatePersistentNuGetFolderGate(file, text, stepText, index + 1);
+    }
+}
+
+// A runner that keeps NuGet's default global-packages folder on persistent disk advertises it with
+// ARKANIS_PERSISTENT_NUGET_PACKAGES=true (daedalus, ARK-528). There the packages are already present,
+// so a NuGet cache step would only download them again and, after a key change or a failed restore,
+// re-compress and re-upload the whole folder from every parallel job. Every NuGet cache step must
+// therefore be skipped when the detection step reports a persistent folder.
+void ValidatePersistentNuGetFolderGate(string file, string text, string stepText, int lineNumber)
+{
+    if (!stepText.Contains(".nuget/packages", StringComparison.Ordinal))
+    {
+        return;
+    }
+
+    const string Gate = "steps.nuget-folder.outputs.persistent != 'true'";
+    if (!stepText.Contains(Gate, StringComparison.Ordinal))
+    {
+        AddFailure($"{file}:{lineNumber}: NuGet cache step must also be gated with '{Gate}' so runners with a persistent NuGet folder skip it.");
+    }
+
+    if (!text.Contains("id: nuget-folder", StringComparison.Ordinal)
+        || !text.Contains("ARKANIS_PERSISTENT_NUGET_PACKAGES", StringComparison.Ordinal))
+    {
+        AddFailure($"{file}: NuGet cache consumers must detect a persistent NuGet folder in a step with 'id: nuget-folder' that reads ARKANIS_PERSISTENT_NUGET_PACKAGES.");
     }
 }
 
