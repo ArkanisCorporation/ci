@@ -238,7 +238,7 @@ jobs:
             echo "Requested runner labels: ${RUNS_ON_JSON}"
             echo "Runner OS: ${RUNNER_OS}"
             echo "Runner arch: ${RUNNER_ARCH}"
-            echo "Remote BuildKit endpoint configured: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
+            echo "BuildKit endpoint input set: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
             echo "BuildKit cache enabled: ${ENABLE_CACHE}"
             echo ".NET version stamping: true"
           } | tee artifacts/meta/runner-contract.txt
