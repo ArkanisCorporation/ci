@@ -68,7 +68,7 @@ on:
         required: false
         default: ""
       buildkit-endpoint:
-        description: Optional remote BuildKit endpoint for self-hosted runners.
+        description: Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created.
         type: string
         required: false
         default: ""
@@ -194,7 +194,7 @@ jobs:
             echo "Requested runner labels: ${RUNS_ON_JSON}"
             echo "Runner OS: ${RUNNER_OS}"
             echo "Runner arch: ${RUNNER_ARCH}"
-            echo "Remote BuildKit endpoint configured: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
+            echo "BuildKit endpoint input set: $([[ -n "$BUILDKIT_ENDPOINT" ]] && echo true || echo false)"
             echo "BuildKit cache enabled: ${ENABLE_CACHE}"
             echo ".NET version stamping: true"
           } | tee artifacts/meta/runner-contract.txt
@@ -316,16 +316,51 @@ jobs:
             echo "SECRET_FILES"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve BuildKit endpoint
+        id: buildkit
+        env:
+          BUILDKIT_ENDPOINT_INPUT: ${{ inputs.buildkit-endpoint }}
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+        run: |
+          # An explicit buildkit-endpoint input always wins. Otherwise a self-hosted runner may
+          # advertise a shared builder through BUILDKIT_HOST in its own environment (daedalus:
+          # ci-runners' bounded buildkitd). Read from the shell: the `env` expression context does
+          # not include the runner process environment. Hosted runners never consult it.
+          endpoint="$BUILDKIT_ENDPOINT_INPUT"
+          origin=input
+          if [[ -z "$endpoint" ]]; then
+            origin=none
+            if [[ "$RUNS_ON_SELF_HOSTED" == "true" && -n "${BUILDKIT_HOST:-}" ]]; then
+              endpoint="$BUILDKIT_HOST"
+              origin=runner
+            fi
+          fi
+          # An endpoint never legitimately spans lines; fail loudly rather than hand buildx a
+          # malformed address. The value is not echoed, only where it came from.
+          if [[ "$endpoint" == *$'\n'* || "$endpoint" == *$'\r'* ]]; then
+            echo "::error::Resolved BuildKit endpoint (source: ${origin}) contains a line break."
+            exit 2
+          fi
+          echo "Remote BuildKit endpoint source: ${origin}" | tee -a artifacts/meta/runner-contract.txt
+          {
+            echo "endpoint<<ENDPOINT"
+            printf '%s\n' "$endpoint"
+            echo "ENDPOINT"
+            echo "origin<<ORIGIN"
+            printf '%s\n' "$origin"
+            echo "ORIGIN"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx @ local
-        if: inputs.buildkit-endpoint == ''
+        if: steps.buildkit.outputs.endpoint == ''
         uses: docker/setup-buildx-action@v4
 
       - name: Set up Docker Buildx @ remote
-        if: inputs.buildkit-endpoint != ''
+        if: steps.buildkit.outputs.endpoint != ''
         uses: docker/setup-buildx-action@v4
         with:
           driver: remote
-          endpoint: ${{ inputs.buildkit-endpoint }}
+          endpoint: ${{ steps.buildkit.outputs.endpoint }}
 
       - name: Resolve image tags @ ${{ inputs.image }}:${{ inputs.version || inputs.version-tag }}
         id: tags
@@ -518,6 +553,7 @@ jobs:
             echo "| Extra tags | \`${EXTRA_TAGS:-none}\` |"
             echo "| BuildKit cache | \`${{ inputs.enable-cache }}\` |"
             echo "| BuildKit cache scope | \`${CACHE_SCOPE:-none}\` |"
+            echo "| BuildKit endpoint source | \`${{ steps.buildkit.outputs.origin }}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 

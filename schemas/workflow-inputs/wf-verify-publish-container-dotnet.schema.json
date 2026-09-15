@@ -58,7 +58,8 @@
     },
     "buildkit-endpoint": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created."
     },
     "build-args": {
       "type": "string",
