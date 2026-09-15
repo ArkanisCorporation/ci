@@ -379,10 +379,20 @@ jobs:
               origin=runner
             fi
           fi
+          # An endpoint never legitimately spans lines; fail loudly rather than hand buildx a
+          # malformed address. The value is not echoed, only where it came from.
+          if [[ "$endpoint" == *$'\n'* || "$endpoint" == *$'\r'* ]]; then
+            echo "::error::Resolved BuildKit endpoint (source: ${origin}) contains a line break."
+            exit 2
+          fi
           echo "Remote BuildKit endpoint source: ${origin}" | tee -a artifacts/meta/runner-contract.txt
           {
-            echo "endpoint=${endpoint}"
-            echo "origin=${origin}"
+            echo "endpoint<<ENDPOINT"
+            printf '%s\n' "$endpoint"
+            echo "ENDPOINT"
+            echo "origin<<ORIGIN"
+            printf '%s\n' "$origin"
+            echo "ORIGIN"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx @ local
