@@ -226,12 +226,26 @@ runs:
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
         GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
 
+    # Runners that keep NuGet's default packages folder on persistent disk advertise it with
+    # ARKANIS_PERSISTENT_NUGET_PACKAGES=true (daedalus, ARK-528); the cache would only re-download
+    # what is already there. Same detection as setup-dotnet; see the comment there.
+    - name: Detect persistent NuGet folder
+      id: nuget-folder
+      run: |
+        if [[ "${ARKANIS_PERSISTENT_NUGET_PACKAGES:-}" == "true" && -z "${NUGET_PACKAGES:-}" ]]; then
+          echo "persistent=true" >> "$GITHUB_OUTPUT"
+          echo "Runner keeps NuGet's default packages folder on persistent disk; skipping the NuGet cache."
+        else
+          echo "persistent=false" >> "$GITHUB_OUTPUT"
+        fi
+      shell: bash
+
     # `~/.nuget/packages`, NuGet's own default folder, rather than a workspace path: the cache
     # `version` is a hash of this literal string, and a workspace path expands to a different
     # literal on every daedalus replica, which splits the cache into one namespace per replica
     # (ARK-502). The tilde is expanded later, at save and restore time.
     - name: Cache NuGet packages
-      if: inputs.enable-cache == 'true'
+      if: inputs.enable-cache == 'true' && steps.nuget-folder.outputs.persistent != 'true'
       uses: runs-on/cache@v5.0.7
       with:
         path: ~/.nuget/packages
@@ -246,6 +260,7 @@ runs:
           echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
           echo "Requested runner labels: ${RUNS_ON_JSON}"
           echo "NuGet cache enabled: ${ENABLE_CACHE}"
+          echo "Persistent NuGet folder (cache skipped): ${NUGET_FOLDER_PERSISTENT}"
           echo "Dotnet setversion enabled: ${DOTNET_SETVERSION}"
           echo "Runner OS: ${RUNNER_OS}"
           echo "Runner arch: ${RUNNER_ARCH}"
@@ -256,6 +271,7 @@ runs:
         RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
         RUNS_ON_JSON: ${{ inputs.runs-on-json }}
         ENABLE_CACHE: ${{ inputs.enable-cache }}
+        NUGET_FOLDER_PERSISTENT: ${{ steps.nuget-folder.outputs.persistent }}
         DOTNET_SETVERSION: ${{ inputs.dotnet-setversion }}
 
     - name: Self-hosted preflight

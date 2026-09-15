@@ -22,6 +22,10 @@ nuget-{os}-{arch}-{dotnet-version}-{global-json-hash}-{packages-lock-hash}
 ```
 
 Use locked restore in CI.
+Cache NuGet's default folder as the literal `~/.nuget/packages` so the cache version is identical on every runner (ARK-502).
+Skip the NuGet cache step when the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`, see `runner-contract.md`).
+There the packages are already on disk: restoring re-downloads and re-extracts the whole multi-GB folder on every job, and after a key change or a failed restore every parallel job re-compresses and re-uploads it (`@actions/cache` builds the archive before it reserves the key, so a duplicate save still pays the compression).
+`scripts/validate-workflows.cs` requires every NuGet `runs-on/cache` step to carry that gate.
 Private NuGet restore credentials come from environment variables during restore only.
 Do not cache generated NuGet auth files or temporary credential maps.
 
