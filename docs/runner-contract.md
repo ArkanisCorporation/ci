@@ -60,11 +60,30 @@ Self-hosted preflight should record disk, workspace, OS, arch, and required tool
 | `buildkit-remote` | Remote BuildKit endpoint reachable. |
 | `k8s` | Kubernetes API reachable and kubectl/helm usable. |
 
+## Runner-Advertised Capabilities
+
+Some capabilities belong to a runner rather than to a caller, so the runner advertises them through
+its own environment instead of a workflow input. Workflows treat them as optimisations only: an
+absent variable means the portable default, never a failure.
+
+| Variable | Set by | Effect |
+|---|---|---|
+| `BUILDKIT_HOST` | daedalus workers (`ArkanisCorporation/ci-runners`, ARK-529) | A shared bounded BuildKit is reachable; the container workflows use it when `buildkit-endpoint` is empty. See *Remote BuildKit* below. |
+| `ARKANIS_PERSISTENT_NUGET_PACKAGES=true` | daedalus workers (`ArkanisCorporation/ci-runners`, ARK-528) | NuGet's default global-packages folder (`~/.nuget/packages`) lives on disk that persists across jobs, so `setup-dotnet`, `dotnet-pack-nuget`, `wf-setup-dotnet-generated-code.yml` and the Aspire deploy workflows skip the NuGet `runs-on/cache` step. Ignored when `NUGET_PACKAGES` points elsewhere. |
+
+Rules for reading one:
+
+- **Only when `runs-on-self-hosted` is true.** A hosted runner never advertises these, and the input is how this platform gates self-hosted behaviour.
+- **In a shell step,** because the runner's machine environment is not part of the `env` expression context. Later steps gate on that step's output.
+- **Record the decision** in the job's `artifacts/meta/runner-contract.txt`, so a run says which path it took.
+- **Never a caller input instead.** Every caller would have to know which runner pool has which capability, and the runner already does.
+- **Never inferred from `runs-on-self-hosted` alone.** ARC runners are self-hosted too, but have neither of these: they start each job in a fresh pod, and gating on the input alone would make them restore cold or point at a builder that is not there.
+
 ## Remote BuildKit
 
 `wf-verify-publish-container-dotnet.yml` and `wf-publish-container-dotnet.yml` accept `buildkit-endpoint`.
 When set, the workflow uses Docker Buildx with the `remote` driver.
-When empty and `runs-on-self-hosted` is true, the workflow uses the runner's own `BUILDKIT_HOST` environment variable if it is set.
+When empty and `runs-on-self-hosted` is true, the workflow uses the runner's own `BUILDKIT_HOST` environment variable if it is set (see *Runner-Advertised Capabilities* above).
 A runner pool advertises a shared builder this way without every caller hard-coding its address (daedalus: a bounded `buildkitd` run by `ci-runners`).
 Otherwise the workflow creates a local `docker-container` builder.
 If an endpoint is selected but unreachable, Buildx setup fails; there is no fallback to a local builder.
