@@ -144,7 +144,7 @@ Preconditions:
 Side effects:
 
 - Installs the requested .NET SDK through `actions/setup-dotnet`.
-- Optionally uses `runs-on/cache` for NuGet packages.
+- Optionally uses `runs-on/cache` for NuGet packages; skipped when the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Optionally writes masked private NuGet credentials to `GITHUB_ENV` during restore.
 - Optionally modifies matched `.csproj` files before packing.
 - Writes package files under `package-directory`, defaulting to `artifacts/nuget`.
