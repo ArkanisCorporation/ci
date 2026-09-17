@@ -296,7 +296,7 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `extra-tags` | string | no | `""` | n/a |
 | `registry` | string | no | `"ghcr.io"` | n/a |
 | `registry-username` | string | no | `""` | n/a |
-| `buildkit-endpoint` | string | no | `""` | n/a |
+| `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
 | `build-args` | string | no | `""` | n/a |
 | `nuget-build-secret` | boolean | no | `false` | Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore. |
 | `sdk-version` | string | no | `"10.0.x"` | n/a |
@@ -456,7 +456,7 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `version-channel` | string | no | `""` | n/a |
 | `channel-latest` | boolean | no | `true` | n/a |
 | `extra-tags` | string | no | `""` | n/a |
-| `buildkit-endpoint` | string | no | `""` | n/a |
+| `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
 | `build-args` | string | no | `""` | n/a |
 | `nuget-build-secret` | boolean | no | `false` | Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore. |
 | `sdk-version` | string | no | `"10.0.x"` | n/a |

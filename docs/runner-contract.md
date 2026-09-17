@@ -62,8 +62,12 @@ Self-hosted preflight should record disk, workspace, OS, arch, and required tool
 
 ## Remote BuildKit
 
-`wf-publish-container-dotnet.yml` accepts `buildkit-endpoint`.
+`wf-verify-publish-container-dotnet.yml` and `wf-publish-container-dotnet.yml` accept `buildkit-endpoint`.
 When set, the workflow uses Docker Buildx with the `remote` driver.
+When empty and `runs-on-self-hosted` is true, the workflow uses the runner's own `BUILDKIT_HOST` environment variable if it is set.
+A runner pool advertises a shared builder this way without every caller hard-coding its address (daedalus: a bounded `buildkitd` run by `ci-runners`).
+Otherwise the workflow creates a local `docker-container` builder.
+If an endpoint is selected but unreachable, Buildx setup fails; there is no fallback to a local builder.
 This is intended for self-hosted or ARC runners that should not run Docker-in-Docker.
 The runner must also support Bash and .NET SDK setup before Docker Buildx runs.
 
