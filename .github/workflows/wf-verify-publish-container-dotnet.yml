@@ -422,6 +422,7 @@ jobs:
           ENABLE_CACHE: ${{ inputs.enable-cache }}
           CACHE_FROM: ${{ inputs.cache-from }}
           CACHE_TO: ${{ inputs.cache-to }}
+          BUILDKIT_ENDPOINT_RESOLVED: ${{ steps.buildkit.outputs.endpoint }}
           IMAGE: ${{ inputs.image }}
           CONTEXT: ${{ inputs.context }}
           DOCKERFILE: ${{ inputs.dockerfile }}
@@ -439,6 +440,7 @@ jobs:
           scope=""
           cache_from=""
           cache_to=""
+          cache_to_state="none"
 
           if [[ "$ENABLE_CACHE" == "true" ]]; then
             if [[ -n "$CACHE_FROM" || -n "$CACHE_TO" ]]; then
@@ -447,15 +449,33 @@ jobs:
             else
               scope="container-$(slug "$IMAGE")-$(slug "$CONTEXT")-$(slug "$DOCKERFILE")-$(slug "$PLATFORMS")"
               cache_from="type=gha,scope=${scope}"
-              cache_to="type=gha,scope=${scope},mode=max"
+              # A runner-advertised BuildKit (ARK-529) is shared and long-lived: it keeps the layer
+              # cache on the runner host between jobs, so exporting the same layers to the Actions
+              # cache buys nothing - and it breaks builds. `type=gha` reserves one cache entry per
+              # layer blob, keyed by blob digest, git ref and repository; the buildx `scope=` above
+              # is NOT part of that key. Matrix jobs of one workflow share base layers, and now that
+              # they also share a warm builder they reach the export phase at the same moment, so
+              # two of them reserve the same key concurrently. The loser is told the reservation is
+              # taken, which BuildKit's Cache Service v2 client reports as `failed to reserve cache`
+              # and - unlike its v1 path, which treats the conflict as "blob already there" and
+              # moves on - turns into a failed build. Import stays on: reads never reserve.
+              if [[ -n "$BUILDKIT_ENDPOINT_RESOLVED" ]]; then
+                cache_to_state="skipped (shared BuildKit keeps the layer cache)"
+              else
+                cache_to="type=gha,scope=${scope},mode=max"
+              fi
             fi
+          fi
+
+          if [[ -n "$cache_to" ]]; then
+            cache_to_state="configured"
           fi
 
           {
             echo "BuildKit cache enabled: ${ENABLE_CACHE}"
             echo "Default cache scope: ${scope:-none}"
             echo "Cache from: $([[ -n "$cache_from" ]] && echo configured || echo none)"
-            echo "Cache to: $([[ -n "$cache_to" ]] && echo configured || echo none)"
+            echo "Cache to: ${cache_to_state}"
           } | tee artifacts/meta/docker-cache.txt
 
           {

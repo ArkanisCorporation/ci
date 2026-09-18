@@ -87,6 +87,7 @@ When empty and `runs-on-self-hosted` is true, the workflow uses the runner's own
 A runner pool advertises a shared builder this way without every caller hard-coding its address (daedalus: a bounded `buildkitd` run by `ci-runners`).
 Otherwise the workflow creates a local `docker-container` builder.
 If an endpoint is selected but unreachable, Buildx setup fails; there is no fallback to a local builder.
+While an endpoint is in use, the workflow imports the generated `type=gha` build cache but does not export to it: a shared builder already keeps the layers between jobs, and concurrent matrix jobs exporting the same layer blob collide on the Actions cache reservation (`failed to reserve cache`), which fails the build. An explicit `cache-to` input still wins.
 This is intended for self-hosted or ARC runners that should not run Docker-in-Docker.
 The runner must also support Bash and .NET SDK setup before Docker Buildx runs.
 
