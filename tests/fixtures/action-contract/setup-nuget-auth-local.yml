@@ -71,7 +71,7 @@ jobs:
         uses: ./.github/actions/setup-nuget-auth
         with:
           phase: cleanup
-          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
 
       - name: Verify fake NuGet auth cleanup
         run: |
@@ -157,7 +157,7 @@ jobs:
         uses: ./.github/actions/setup-nuget-auth
         with:
           phase: cleanup
-          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
           op-env-file: ${{ steps.prepare.outputs.op-env-file }}
           op-map-file: ${{ steps.prepare.outputs.op-map-file }}
 
@@ -224,7 +224,8 @@ jobs:
         uses: ./.github/actions/setup-nuget-auth
         with:
           phase: cleanup
-          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
+          credential-mode: docker-config
           docker-config-path: ${{ steps.auth.outputs.docker-config-path }}
 
       - name: Verify fake NuGet BuildKit cleanup

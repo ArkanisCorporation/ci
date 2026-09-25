@@ -89,6 +89,7 @@ jobs:
     uses: ./.github/workflows/wf-dotnet-format.yml
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
       runs-on-self-hosted: true
@@ -109,6 +110,7 @@ jobs:
     uses: ./.github/workflows/wf-dotnet-test.yml
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
@@ -129,6 +131,7 @@ jobs:
     uses: ./.github/workflows/wf-verify-publish-nuget.yml
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
       runs-on-self-hosted: true
@@ -146,6 +149,7 @@ jobs:
     uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
       runs-on-self-hosted: true

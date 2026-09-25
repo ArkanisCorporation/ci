@@ -81,11 +81,12 @@ The workflow resolves `op://` values through `1password/load-secrets-action@v4`.
 The workflow must not invoke the 1Password `op` CLI directly.
 The workflow resolves `github://actor` from `github.actor`.
 The workflow resolves `github://token` from `github.token`, passed into auth setup as `GITHUB_TOKEN_FOR_NUGET_AUTH`.
-For host restore, credentials are written as masked `NuGetPackageSourceCredentials_{name}` environment variables.
+For host restore, credentials use masked `NuGetPackageSourceCredentials_{name}` environment variables when safe, or a temporary copy of the caller's `NuGet.Config` under `RUNNER_TEMP` for other valid source names or credential values.
+The temporary host config retains source mappings, is never uploaded or cached, and is removed after restore.
 For Dockerfile restore, credentials are written to a temporary `NuGet.Config` under `RUNNER_TEMP` and mounted with Docker BuildKit `secret-files`.
 Do not run private-feed credentialed jobs on untrusted fork pull requests.
 Do not use `pull_request_target` to run fork code with private feed credentials.
-Do not write `NUGET_AUTH_JSON`, `OP_SERVICE_ACCOUNT_TOKEN`, `NuGetPackageSourceCredentials_*`, `NUGET_AUTH_OP_*`, generated 1Password env files, or generated Docker NuGet configs to logs, summaries, outputs, artifacts, cache keys, Docker labels, Docker build args, or image metadata.
+Do not write `NUGET_AUTH_JSON`, `OP_SERVICE_ACCOUNT_TOKEN`, `NuGetPackageSourceCredentials_*`, `NUGET_AUTH_OP_*`, generated 1Password env files, or generated host or Docker NuGet configs to logs, summaries, outputs, artifacts, cache keys, Docker labels, Docker build args, or image metadata.
 
 ## Secrets
 

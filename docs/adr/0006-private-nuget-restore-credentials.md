@@ -9,7 +9,7 @@ Reusable workflow secret names are static, but consumers may need one or many pr
 `actions/setup-dotnet` supports an authenticated `source-url` path, but that path is single-source oriented and does not cover Dockerfile restores.
 Dockerfile restores need credentials inside BuildKit without copying them into image layers.
 Some callers store package credentials in 1Password and want CI to resolve `op://` item references without invoking the `op` CLI directly.
-Last verified: 2026-07-09.
+Last verified: 2026-09-25.
 
 ## Decision
 
@@ -21,15 +21,18 @@ Resolve `github://actor` from `github.actor`.
 Resolve `github://token` from `github.token`, passed explicitly to auth steps as `GITHUB_TOKEN_FOR_NUGET_AUTH`.
 Resolve `op://` values through a generated env file loaded by `1password/load-secrets-action@v4`.
 Never invoke the 1Password `op` CLI directly.
-For host restore, write masked `NuGetPackageSourceCredentials_{name}` values to `GITHUB_ENV` only for the restore window.
+For host restore, write masked `NuGetPackageSourceCredentials_{name}` values to `GITHUB_ENV` only when the source name and credential values can be represented safely in that form.
+For other valid NuGet source names or credential values, copy the caller's `NuGet.Config` to `RUNNER_TEMP`, add XML-encoded source credential elements, and use the temporary config for restore.
+Preserve source mappings and other caller config settings in the temporary copy.
 For Dockerfile restore, write a temporary `NuGet.Config` under `RUNNER_TEMP` and pass it to Docker Buildx as a `secret-files` entry.
-Delete generated env files, map files, and Docker NuGet configs in `if: always()` cleanup steps.
+Delete generated env files, map files, host NuGet configs, and Docker NuGet configs in `if: always()` cleanup steps.
 
 ## Consequences
 
 Current unauthenticated consumers keep working because both secrets are optional.
 Callers can provide any number of private feed credentials without adding fixed `NUGET_TOKEN_1` style workflow secrets.
 Callers must keep non-secret package source URLs in committed `NuGet.Config` files for host restore.
+Callers using `github://token` must grant `packages: read` in every restoring caller job and reusable workflow job.
 Callers should use NuGet package source mapping to reduce dependency confusion risk when multiple feeds are configured.
 Docker consumers must opt in with `nuget-build-secret: true` and update Dockerfiles to mount the `nuget_config` BuildKit secret during restore.
 The `OP_SERVICE_ACCOUNT_TOKEN` secret is available only to trusted workflows and is not passed to Docker builds.

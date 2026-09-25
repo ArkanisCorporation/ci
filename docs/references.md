@@ -1,6 +1,6 @@
 # References
 
-Last verified: 2026-09-11.
+Last verified: 2026-09-25.
 
 ## Primary Docs
 
@@ -74,6 +74,8 @@ Last verified: 2026-09-11.
 - NuGet Trusted Publishing with shared workflows can require careful policy ownership: https://github.com/NuGet/login/issues/6
 - NuGet Trusted Publishing and shared workflow discussion: https://github.com/orgs/community/discussions/179952
 - actions/setup-dotnet multiple source request: https://github.com/actions/setup-dotnet/issues/167
+- NuGet source credential environment variable case behavior on Linux: https://github.com/NuGet/Home/issues/14581
+- NuGet credential XML name encoding implementation: https://github.com/NuGet/NuGet.Client/blob/dev/src/NuGet.Core/NuGet.Configuration/Settings/Items/CredentialsItem.cs
 - semantic-release major tag update request: https://github.com/semantic-release/semantic-release/issues/1515
 - semantic-release dry-run still checks push permissions: https://github.com/semantic-release/semantic-release/issues/2232
 - actionlint `queue` key support gap: https://github.com/rhysd/actionlint/issues/657

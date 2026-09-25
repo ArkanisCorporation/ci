@@ -166,6 +166,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      packages: read
     outputs:
       metadata: ${{ steps.build.outputs.metadata }}
       artifact-manifest: ${{ steps.manifest.outputs.path }}
@@ -510,10 +511,11 @@ jobs:
         uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
         with:
           phase: cleanup
+          credential-mode: docker-config
           op-env-file: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
           op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
           docker-config-path: ${{ steps.nuget-auth.outputs.docker-config-path }}
-          configured-source-names: ${{ steps.nuget-auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.nuget-auth.outputs.source-names-json }}
 
       - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}
         id: manifest

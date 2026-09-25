@@ -28,9 +28,9 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Minimum caller permissions | Main outputs |
 |---|---|---|
-| `wf-dotnet-format.yml` | `contents: read` | format diagnostics, CleanupCode diff diagnostics, metadata, manifest |
-| `wf-dotnet-test.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
-| `wf-setup-dotnet-generated-code.yml` | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
+| `wf-dotnet-format.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | format diagnostics, CleanupCode diff diagnostics, metadata, manifest |
+| `wf-dotnet-test.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
+| `wf-setup-dotnet-generated-code.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | command logs, changed-file list, diff stat, diff preview, manifest |
 | `wf-node-lint.yml` | `contents: read` | install and lint logs, metadata, manifest |
 | `wf-node-test.yml` | `contents: read` | install and test logs, metadata, manifest |
 | `wf-node-build.yml` | `contents: read` | install and build logs, metadata, manifest |
@@ -38,11 +38,11 @@ Audience: consumers and platform maintainers.
 | `wf-verify-release-semantic.yml` | `contents: write` | release diagnostics and predicted release outputs |
 | `wf-release-semantic.yml` | `contents: write`<br>`issues: write`<br>`pull-requests: write` | release diagnostics and release outputs |
 | `wf-release-backpropagation.yml` | `contents: write`<br>`pull-requests: write` | pull request summary |
-| `wf-verify-publish-nuget.yml` | `contents: read` | `.nupkg`, `.snupkg`, manifest |
-| `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
-| `wf-verify-publish-container-dotnet.yml` | `contents: read` | Buildx metadata, manifest |
+| `wf-verify-publish-nuget.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | `.nupkg`, `.snupkg`, manifest |
+| `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`packages: read` for GitHub Packages restore<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
+| `wf-verify-publish-container-dotnet.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | Buildx metadata, manifest |
 | `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
-| `wf-verify-deploy-k8s-aspire.yml` | `contents: read` | verification manifest |
+| `wf-verify-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | verification manifest |
 | `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
 
@@ -535,7 +535,10 @@ External services and caches are gray dashed nodes.
 .NET workflows that restore packages accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
 `NUGET_AUTH_JSON` is a versioned JSON document with one or more `sources`.
 Each `name` must match a package source key in the caller repository's committed `NuGet.Config`.
-Host restore uses NuGet's `NuGetPackageSourceCredentials_{name}` environment variable convention.
+Host restore uses NuGet's `NuGetPackageSourceCredentials_{name}` environment variable convention for environment-safe names and values.
+Other valid source names, including `github.com-ArkanisCorporation`, spaces, commas, and Unicode, use a temporary credentialed copy of the caller's `NuGet.Config` under `RUNNER_TEMP`.
+The copy retains package source mapping and is deleted after restore.
+Callers can set `nuget-source-config-path` on the setup and pack actions or `source-config-path` on the auth action when the config is outside the action's current directory tree.
 Dockerfile restore uses a generated `NuGet.Config` mounted through Docker Buildx `secret-files`.
 The generated Docker config is temporary secret material under `RUNNER_TEMP`.
 It must not be cached, uploaded, copied into images, written to summaries, or passed through Docker build args.
@@ -583,6 +586,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       solution: src/Product.slnx
@@ -615,6 +619,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       solution: Product.slnx
       checkout-submodules: "true"
@@ -859,6 +864,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-generated-code.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false

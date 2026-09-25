@@ -90,6 +90,10 @@ inputs:
     description: Optional NUGET_AUTH_JSON document containing private package source credentials.
     required: false
     default: ""
+  nuget-source-config-path:
+    description: Optional caller NuGet.Config path for source names requiring temporary host credentials.
+    required: false
+    default: ""
   op-service-account-token:
     description: Optional 1Password service account token used when nuget-auth-json contains op:// references.
     required: false
@@ -223,6 +227,8 @@ runs:
         NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
         NUGET_AUTH_PHASE: apply
         NUGET_AUTH_CREDENTIAL_MODE: env
+        NUGET_AUTH_HOST_CONFIG_PATH: ${{ runner.temp }}/nuget-auth/host.NuGet.Config
+        NUGET_AUTH_SOURCE_CONFIG_PATH: ${{ inputs.nuget-source-config-path }}
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
         GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
 
@@ -290,7 +296,10 @@ runs:
       shell: bash
 
     - name: Restore package project
-      run: dotnet restore "$PROJECT" --locked-mode
+      run: |
+        config_args=()
+        if [[ -n "${RestoreConfigFile:-}" ]]; then config_args=(--configfile "$RestoreConfigFile"); fi
+        dotnet restore "$PROJECT" --locked-mode "${config_args[@]}"
       shell: bash
       env:
         PROJECT: ${{ inputs.project }}
@@ -303,7 +312,8 @@ runs:
         NUGET_AUTH_PHASE: cleanup
         NUGET_AUTH_OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
-        NUGET_AUTH_CONFIGURED_SOURCE_NAMES: ${{ steps.nuget-auth.outputs.source-names }}
+        NUGET_AUTH_HOST_CONFIG_PATH: ${{ steps.nuget-auth.outputs.host-config-path }}
+        NUGET_AUTH_CONFIGURED_SOURCE_NAMES_JSON: ${{ steps.nuget-auth.outputs.source-names-json }}
 
     - name: Install dotnet-setversion
       if: ${{ inputs.dotnet-setversion == 'true' }}

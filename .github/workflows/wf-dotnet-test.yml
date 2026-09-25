@@ -146,6 +146,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}

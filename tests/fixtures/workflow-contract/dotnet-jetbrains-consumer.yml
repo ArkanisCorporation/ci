@@ -11,6 +11,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false

@@ -9,6 +9,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 
 /*
  * Summary:
@@ -40,7 +42,7 @@ try
 
     return 0;
 }
-catch (Exception exception) when (exception is InvalidOperationException or JsonException or IOException)
+catch (Exception exception) when (exception is InvalidOperationException or JsonException or IOException or XmlException or ArgumentException)
 {
     Console.Error.WriteLine($"::error::{EscapeCommandValue(exception.Message)}");
     return 1;
@@ -92,20 +94,27 @@ static void Apply(AuthCommand command)
         Mask(credential.EnvironmentValue);
     }
 
-    if (includesEnv)
+    var usesHostConfig = includesEnv && credentials.Any(credential => !IsEnvironmentSourceName(credential.Name)
+        || !IsEnvironmentCredentialValue(credential));
+    if (usesHostConfig)
+    {
+        var hostConfigPath = RequireRunnerTempPath(command.HostConfigPath, "host-config-path");
+        Directory.CreateDirectory(Path.GetDirectoryName(hostConfigPath)!);
+        var sourceConfigPath = FindSourceConfig(command.SourceConfigPath);
+        var hostConfig = BuildHostConfig(sourceConfigPath, credentials);
+        WritePrivateFile(hostConfigPath, stream => hostConfig.Save(stream));
+        AppendGitHubEnv("RestoreConfigFile", hostConfigPath);
+        WriteOutput("host-config-path", hostConfigPath);
+    }
+    else
+    {
+        WriteOutput("host-config-path", string.Empty);
+    }
+
+    if (includesEnv && !usesHostConfig)
     {
         foreach (var credential in credentials)
         {
-            if (credential.Username.Contains(';', StringComparison.Ordinal)
-                || credential.Password.Contains(';', StringComparison.Ordinal)
-                || credential.ValidAuthenticationTypes.Contains(';', StringComparison.Ordinal)
-                || credential.Username.Contains('\n', StringComparison.Ordinal)
-                || credential.Password.Contains('\n', StringComparison.Ordinal)
-                || credential.ValidAuthenticationTypes.Contains('\n', StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException($"source {credential.Name} contains characters that cannot be represented safely in NuGetPackageSourceCredentials environment variables.");
-            }
-
             AppendGitHubEnv($"NuGetPackageSourceCredentials_{credential.Name}", credential.EnvironmentValue);
         }
     }
@@ -114,7 +123,12 @@ static void Apply(AuthCommand command)
     {
         var dockerConfigPath = RequireRunnerTempPath(command.DockerConfigPath, "docker-config-path");
         Directory.CreateDirectory(Path.GetDirectoryName(dockerConfigPath)!);
-        File.WriteAllText(dockerConfigPath, BuildDockerConfig(credentials), Utf8NoBom());
+        var dockerConfig = BuildDockerConfig(credentials);
+        WritePrivateFile(dockerConfigPath, stream =>
+        {
+            using var writer = new StreamWriter(stream, Utf8NoBom(), leaveOpen: true);
+            writer.Write(dockerConfig);
+        });
         WriteOutput("docker-config-path", dockerConfigPath);
     }
     else
@@ -133,15 +147,24 @@ static void Cleanup(AuthCommand command)
 {
     var opVariableNames = ReadOpVariableNames(command.OpMapFile).ToArray();
 
-    foreach (var path in new[] { command.OpEnvFile, command.OpMapFile, command.DockerConfigPath })
+    foreach (var path in new[] { command.OpEnvFile, command.OpMapFile, command.DockerConfigPath, command.HostConfigPath })
     {
         DeleteRunnerTempFile(path);
     }
 
-    foreach (var sourceName in SplitCsv(command.ConfiguredSourceNames))
+    var configuredNames = !string.IsNullOrWhiteSpace(command.ConfiguredSourceNamesJson)
+        ? JsonSerializer.Deserialize<string[]>(command.ConfiguredSourceNamesJson, JsonOptions.Strict) ?? []
+        : SplitCsv(command.ConfiguredSourceNames).ToArray();
+    foreach (var sourceName in configuredNames.Where(name => ModeIncludes(command.CredentialMode, "env")
+        && string.IsNullOrWhiteSpace(command.HostConfigPath) && IsEnvironmentSourceName(name)))
     {
         ValidateSourceName(sourceName);
         AppendGitHubEnv($"NuGetPackageSourceCredentials_{sourceName}", string.Empty);
+    }
+
+    if (!string.IsNullOrWhiteSpace(command.HostConfigPath))
+    {
+        AppendGitHubEnv("RestoreConfigFile", string.Empty);
     }
 
     foreach (var opVariable in opVariableNames)
@@ -153,6 +176,8 @@ static void Cleanup(AuthCommand command)
     WriteOutput("op-required", "false");
     WriteOutput("source-count", "0");
     WriteOutput("source-names", string.Empty);
+    WriteOutput("source-names-json", "[]");
+    WriteOutput("host-config-path", string.Empty);
     WriteOutput("op-env-file", string.Empty);
     WriteOutput("op-map-file", string.Empty);
     WriteOutput("docker-config-path", string.Empty);
@@ -333,7 +358,84 @@ static bool ModeIncludes(string credentialMode, string requestedMode) =>
 static void WriteCommonOutputs(NuGetAuthDocument document)
 {
     WriteOutput("source-count", document.Sources.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
-    WriteOutput("source-names", string.Join(',', document.Sources.Select(source => source.Name)));
+    var names = document.Sources.Select(source => source.Name).ToArray();
+    WriteOutput("source-names", names.All(IsEnvironmentSourceName) ? string.Join(',', names) : string.Empty);
+    WriteOutput("source-names-json", JsonSerializer.Serialize(names));
+}
+
+static bool IsEnvironmentSourceName(string name) =>
+    Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
+
+static bool IsEnvironmentCredentialValue(ResolvedCredential credential) =>
+    !new[] { credential.Username, credential.Password, credential.ValidAuthenticationTypes }
+        .Any(value => value.Contains(';', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal) || value.Contains('\n', StringComparison.Ordinal));
+
+static string FindSourceConfig(string configuredPath)
+{
+    if (!string.IsNullOrWhiteSpace(configuredPath))
+    {
+        var path = Path.GetFullPath(configuredPath);
+        if (!File.Exists(path))
+        {
+            throw new InvalidOperationException("source-config-path does not exist.");
+        }
+        return path;
+    }
+
+    for (var directory = new DirectoryInfo(Environment.CurrentDirectory); directory is not null; directory = directory.Parent)
+    {
+        foreach (var name in new[] { "NuGet.Config", "nuget.config", "NuGet.config" })
+        {
+            var path = Path.Combine(directory.FullName, name);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+    }
+    throw new InvalidOperationException("A NuGet.Config is required for source names that cannot use environment credentials. Set source-config-path.");
+}
+
+static XDocument BuildHostConfig(string sourceConfigPath, IReadOnlyCollection<ResolvedCredential> credentials)
+{
+    var document = XDocument.Load(sourceConfigPath);
+    var root = document.Root;
+    if (root?.Name.LocalName != "configuration")
+    {
+        throw new InvalidOperationException("source-config-path must contain a NuGet configuration root.");
+    }
+
+    var sources = root.Element("packageSources")?.Elements("add")
+        .Select(element => (string?)element.Attribute("key"))
+        .ToHashSet(StringComparer.Ordinal) ?? [];
+    foreach (var credential in credentials)
+    {
+        if (!sources.Contains(credential.Name))
+        {
+            throw new InvalidOperationException($"source {credential.Name} is not present in source-config-path.");
+        }
+    }
+
+    var credentialsElement = root.Element("packageSourceCredentials");
+    if (credentialsElement is null)
+    {
+        credentialsElement = new XElement("packageSourceCredentials");
+        root.Add(credentialsElement);
+    }
+    foreach (var credential in credentials)
+    {
+        var encodedName = XmlConvert.EncodeLocalName(credential.Name);
+        credentialsElement.Element(encodedName)?.Remove();
+        var sourceElement = new XElement(encodedName,
+            new XElement("add", new XAttribute("key", "Username"), new XAttribute("value", credential.Username)),
+            new XElement("add", new XAttribute("key", "ClearTextPassword"), new XAttribute("value", credential.Password)));
+        if (!string.IsNullOrWhiteSpace(credential.ValidAuthenticationTypes))
+        {
+            sourceElement.Add(new XElement("add", new XAttribute("key", "ValidAuthenticationTypes"), new XAttribute("value", credential.ValidAuthenticationTypes)));
+        }
+        credentialsElement.Add(sourceElement);
+    }
+    return document;
 }
 
 static string BuildDockerConfig(IReadOnlyCollection<ResolvedCredential> credentials)
@@ -362,7 +464,8 @@ static string BuildDockerConfig(IReadOnlyCollection<ResolvedCredential> credenti
     builder.AppendLine("  <packageSourceCredentials>");
     foreach (var credential in credentials)
     {
-        builder.Append("    <").Append(credential.Name).AppendLine(">");
+        var encodedName = XmlConvert.EncodeLocalName(credential.Name);
+        builder.Append("    <").Append(encodedName).AppendLine(">");
         builder
             .Append("      <add key=\"Username\" value=\"")
             .Append(XmlEscape(credential.Username))
@@ -379,7 +482,7 @@ static string BuildDockerConfig(IReadOnlyCollection<ResolvedCredential> credenti
                 .AppendLine("\" />");
         }
 
-        builder.Append("    </").Append(credential.Name).AppendLine(">");
+        builder.Append("    </").Append(encodedName).AppendLine(">");
     }
 
     builder.AppendLine("  </packageSourceCredentials>");
@@ -397,10 +500,11 @@ static string XmlEscape(string value) =>
 
 static void ValidateSourceName(string sourceName)
 {
-    if (!Regex.IsMatch(sourceName, @"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant))
+    if (string.IsNullOrWhiteSpace(sourceName))
     {
-        throw new InvalidOperationException($"source name {sourceName} must match ^[A-Za-z_][A-Za-z0-9_]*$.");
+        throw new InvalidOperationException("source name must not be blank.");
     }
+    XmlConvert.VerifyXmlChars(sourceName);
 }
 
 static string RequireRunnerTempPath(string path, string inputName)
@@ -440,6 +544,26 @@ static void DeleteRunnerTempFile(string path)
     {
         File.Delete(fullPath);
     }
+}
+
+static void WritePrivateFile(string path, Action<Stream> write)
+{
+    if (File.Exists(path))
+    {
+        File.Delete(path);
+    }
+    var options = new FileStreamOptions
+    {
+        Mode = FileMode.CreateNew,
+        Access = FileAccess.Write,
+        Share = FileShare.None,
+    };
+    if (!OperatingSystem.IsWindows())
+    {
+        options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    }
+    using var stream = new FileStream(path, options);
+    write(stream);
 }
 
 static void AppendGitHubEnv(string name, string value)
@@ -491,7 +615,10 @@ sealed record AuthCommand(
     string OpEnvFile,
     string OpMapFile,
     string DockerConfigPath,
+    string HostConfigPath,
+    string SourceConfigPath,
     string ConfiguredSourceNames,
+    string ConfiguredSourceNamesJson,
     string GitHubActor,
     string GitHubTokenForNuGetAuth)
 {
@@ -503,7 +630,10 @@ sealed record AuthCommand(
             GetEnv("NUGET_AUTH_OP_ENV_FILE"),
             GetEnv("NUGET_AUTH_OP_MAP_FILE"),
             GetEnv("NUGET_AUTH_DOCKER_CONFIG_PATH"),
+            GetEnv("NUGET_AUTH_HOST_CONFIG_PATH"),
+            GetEnv("NUGET_AUTH_SOURCE_CONFIG_PATH"),
             GetEnv("NUGET_AUTH_CONFIGURED_SOURCE_NAMES"),
+            GetEnv("NUGET_AUTH_CONFIGURED_SOURCE_NAMES_JSON"),
             GetEnv("GITHUB_ACTOR"),
             GetEnv("GITHUB_TOKEN_FOR_NUGET_AUTH"));
 

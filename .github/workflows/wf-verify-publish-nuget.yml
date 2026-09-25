@@ -118,6 +118,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      packages: read
     outputs:
       artifact-manifest: ${{ steps.pack.outputs.artifact-manifest }}
     env:

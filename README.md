@@ -71,6 +71,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
@@ -83,6 +84,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       runs-on: ubuntu-latest
@@ -100,6 +102,10 @@ jobs:
 .NET workflows accept an optional `NUGET_AUTH_JSON` secret for private package source credentials.
 The caller repository should commit non-secret package sources in `NuGet.Config`.
 The `name` values in `NUGET_AUTH_JSON` must match the package source keys in `NuGet.Config`.
+NuGet source names with punctuation, spaces, or Unicode are supported.
+For these names, host restore uses a temporary copy of the caller's `NuGet.Config` under `RUNNER_TEMP` with credentials added to it.
+The temporary config is removed after restore.
+Callers using `github://token` must grant `packages: read` on each reusable workflow call that restores packages.
 Multiple credentials are provided by adding more entries to the `sources` array.
 
 Literal single-feed shape:
@@ -154,6 +160,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       solution: CitizenId.slnx
