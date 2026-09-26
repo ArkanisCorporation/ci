@@ -65,6 +65,16 @@ on:
         type: string
         required: false
         default: ""
+      github-packages-auth:
+        description: Use the job-scoped GitHub token for caller-owner GitHub Packages sources in NuGet.Config.
+        type: boolean
+        required: false
+        default: false
+      nuget-source-config-path:
+        description: Optional caller NuGet.Config path when it is not in the repository root.
+        type: string
+        required: false
+        default: ""
       enable-cache:
         description: Restores and saves NuGet dependency cache with runs-on/cache when true. Set false for cold-deploy validation or runners without cache service access.
         type: boolean
@@ -162,12 +172,14 @@ jobs:
 
       - name: Prepare private NuGet auth references
         id: nuget-auth-prepare
-        if: env.NUGET_AUTH_JSON_PRESENT == 'true'
+        if: env.NUGET_AUTH_JSON_PRESENT == 'true' || inputs.github-packages-auth
         uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
         env:
           GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          github-packages-auth: ${{ inputs.github-packages-auth }}
+          source-config-path: ${{ inputs.nuget-source-config-path }}
           phase: prepare
           op-env-file: ${{ runner.temp }}/nuget-auth/op.env
           op-map-file: ${{ runner.temp }}/nuget-auth/op-map.json
@@ -189,14 +201,17 @@ jobs:
 
       - name: Apply private NuGet auth credentials
         id: nuget-auth
-        if: env.NUGET_AUTH_JSON_PRESENT == 'true'
+        if: env.NUGET_AUTH_JSON_PRESENT == 'true' || inputs.github-packages-auth
         uses: ./.ci/arkanis-ci/.github/actions/setup-nuget-auth
         env:
           GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          github-packages-auth: ${{ inputs.github-packages-auth }}
+          source-config-path: ${{ inputs.nuget-source-config-path }}
           phase: apply
           credential-mode: env
+          host-config-path: ${{ runner.temp }}/nuget-auth/host.NuGet.Config
           op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
 
       # Runners that keep NuGet's default packages folder on persistent disk advertise it with
@@ -230,7 +245,10 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore local .NET tools @ .config/dotnet-tools.json
-        run: dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+        run: |
+          config_args=()
+          if [[ -n "${RestoreConfigFile:-}" ]]; then config_args=(--configfile "$RestoreConfigFile"); fi
+          dotnet tool restore "${config_args[@]}" || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore "${config_args[@]}")
 
       - name: Setup kubectl @ ${{ inputs.kubectl-version }}
         uses: azure/setup-kubectl@v5.1.0
@@ -336,7 +354,8 @@ jobs:
           phase: cleanup
           op-env-file: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
           op-map-file: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
-          configured-source-names: ${{ steps.nuget-auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.nuget-auth.outputs.source-names-json }}
+          host-config-path: ${{ steps.nuget-auth.outputs.host-config-path }}
 
       - name: Remove temporary kubeconfig @ ${{ inputs.environment-name }}
         if: always() && env.HAS_KUBE_CONFIG == 'true'

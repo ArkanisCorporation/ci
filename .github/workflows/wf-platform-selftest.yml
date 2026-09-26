@@ -78,6 +78,9 @@ jobs:
       - name: Validate workflow contracts @ scripts/validate-workflows.cs
         run: dotnet run --file scripts/validate-workflows.cs
 
+      - name: Verify NuGet auth source names @ tests/nuget-auth-source-names.cs
+        run: dotnet run --file tests/nuget-auth-source-names.cs --no-launch-profile
+
       - name: Publish summary @ ${{ github.run_id }}
         if: always()
         env:

@@ -6,6 +6,59 @@ on:
 permissions: {}
 
 jobs:
+  github-packages:
+    # Expected: success without NUGET_AUTH_JSON or a stored token.
+    name: Setup caller-owner GitHub Packages auth
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN_FOR_NUGET_AUTH: fixture-github-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Prepare GitHub Packages auth
+        id: prepare
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: prepare
+          github-packages-auth: "true"
+          source-config-path: tests/fixtures/action-contract/github-packages.NuGet.Config
+
+      - name: Apply GitHub Packages auth
+        id: auth
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: apply
+          github-packages-auth: "true"
+          source-config-path: tests/fixtures/action-contract/github-packages.NuGet.Config
+          host-config-path: ${{ runner.temp }}/nuget-auth/fixture-host.NuGet.Config
+
+      - name: Verify generated host config
+        env:
+          SOURCE_NAMES_JSON: ${{ steps.auth.outputs.source-names-json }}
+          NUGET_CONFIG_PATH: ${{ steps.auth.outputs.host-config-path }}
+        run: |
+          test "$SOURCE_NAMES_JSON" = '["github.com-ArkanisCorporation"]'
+          test -f "$NUGET_CONFIG_PATH"
+          dotnet nuget list source --configfile "$NUGET_CONFIG_PATH" >/dev/null
+        shell: bash
+
+      - name: Cleanup GitHub Packages auth
+        if: always() && steps.auth.outputs.configured == 'true'
+        uses: ./.github/actions/setup-nuget-auth
+        with:
+          phase: cleanup
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
+          host-config-path: ${{ steps.auth.outputs.host-config-path }}
+
   env-credentials:
     # Expected: success.
     name: Setup NuGet auth env credentials
@@ -71,7 +124,7 @@ jobs:
         uses: ./.github/actions/setup-nuget-auth
         with:
           phase: cleanup
-          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
 
       - name: Verify fake NuGet auth cleanup
         run: |
@@ -157,7 +210,7 @@ jobs:
         uses: ./.github/actions/setup-nuget-auth
         with:
           phase: cleanup
-          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
           op-env-file: ${{ steps.prepare.outputs.op-env-file }}
           op-map-file: ${{ steps.prepare.outputs.op-map-file }}
 
@@ -224,7 +277,8 @@ jobs:
         uses: ./.github/actions/setup-nuget-auth
         with:
           phase: cleanup
-          configured-source-names: ${{ steps.auth.outputs.source-names }}
+          configured-source-names-json: ${{ steps.auth.outputs.source-names-json }}
+          credential-mode: docker-config
           docker-config-path: ${{ steps.auth.outputs.docker-config-path }}
 
       - name: Verify fake NuGet BuildKit cleanup

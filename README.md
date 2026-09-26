@@ -71,6 +71,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
@@ -83,6 +84,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       runs-on: ubuntu-latest
@@ -97,9 +99,35 @@ jobs:
 
 ## Private NuGet Restore
 
-.NET workflows accept an optional `NUGET_AUTH_JSON` secret for private package source credentials.
+.NET workflows can authenticate to the caller owner's GitHub Packages feed with `github-packages-auth: true`.
+The shared workflow reads the exact `https://nuget.pkg.github.com/<caller-owner>/index.json` source from the caller's `NuGet.Config` and binds `github.actor` and the job-scoped `github.token` to its existing source name.
+No stored token or `NUGET_AUTH_JSON` secret is needed for this path.
+Grant `packages: read` in every caller job in the reusable workflow chain, and grant the caller repository Actions access to the package.
+GitHub Packages authentication is unavailable for fork pull requests.
+Set `nuget-source-config-path` if the caller config is outside the repository root.
+
+```yaml
+jobs:
+  dotnet-test:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write
+    with:
+      solution: ArkanisOverlay.sln
+      github-packages-auth: true
+```
+
+Container workflows also require `nuget-build-secret: true` and a Dockerfile restore step that mounts the `nuget_config` BuildKit secret.
+
+For other private feeds, workflows still accept the optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
 The caller repository should commit non-secret package sources in `NuGet.Config`.
 The `name` values in `NUGET_AUTH_JSON` must match the package source keys in `NuGet.Config`.
+NuGet source names with punctuation, spaces, or Unicode are supported.
+For these names, host restore uses a temporary copy of the caller's `NuGet.Config` under `RUNNER_TEMP` with credentials added to it.
+The temporary config is removed after restore.
+Callers using `github://token` must grant `packages: read` on each reusable workflow call that restores packages.
 Multiple credentials are provided by adding more entries to the `sources` array.
 
 Literal single-feed shape:
@@ -120,7 +148,7 @@ Literal single-feed shape:
 }
 ```
 
-Mixed GitHub Packages and 1Password shape:
+Explicit GitHub Packages and 1Password shape for callers not using `github-packages-auth`:
 
 ```json
 {
@@ -154,6 +182,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       solution: CitizenId.slnx

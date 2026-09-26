@@ -1,5 +1,5 @@
 # Summary:
-#   Prepares, applies, or cleans up private NuGet restore credentials from NUGET_AUTH_JSON.
+#   Prepares, applies, or cleans up private NuGet restore credentials.
 # Remarks:
 #   This action reads secret inputs through environment variables passed to a .NET file script.
 #   It writes only masked credentials to GITHUB_ENV and non-sensitive metadata to GITHUB_OUTPUT.
@@ -12,6 +12,10 @@ inputs:
     description: Optional NUGET_AUTH_JSON document containing private package source credentials.
     required: false
     default: ""
+  github-packages-auth:
+    description: Bind the job-scoped GitHub token to exact caller-owner GitHub Packages sources in NuGet.Config.
+    required: false
+    default: "false"
   phase:
     description: Credential lifecycle phase.
     required: false
@@ -32,8 +36,20 @@ inputs:
     description: Temporary Docker BuildKit NuGet.Config secret file path under RUNNER_TEMP.
     required: false
     default: ""
+  host-config-path:
+    description: Temporary host NuGet.Config path under RUNNER_TEMP for source names that require config credentials.
+    required: false
+    default: ""
+  source-config-path:
+    description: Caller NuGet.Config to copy for host credentials. Defaults to the nearest NuGet.Config.
+    required: false
+    default: ""
   configured-source-names:
     description: Comma-delimited source names to clear during cleanup.
+    required: false
+    default: ""
+  configured-source-names-json:
+    description: JSON array of source names to clear during cleanup, including names containing commas.
     required: false
     default: ""
 
@@ -45,11 +61,17 @@ outputs:
     description: True when NUGET_AUTH_JSON contains op:// references.
     value: ${{ steps.configure.outputs.op-required }}
   source-count:
-    description: Number of credential sources in NUGET_AUTH_JSON.
+    description: Number of credential sources configured for restore.
     value: ${{ steps.configure.outputs.source-count }}
   source-names:
-    description: Comma-delimited non-secret source names.
+    description: Legacy comma-delimited source names, empty if any name is not environment-safe.
     value: ${{ steps.configure.outputs.source-names }}
+  source-names-json:
+    description: JSON array of non-secret source names.
+    value: ${{ steps.configure.outputs.source-names-json }}
+  host-config-path:
+    description: Temporary host NuGet.Config path when config credentials are required.
+    value: ${{ steps.configure.outputs.host-config-path }}
   op-env-file:
     description: Temporary 1Password env file path.
     value: ${{ steps.configure.outputs.op-env-file }}
@@ -69,10 +91,15 @@ runs:
       shell: bash
       env:
         NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_GITHUB_PACKAGES: ${{ inputs.github-packages-auth }}
+        NUGET_AUTH_UNTRUSTED_FORK: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.head.repo.fork }}
         NUGET_AUTH_PHASE: ${{ inputs.phase }}
         NUGET_AUTH_CREDENTIAL_MODE: ${{ inputs.credential-mode }}
         NUGET_AUTH_OP_ENV_FILE: ${{ inputs.op-env-file }}
         NUGET_AUTH_OP_MAP_FILE: ${{ inputs.op-map-file }}
         NUGET_AUTH_DOCKER_CONFIG_PATH: ${{ inputs.docker-config-path }}
+        NUGET_AUTH_HOST_CONFIG_PATH: ${{ inputs.host-config-path }}
+        NUGET_AUTH_SOURCE_CONFIG_PATH: ${{ inputs.source-config-path }}
         NUGET_AUTH_CONFIGURED_SOURCE_NAMES: ${{ inputs.configured-source-names }}
+        NUGET_AUTH_CONFIGURED_SOURCE_NAMES_JSON: ${{ inputs.configured-source-names-json }}
         GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}

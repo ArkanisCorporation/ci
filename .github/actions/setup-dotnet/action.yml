@@ -71,6 +71,14 @@ inputs:
     description: Optional NUGET_AUTH_JSON document containing private package source credentials.
     required: false
     default: ""
+  github-packages-auth:
+    description: Use the job-scoped GitHub token for caller-owner GitHub Packages sources in NuGet.Config.
+    required: false
+    default: "false"
+  nuget-source-config-path:
+    description: Optional caller NuGet.Config path for source names requiring temporary host credentials.
+    required: false
+    default: ""
   op-service-account-token:
     description: Optional 1Password service account token used when nuget-auth-json contains op:// references.
     required: false
@@ -110,11 +118,14 @@ runs:
 
     - name: Prepare private NuGet auth references
       id: nuget-auth-prepare
-      if: inputs.nuget-auth-json != ''
+      if: inputs.nuget-auth-json != '' || inputs.github-packages-auth == 'true'
       run: dotnet run --file "$GITHUB_ACTION_PATH/../setup-nuget-auth/configure-nuget-auth.cs" --no-launch-profile
       shell: bash
       env:
         NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_GITHUB_PACKAGES: ${{ inputs.github-packages-auth }}
+        NUGET_AUTH_UNTRUSTED_FORK: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.head.repo.fork }}
+        NUGET_AUTH_SOURCE_CONFIG_PATH: ${{ inputs.nuget-source-config-path }}
         NUGET_AUTH_PHASE: prepare
         NUGET_AUTH_OP_ENV_FILE: ${{ runner.temp }}/nuget-auth/op.env
         NUGET_AUTH_OP_MAP_FILE: ${{ runner.temp }}/nuget-auth/op-map.json
@@ -138,13 +149,17 @@ runs:
 
     - name: Apply private NuGet auth credentials
       id: nuget-auth
-      if: inputs.nuget-auth-json != ''
+      if: inputs.nuget-auth-json != '' || inputs.github-packages-auth == 'true'
       run: dotnet run --file "$GITHUB_ACTION_PATH/../setup-nuget-auth/configure-nuget-auth.cs" --no-launch-profile
       shell: bash
       env:
         NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_GITHUB_PACKAGES: ${{ inputs.github-packages-auth }}
+        NUGET_AUTH_UNTRUSTED_FORK: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.head.repo.fork }}
         NUGET_AUTH_PHASE: apply
         NUGET_AUTH_CREDENTIAL_MODE: env
+        NUGET_AUTH_HOST_CONFIG_PATH: ${{ runner.temp }}/nuget-auth/host.NuGet.Config
+        NUGET_AUTH_SOURCE_CONFIG_PATH: ${{ inputs.nuget-source-config-path }}
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
         GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ env.GITHUB_TOKEN_FOR_NUGET_AUTH }}
 
@@ -241,7 +256,9 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         cd "$WORKING_DIRECTORY"
-        dotnet tool restore || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore)
+        config_args=()
+        if [[ -n "${RestoreConfigFile:-}" ]]; then config_args=(--configfile "$RestoreConfigFile"); fi
+        dotnet tool restore "${config_args[@]}" || (echo "First dotnet tool restore failed; retrying once." && dotnet tool restore "${config_args[@]}")
       shell: bash
 
     - name: Restore solution with lock file
@@ -251,7 +268,9 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         cd "$WORKING_DIRECTORY"
-        dotnet restore "$SOLUTION" --locked-mode
+        config_args=()
+        if [[ -n "${RestoreConfigFile:-}" ]]; then config_args=(--configfile "$RestoreConfigFile"); fi
+        dotnet restore "$SOLUTION" --locked-mode "${config_args[@]}"
       shell: bash
 
     - name: Restore solution
@@ -261,7 +280,9 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         cd "$WORKING_DIRECTORY"
-        dotnet restore "$SOLUTION"
+        config_args=()
+        if [[ -n "${RestoreConfigFile:-}" ]]; then config_args=(--configfile "$RestoreConfigFile"); fi
+        dotnet restore "$SOLUTION" "${config_args[@]}"
       shell: bash
 
     - name: Clear private NuGet auth credentials
@@ -272,4 +293,5 @@ runs:
         NUGET_AUTH_PHASE: cleanup
         NUGET_AUTH_OP_ENV_FILE: ${{ steps.nuget-auth-prepare.outputs.op-env-file }}
         NUGET_AUTH_OP_MAP_FILE: ${{ steps.nuget-auth-prepare.outputs.op-map-file }}
-        NUGET_AUTH_CONFIGURED_SOURCE_NAMES: ${{ steps.nuget-auth.outputs.source-names }}
+        NUGET_AUTH_HOST_CONFIG_PATH: ${{ steps.nuget-auth.outputs.host-config-path }}
+        NUGET_AUTH_CONFIGURED_SOURCE_NAMES_JSON: ${{ steps.nuget-auth.outputs.source-names-json }}

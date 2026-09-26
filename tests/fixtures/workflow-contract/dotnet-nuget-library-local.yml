@@ -12,6 +12,7 @@ jobs:
     uses: ./.github/workflows/wf-dotnet-format.yml
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
@@ -34,6 +35,7 @@ jobs:
     uses: ./.github/workflows/wf-dotnet-test.yml
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       runs-on: ubuntu-latest

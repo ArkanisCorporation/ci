@@ -28,9 +28,9 @@ Audience: consumers and platform maintainers.
 
 | Workflow | Minimum caller permissions | Main outputs |
 |---|---|---|
-| `wf-dotnet-format.yml` | `contents: read` | format diagnostics, CleanupCode diff diagnostics, metadata, manifest |
-| `wf-dotnet-test.yml` | `contents: read`<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
-| `wf-setup-dotnet-generated-code.yml` | `contents: read` | command logs, changed-file list, diff stat, diff preview, manifest |
+| `wf-dotnet-format.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | format diagnostics, CleanupCode diff diagnostics, metadata, manifest |
+| `wf-dotnet-test.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore<br>`pull-requests: write` only for coverage comments | test results, coverage files, binlog, metadata, manifest |
+| `wf-setup-dotnet-generated-code.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | command logs, changed-file list, diff stat, diff preview, manifest |
 | `wf-node-lint.yml` | `contents: read` | install and lint logs, metadata, manifest |
 | `wf-node-test.yml` | `contents: read` | install and test logs, metadata, manifest |
 | `wf-node-build.yml` | `contents: read` | install and build logs, metadata, manifest |
@@ -38,11 +38,11 @@ Audience: consumers and platform maintainers.
 | `wf-verify-release-semantic.yml` | `contents: write` | release diagnostics and predicted release outputs |
 | `wf-release-semantic.yml` | `contents: write`<br>`issues: write`<br>`pull-requests: write` | release diagnostics and release outputs |
 | `wf-release-backpropagation.yml` | `contents: write`<br>`pull-requests: write` | pull request summary |
-| `wf-verify-publish-nuget.yml` | `contents: read` | `.nupkg`, `.snupkg`, manifest |
-| `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
-| `wf-verify-publish-container-dotnet.yml` | `contents: read` | Buildx metadata, manifest |
+| `wf-verify-publish-nuget.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | `.nupkg`, `.snupkg`, manifest |
+| `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`packages: read` for GitHub Packages restore<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
+| `wf-verify-publish-container-dotnet.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | Buildx metadata, manifest |
 | `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
-| `wf-verify-deploy-k8s-aspire.yml` | `contents: read` | verification manifest |
+| `wf-verify-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | verification manifest |
 | `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
 
@@ -101,6 +101,8 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `image-tag` | string | no | `""` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `kubectl-version` | string | no | `"v1.36.2"` | n/a |
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
@@ -120,6 +122,8 @@ Schema: `schemas/workflow-inputs/wf-dotnet-format.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `checkout-submodules` | string | no | `"false"` | Allowed: "false", "true", "recursive" |
 | `solution` | string | yes | none | n/a |
 | `working-directory` | string | no | `"."` | n/a |
@@ -151,6 +155,8 @@ Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `checkout-submodules` | string | no | `"false"` | Allowed: "false", "true", "recursive" |
 | `solution` | string | yes | none | n/a |
 | `configuration` | string | no | `"Release"` | n/a |
@@ -299,6 +305,8 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
 | `build-args` | string | no | `""` | n/a |
 | `nuget-build-secret` | boolean | no | `false` | Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore. |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `sdk-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
 | `version-working-directory` | string | no | `"."` | n/a |
@@ -330,6 +338,8 @@ Schema: `schemas/workflow-inputs/wf-publish-nuget.schema.json`.
 | `version` | string | yes | none | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `configuration` | string | no | `"Release"` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `source` | string | no | `"https://api.nuget.org/v3/index.json"` | n/a |
@@ -399,6 +409,8 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
 | `runs-on-self-hosted` | boolean | no | `false` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `solution` | string | yes | none | n/a |
 | `configuration` | string | no | `"Release"` | n/a |
 | `restore-locked-mode` | boolean | no | `true` | n/a |
@@ -430,6 +442,8 @@ Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
 | `image-tag` | string | no | `""` | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `kubectl-version` | string | no | `"v1.36.2"` | n/a |
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
@@ -459,6 +473,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
 | `build-args` | string | no | `""` | n/a |
 | `nuget-build-secret` | boolean | no | `false` | Mount a generated NuGet.Config as a BuildKit secret for Dockerfile restore. |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `sdk-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
 | `version-working-directory` | string | no | `"."` | n/a |
@@ -487,6 +503,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-nuget.schema.json`.
 | `version` | string | yes | none | n/a |
 | `dotnet-version` | string | no | `"10.0.x"` | n/a |
 | `global-json-file` | string | no | `""` | n/a |
+| `github-packages-auth` | boolean | no | `false` | Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config. |
+| `nuget-source-config-path` | string | no | `""` | Optional caller NuGet.Config path when it is not in the repository root. |
 | `configuration` | string | no | `"Release"` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
 | `include-symbols` | boolean | no | `true` | n/a |
@@ -532,10 +550,35 @@ External services and caches are gray dashed nodes.
 
 ## Private NuGet Restore Credentials
 
-.NET workflows that restore packages accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
+.NET workflows that restore packages accept `github-packages-auth: true` to use the job-scoped `GITHUB_TOKEN` without a stored token or `NUGET_AUTH_JSON` secret.
+The action discovers existing source names only for the exact `https://nuget.pkg.github.com/<caller-owner>/index.json` endpoint in the caller's `NuGet.Config`.
+It rejects lookalike hosts, other owners, duplicate effective source keys, missing matching sources, and fork pull requests.
+The token is bound through a temporary host config or Docker BuildKit secret config and removed after restore.
+Every caller and shared job in the workflow chain needs `packages: read`, and the package must grant the caller repository Actions access.
+Use `nuget-source-config-path` when the config is outside the repository root.
+Docker workflows also require `nuget-build-secret: true` and a `nuget_config` secret mount in the Dockerfile.
+
+```yaml
+jobs:
+  dotnet-test:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write
+    with:
+      solution: ArkanisOverlay.sln
+      github-packages-auth: true
+```
+
+For other private feeds, .NET workflows accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
 `NUGET_AUTH_JSON` is a versioned JSON document with one or more `sources`.
 Each `name` must match a package source key in the caller repository's committed `NuGet.Config`.
-Host restore uses NuGet's `NuGetPackageSourceCredentials_{name}` environment variable convention.
+The two auth methods can be combined when they describe distinct source names.
+For explicit JSON credentials alone, host restore uses NuGet's `NuGetPackageSourceCredentials_{name}` environment variable convention for environment-safe names and values.
+Other valid source names, including `github.com-ArkanisCorporation`, spaces, commas, and Unicode, use a temporary credentialed copy of the caller's `NuGet.Config` under `RUNNER_TEMP`.
+The copy retains package source mapping and is deleted after restore.
+Callers can set `nuget-source-config-path` on the setup and pack actions or `source-config-path` on the auth action when the config is outside the action's current directory tree.
 Dockerfile restore uses a generated `NuGet.Config` mounted through Docker Buildx `secret-files`.
 The generated Docker config is temporary secret material under `RUNNER_TEMP`.
 It must not be cached, uploaded, copied into images, written to summaries, or passed through Docker build args.
@@ -575,7 +618,7 @@ Example `NUGET_AUTH_JSON`:
 }
 ```
 
-Example reusable workflow call:
+Example reusable workflow call using explicit JSON credentials:
 
 ```yaml
 jobs:
@@ -583,6 +626,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-test.yml@v1
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     with:
       solution: src/Product.slnx
@@ -592,6 +636,12 @@ jobs:
 ```
 
 Container workflows require `nuget-build-secret: true` when package restore happens inside the Dockerfile.
+
+| Symptom | Likely cause | Confirm | Fix and prevention |
+|---|---|---|---|
+| `github-packages-auth` reports no matching source | Caller config has no exact caller-owner GitHub Packages URL or the config path is elsewhere. | Inspect committed `NuGet.Config` source values and `nuget-source-config-path`. | Commit the exact source URL or set the config path; keep source names aligned with package source mapping. |
+| GitHub Packages restore returns 401 or 403 | Token lacks package read permission or the package has not granted Actions access to the caller repository. | Check every reusable workflow caller permission layer and package Actions access settings. | Grant `packages: read` throughout the call chain and add the caller repository to package Actions access. |
+| Fork pull request reports GitHub Packages auth unavailable | A private package token would be exposed to untrusted PR code. | Inspect the event's head repository and fork flag. | Run credentialed validation from a trusted branch; keep fork validation free of private feed credentials. |
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -615,6 +665,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-dotnet-format.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       solution: Product.slnx
       checkout-submodules: "true"
@@ -859,6 +910,7 @@ jobs:
     uses: ArkanisCorporation/ci/.github/workflows/wf-setup-dotnet-generated-code.yml@v1
     permissions:
       contents: read
+      packages: read
     with:
       runs-on: ubuntu-latest
       runs-on-self-hosted: false
