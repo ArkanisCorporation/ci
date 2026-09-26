@@ -13,6 +13,8 @@ Last verified: 2026-09-25.
 - GitHub GITHUB_TOKEN permissions: https://docs.github.com/actions/reference/authentication-in-a-workflow
 - GitHub fork pull request workflow restrictions: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
 - GitHub Packages with Actions: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
+- GitHub Packages access permissions and Actions access: https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages
+- GitHub NuGet registry: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-nuget-registry
 - GitHub secrets in conditionals: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - GitHub OIDC with reusable workflows: https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
 - GitHub composite action metadata: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax

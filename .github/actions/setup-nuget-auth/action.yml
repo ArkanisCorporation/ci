@@ -1,5 +1,5 @@
 # Summary:
-#   Prepares, applies, or cleans up private NuGet restore credentials from NUGET_AUTH_JSON.
+#   Prepares, applies, or cleans up private NuGet restore credentials.
 # Remarks:
 #   This action reads secret inputs through environment variables passed to a .NET file script.
 #   It writes only masked credentials to GITHUB_ENV and non-sensitive metadata to GITHUB_OUTPUT.
@@ -12,6 +12,10 @@ inputs:
     description: Optional NUGET_AUTH_JSON document containing private package source credentials.
     required: false
     default: ""
+  github-packages-auth:
+    description: Bind the job-scoped GitHub token to exact caller-owner GitHub Packages sources in NuGet.Config.
+    required: false
+    default: "false"
   phase:
     description: Credential lifecycle phase.
     required: false
@@ -57,7 +61,7 @@ outputs:
     description: True when NUGET_AUTH_JSON contains op:// references.
     value: ${{ steps.configure.outputs.op-required }}
   source-count:
-    description: Number of credential sources in NUGET_AUTH_JSON.
+    description: Number of credential sources configured for restore.
     value: ${{ steps.configure.outputs.source-count }}
   source-names:
     description: Legacy comma-delimited source names, empty if any name is not environment-safe.
@@ -87,6 +91,8 @@ runs:
       shell: bash
       env:
         NUGET_AUTH_JSON_INPUT: ${{ inputs.nuget-auth-json }}
+        NUGET_AUTH_GITHUB_PACKAGES: ${{ inputs.github-packages-auth }}
+        NUGET_AUTH_UNTRUSTED_FORK: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.head.repo.fork }}
         NUGET_AUTH_PHASE: ${{ inputs.phase }}
         NUGET_AUTH_CREDENTIAL_MODE: ${{ inputs.credential-mode }}
         NUGET_AUTH_OP_ENV_FILE: ${{ inputs.op-env-file }}

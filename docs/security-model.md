@@ -74,7 +74,11 @@ If reusable platform packaging is desired, call `dotnet-pack-nuget` earlier in t
 
 ## Private NuGet Restore Credentials
 
-Private restore credentials are allowed only when the caller explicitly passes `NUGET_AUTH_JSON`.
+Private restore credentials are allowed only when the caller explicitly passes `NUGET_AUTH_JSON` or enables `github-packages-auth`.
+The GitHub Packages path uses the job-scoped `github.token` only for the exact caller-owner NuGet Packages endpoint in the caller's `NuGet.Config`.
+It fails for fork pull requests, duplicate effective source keys, and missing matching sources.
+Callers must grant `packages: read` through every reusable workflow permission layer and give the caller repository Actions access to the package.
+The GitHub Packages token is bound to a temporary host or BuildKit config even when the source name could be represented as an environment variable.
 Workflows also accept `OP_SERVICE_ACCOUNT_TOKEN` when any `NUGET_AUTH_JSON` value starts with `op://`.
 The 1Password service account token is only for trusted workflows and is never passed to Docker Buildx.
 The workflow resolves `op://` values through `1password/load-secrets-action@v4`.

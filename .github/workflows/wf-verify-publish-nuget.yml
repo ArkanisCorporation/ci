@@ -42,6 +42,16 @@ on:
         type: string
         required: false
         default: ""
+      github-packages-auth:
+        description: Use the job-scoped GitHub token for caller-owner GitHub Packages sources in NuGet.Config.
+        type: boolean
+        required: false
+        default: false
+      nuget-source-config-path:
+        description: Optional caller NuGet.Config path when it is not in the repository root.
+        type: string
+        required: false
+        default: ""
       configuration:
         description: Build configuration.
         type: string
@@ -171,6 +181,8 @@ jobs:
           artifact-retention-days: ${{ inputs.artifact-retention-days }}
           workflow-name: wf-verify-publish-nuget
           nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          github-packages-auth: ${{ inputs.github-packages-auth }}
+          nuget-source-config-path: ${{ inputs.nuget-source-config-path }}
           op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Upload package artifacts @ ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}

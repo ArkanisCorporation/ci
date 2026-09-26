@@ -82,6 +82,16 @@ on:
         type: boolean
         required: false
         default: false
+      github-packages-auth:
+        description: Use the job-scoped GitHub token for caller-owner GitHub Packages sources in NuGet.Config.
+        type: boolean
+        required: false
+        default: false
+      nuget-source-config-path:
+        description: Optional caller NuGet.Config path when it is not in the repository root.
+        type: string
+        required: false
+        default: ""
       sdk-version:
         description: .NET SDK version used by the dotnet-setversion action.
         type: string
@@ -257,10 +267,16 @@ jobs:
           project: ${{ inputs.version-project }}
           tool-version: ${{ inputs.version-tool-version }}
 
-      - name: Require private NuGet auth JSON
-        if: inputs.nuget-build-secret && env.NUGET_AUTH_JSON_PRESENT != 'true'
+      - name: Require private NuGet auth
+        if: inputs.nuget-build-secret && env.NUGET_AUTH_JSON_PRESENT != 'true' && !inputs.github-packages-auth
         run: |
-          echo "::error::NUGET_AUTH_JSON is required when nuget-build-secret is true."
+          echo "::error::NUGET_AUTH_JSON or github-packages-auth is required when nuget-build-secret is true."
+          exit 2
+
+      - name: Require NuGet BuildKit secret for GitHub Packages auth
+        if: inputs.github-packages-auth && !inputs.nuget-build-secret
+        run: |
+          echo "::error::nuget-build-secret must be true when github-packages-auth is true."
           exit 2
 
       - name: Prepare private NuGet auth references
@@ -271,6 +287,8 @@ jobs:
           GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          github-packages-auth: ${{ inputs.github-packages-auth }}
+          source-config-path: ${{ inputs.nuget-source-config-path }}
           phase: prepare
           op-env-file: ${{ runner.temp }}/nuget-auth/op.env
           op-map-file: ${{ runner.temp }}/nuget-auth/op-map.json
@@ -298,6 +316,8 @@ jobs:
           GITHUB_TOKEN_FOR_NUGET_AUTH: ${{ github.token }}
         with:
           nuget-auth-json: ${{ secrets.NUGET_AUTH_JSON }}
+          github-packages-auth: ${{ inputs.github-packages-auth }}
+          source-config-path: ${{ inputs.nuget-source-config-path }}
           phase: apply
           credential-mode: docker-config
           docker-config-path: ${{ runner.temp }}/nuget-auth/NuGet.Config

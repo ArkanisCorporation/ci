@@ -30,7 +30,8 @@ The consumer workflow should run `NuGet/login` between those two actions in the 
 
 ## Private NuGet Restore
 
-.NET reusable workflows accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets.
+.NET reusable workflows accept `github-packages-auth: true` to bind the job-scoped GitHub token to exact caller-owner GitHub Packages sources from the caller's `NuGet.Config`.
+They also accept optional `NUGET_AUTH_JSON` and `OP_SERVICE_ACCOUNT_TOKEN` secrets for other private feeds.
 `NUGET_AUTH_JSON` may contain multiple package source credentials, including literal values, `op://` 1Password references, `github://actor`, and `github://token`.
 Container workflows only pass private restore credentials to Docker BuildKit when `nuget-build-secret` is true.
 Dockerfiles that need the generated config should mount the `nuget_config` secret during restore.

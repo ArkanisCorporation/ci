@@ -45,6 +45,7 @@ Create `NUGET_AUTH_JSON` in the caller repository or organization secrets.
 Pass it explicitly to the reusable workflow as `NUGET_AUTH_JSON`.
 When using 1Password references, also pass `OP_SERVICE_ACCOUNT_TOKEN`.
 For GitHub Packages in the same access boundary, use `github://actor` and `github://token`.
+ADR-0007 adds a simpler opt-in GitHub Packages path that derives the source name from `NuGet.Config` and does not require a JSON secret.
 For Dockerfile restore, set `nuget-build-secret: true` and mount `id=nuget_config` in the Dockerfile restore step.
 
 ## References

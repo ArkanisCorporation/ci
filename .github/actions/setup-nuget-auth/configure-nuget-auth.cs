@@ -14,7 +14,7 @@ using System.Xml.Linq;
 
 /*
  * Summary:
- *   Converts NUGET_AUTH_JSON into NuGet environment credentials or a temporary Docker BuildKit NuGet.Config secret.
+ *   Converts explicit credentials and opted-in GitHub Packages sources into NuGet restore credentials.
  *
  * Remarks:
  *   The script is intentionally environment-driven so secret JSON never appears in process arguments.
@@ -50,7 +50,7 @@ catch (Exception exception) when (exception is InvalidOperationException or Json
 
 static void Prepare(AuthCommand command)
 {
-    var document = ParseDocument(command.AuthJson);
+    var document = ParseDocument(command);
     var opEntries = BuildOpEntries(document).ToArray();
 
     WriteCommonOutputs(document);
@@ -78,7 +78,7 @@ static void Prepare(AuthCommand command)
 
 static void Apply(AuthCommand command)
 {
-    var document = ParseDocument(command.AuthJson);
+    var document = ParseDocument(command);
     var credentials = ResolveCredentials(document, command).ToArray();
     var includesEnv = ModeIncludes(command.CredentialMode, "env");
     var includesDockerConfig = ModeIncludes(command.CredentialMode, "docker-config");
@@ -94,8 +94,8 @@ static void Apply(AuthCommand command)
         Mask(credential.EnvironmentValue);
     }
 
-    var usesHostConfig = includesEnv && credentials.Any(credential => !IsEnvironmentSourceName(credential.Name)
-        || !IsEnvironmentCredentialValue(credential));
+    var usesHostConfig = includesEnv && (command.GitHubPackagesAuth || credentials.Any(credential => !IsEnvironmentSourceName(credential.Name)
+        || !IsEnvironmentCredentialValue(credential)));
     if (usesHostConfig)
     {
         var hostConfigPath = RequireRunnerTempPath(command.HostConfigPath, "host-config-path");
@@ -183,19 +183,30 @@ static void Cleanup(AuthCommand command)
     WriteOutput("docker-config-path", string.Empty);
 }
 
-static NuGetAuthDocument ParseDocument(string authJson)
+static NuGetAuthDocument ParseDocument(AuthCommand command)
 {
-    if (string.IsNullOrWhiteSpace(authJson))
+    if (string.IsNullOrWhiteSpace(command.AuthJson) && !command.GitHubPackagesAuth)
     {
-        throw new InvalidOperationException("nuget-auth-json is required for prepare and apply phases.");
+        throw new InvalidOperationException("nuget-auth-json or github-packages-auth is required for prepare and apply phases.");
     }
 
-    var document = JsonSerializer.Deserialize<NuGetAuthDocument>(authJson, JsonOptions.Strict)
-        ?? throw new InvalidOperationException("nuget-auth-json must be a JSON object.");
+    var document = string.IsNullOrWhiteSpace(command.AuthJson)
+        ? new NuGetAuthDocument { Version = 1 }
+        : JsonSerializer.Deserialize<NuGetAuthDocument>(command.AuthJson, JsonOptions.Strict)
+            ?? throw new InvalidOperationException("nuget-auth-json must be a JSON object.");
 
     if (document.Version != 1)
     {
         throw new InvalidOperationException("NUGET_AUTH_JSON version must be 1.");
+    }
+
+    if (command.GitHubPackagesAuth)
+    {
+        if (command.UntrustedFork)
+        {
+            throw new InvalidOperationException("github-packages-auth is unavailable for fork pull requests.");
+        }
+        document.Sources.AddRange(DiscoverGitHubPackageSources(command));
     }
 
     if (document.Sources.Count == 0)
@@ -396,9 +407,19 @@ static string FindSourceConfig(string configuredPath)
     throw new InvalidOperationException("A NuGet.Config is required for source names that cannot use environment credentials. Set source-config-path.");
 }
 
+static XDocument LoadNuGetConfig(string path)
+{
+    using var reader = XmlReader.Create(path, new XmlReaderSettings
+    {
+        DtdProcessing = DtdProcessing.Prohibit,
+        XmlResolver = null,
+    });
+    return XDocument.Load(reader);
+}
+
 static XDocument BuildHostConfig(string sourceConfigPath, IReadOnlyCollection<ResolvedCredential> credentials)
 {
-    var document = XDocument.Load(sourceConfigPath);
+    var document = LoadNuGetConfig(sourceConfigPath);
     var root = document.Root;
     if (root?.Name.LocalName != "configuration")
     {
@@ -436,6 +457,76 @@ static XDocument BuildHostConfig(string sourceConfigPath, IReadOnlyCollection<Re
         credentialsElement.Add(sourceElement);
     }
     return document;
+}
+
+static IEnumerable<NuGetAuthSource> DiscoverGitHubPackageSources(AuthCommand command)
+{
+    if (string.IsNullOrWhiteSpace(command.GitHubRepositoryOwner))
+    {
+        throw new InvalidOperationException("GITHUB_REPOSITORY_OWNER is required for github-packages-auth.");
+    }
+
+    var config = LoadNuGetConfig(FindSourceConfig(command.SourceConfigPath));
+    if (config.Root?.Name.LocalName != "configuration")
+    {
+        throw new InvalidOperationException("source-config-path must contain a NuGet configuration root.");
+    }
+
+    var effectiveSources = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
+    foreach (var source in config.Root.Element("packageSources")?.Elements() ?? [])
+    {
+        var name = (string?)source.Attribute("key");
+        if (source.Name.LocalName == "clear")
+        {
+            effectiveSources.Clear();
+        }
+        else if (source.Name.LocalName == "remove" && name is not null)
+        {
+            effectiveSources.Remove(name);
+        }
+        else if (source.Name.LocalName == "add" && name is not null)
+        {
+            if (!effectiveSources.TryAdd(name, source))
+            {
+                throw new InvalidOperationException($"duplicate package source key {name} in source-config-path.");
+            }
+        }
+    }
+
+    var matches = new List<NuGetAuthSource>();
+    foreach (var source in effectiveSources.Values)
+    {
+        var name = (string?)source.Attribute("key");
+        var url = (string?)source.Attribute("value");
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(url)
+            || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.Host, "nuget.pkg.github.com", StringComparison.OrdinalIgnoreCase)
+            || !uri.IsDefaultPort
+            || uri.UserInfo.Length != 0
+            || uri.Query.Length != 0
+            || uri.Fragment.Length != 0
+            || !string.Equals(uri.AbsolutePath, $"/{command.GitHubRepositoryOwner}/index.json", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        matches.Add(new NuGetAuthSource
+        {
+            Name = name,
+            Source = url,
+            Username = "github://actor",
+            Password = "github://token",
+            ValidAuthenticationTypes = "Basic",
+            ProtocolVersion = (string?)source.Attribute("protocolVersion"),
+        });
+    }
+
+    if (matches.Count == 0)
+    {
+        throw new InvalidOperationException("github-packages-auth requires a package source at https://nuget.pkg.github.com/{GITHUB_REPOSITORY_OWNER}/index.json in the caller NuGet.Config.");
+    }
+    return matches;
 }
 
 static string BuildDockerConfig(IReadOnlyCollection<ResolvedCredential> credentials)
@@ -610,6 +701,9 @@ static IEnumerable<string> SplitCsv(string value) =>
 
 sealed record AuthCommand(
     string AuthJson,
+    bool GitHubPackagesAuth,
+    bool UntrustedFork,
+    string GitHubRepositoryOwner,
     string Phase,
     string CredentialMode,
     string OpEnvFile,
@@ -625,6 +719,9 @@ sealed record AuthCommand(
     public static AuthCommand FromEnvironment() =>
         new(
             GetEnv("NUGET_AUTH_JSON_INPUT"),
+            string.Equals(GetEnv("NUGET_AUTH_GITHUB_PACKAGES"), "true", StringComparison.OrdinalIgnoreCase),
+            string.Equals(GetEnv("NUGET_AUTH_UNTRUSTED_FORK"), "true", StringComparison.OrdinalIgnoreCase),
+            GetEnv("GITHUB_REPOSITORY_OWNER"),
             GetEnv("NUGET_AUTH_PHASE", "apply"),
             GetEnv("NUGET_AUTH_CREDENTIAL_MODE", "env"),
             GetEnv("NUGET_AUTH_OP_ENV_FILE"),

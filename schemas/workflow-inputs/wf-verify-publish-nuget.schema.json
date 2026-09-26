@@ -35,6 +35,16 @@
       "type": "string",
       "default": ""
     },
+    "github-packages-auth": {
+      "type": "boolean",
+      "description": "Use the job-scoped GitHub token for exact caller-owner GitHub Packages sources in NuGet.Config.",
+      "default": false
+    },
+    "nuget-source-config-path": {
+      "type": "string",
+      "description": "Optional caller NuGet.Config path when it is not in the repository root.",
+      "default": ""
+    },
     "configuration": {
       "type": "string",
       "default": "Release"
