@@ -52,13 +52,24 @@
       "type": "boolean",
       "default": true
     },
+    "test-platform": {
+      "type": "string",
+      "enum": [
+        "vstest",
+        "mtp"
+      ],
+      "default": "vstest",
+      "description": "Test platform. MTP callers must configure Microsoft.Testing.Platform in global.json."
+    },
     "test-filter": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "VSTest-only dotnet test filter expression. MTP rejects this input because test-framework filter syntax is not portable."
     },
     "coverage": {
       "type": "boolean",
-      "default": true
+      "default": true,
+      "description": "Collect Cobertura coverage. MTP callers must reference Microsoft.Testing.Extensions.CodeCoverage."
     },
     "coverage-report": {
       "type": "boolean",

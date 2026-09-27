@@ -90,6 +90,9 @@ jobs:
       enable-cache: true
       global-json-file: global.json
       solution: CitizenId.slnx
+      # "vstest" is the default.
+      # Use "mtp" only when global.json selects Microsoft.Testing.Platform and test projects reference its coverage extension.
+      test-platform: vstest
       coverage-pr-comment: true
       upload-test-results: false
       upload-coverage: false

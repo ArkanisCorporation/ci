@@ -28,6 +28,7 @@ jobs:
       runs-on-self-hosted: false
       dotnet-version: 10.0.x
       solution: Example.slnx
+      test-platform: mtp
       coverage: true
       coverage-report: true
       coverage-pr-comment: true

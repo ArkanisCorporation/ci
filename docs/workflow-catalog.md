@@ -156,8 +156,9 @@ Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
 | `configuration` | string | no | `"Release"` | n/a |
 | `restore-locked-mode` | boolean | no | `true` | n/a |
 | `enable-cache` | boolean | no | `true` | n/a |
-| `test-filter` | string | no | `""` | n/a |
-| `coverage` | boolean | no | `true` | n/a |
+| `test-platform` | string | no | `"vstest"` | Test platform. MTP callers must configure Microsoft.Testing.Platform in global.json.<br>Allowed: "vstest", "mtp" |
+| `test-filter` | string | no | `""` | VSTest-only dotnet test filter expression. MTP rejects this input because test-framework filter syntax is not portable. |
+| `coverage` | boolean | no | `true` | Collect Cobertura coverage. MTP callers must reference Microsoft.Testing.Extensions.CodeCoverage. |
 | `coverage-report` | boolean | no | `true` | n/a |
 | `coverage-pr-comment` | boolean | no | `true` | n/a |
 | `upload-test-results` | boolean | no | `false` | n/a |
@@ -711,6 +712,10 @@ Side effects:
 It installs .NET 10 action tooling for coverage report file scripts, checks out this CI platform repository for shared actions, sets up the project SDK, restores dependencies, builds with a binlog, runs tests, optionally collects coverage, writes metadata, writes a manifest, writes a summary, and uploads diagnostics.
 When `coverage-report` is true, it generates ReportGenerator HTML, Cobertura, Markdown, and text output from collected coverage.
 When `coverage-pr-comment` is true on pull requests, it updates one coverage comment with the Markdown summary.
+`test-platform` defaults to `vstest` for caller compatibility.
+Callers can opt into `mtp` when their `global.json` selects `Microsoft.Testing.Platform` and their test projects reference `Microsoft.Testing.Extensions.CodeCoverage` when coverage is enabled.
+The workflow uses MTP-native coverage options and discovers `*.cobertura.xml` files under the test result directory.
+`test-filter` is intentionally rejected for MTP because its syntax depends on the selected test framework.
 It does not run formatting, publish, or deploy.
 
 Flow:
