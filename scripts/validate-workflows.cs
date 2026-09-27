@@ -48,6 +48,7 @@ ValidatePrivateNuGetCredentialContract();
 ValidatePrivateSubmoduleCheckoutContract();
 ValidateNuGetPackSymbolContract();
 ValidateCoverageReportContract();
+await ValidateDotNetTestPlatformInvocationContractAsync();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
 ValidatePlatformSelftestContract();
@@ -1322,6 +1323,201 @@ void ValidateCoverageReportContract()
         if (scriptText.Contains("--allow-roll-forward", StringComparison.Ordinal))
         {
             AddFailure($"{scriptPath}: dotnet-coverage-report must not install ReportGenerator with --allow-roll-forward because ReportGenerator runtimeconfig already uses legacy roll-forward settings.");
+        }
+    }
+}
+
+async Task ValidateDotNetTestPlatformInvocationContractAsync()
+{
+    if (OperatingSystem.IsWindows())
+    {
+        // The workflow explicitly executes this step in Bash.
+        // Run the behavioral contract in the Linux CI environment where the shell and glob semantics are authoritative.
+        Console.WriteLine("Skipped .NET test-platform invocation contract on Windows.");
+        return;
+    }
+
+    var bash = FindExecutableOnPath("bash");
+    if (bash is null)
+    {
+        AddFailure("bash executable is required to validate the .NET test-platform invocation contract.");
+        return;
+    }
+
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-dotnet-test.yml");
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: .NET test workflow is required for test-platform invocation validation.");
+        return;
+    }
+
+    var testPlatformInput = ReadWorkflowInputs(workflowPath).GetValueOrDefault("test-platform");
+    if (testPlatformInput is null
+        || !string.Equals(NormalizeWorkflowInputType(testPlatformInput.Type), "string", StringComparison.Ordinal)
+        || testPlatformInput.Required
+        || !testPlatformInput.HasDefault
+        || !string.Equals(NormalizeWorkflowDefault(testPlatformInput), "string:vstest", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: test-platform must remain an optional string input defaulting to vstest.");
+    }
+
+    var workflowLines = File.ReadAllLines(workflowPath);
+    var testStepStart = Array.FindIndex(workflowLines, line => line.StartsWith("      - name: Test ", StringComparison.Ordinal));
+    var testStepEnd = testStepStart >= 0
+        ? Array.FindIndex(workflowLines, testStepStart + 1, line => line.StartsWith("      - name: ", StringComparison.Ordinal))
+        : -1;
+    if (testStepStart < 0)
+    {
+        AddFailure($"{workflowPath}: could not extract the test-step Bash invocation for behavioral validation.");
+        return;
+    }
+
+    if (testStepEnd < 0)
+    {
+        testStepEnd = workflowLines.Length;
+    }
+
+    var testStepRun = Array.FindIndex(
+        workflowLines,
+        testStepStart,
+        testStepEnd - testStepStart,
+        line => string.Equals(line, "        run: |", StringComparison.Ordinal));
+    if (testStepRun < 0)
+    {
+        AddFailure($"{workflowPath}: test-step Bash invocation is required for behavioral validation.");
+        return;
+    }
+
+    var testStepScript = string.Join(
+        '\n',
+        workflowLines
+            .Skip(testStepRun + 1)
+            .Take(testStepEnd - testStepRun - 1)
+            .Select(line => line.Length == 0 ? string.Empty : line[10..]));
+    var tempRoot = Path.Combine(Path.GetTempPath(), "arkanis-ci-dotnet-test-platform", Guid.NewGuid().ToString("N"));
+    var fakeBin = Path.Combine(tempRoot, "fake-bin");
+    var fakeDotnet = Path.Combine(fakeBin, "dotnet");
+    var commandScript = Path.Combine(tempRoot, "test-step.sh");
+    var commandArgumentsPath = Path.Combine(tempRoot, "dotnet-arguments.txt");
+    var githubOutputPath = Path.Combine(tempRoot, "github-output.txt");
+
+    try
+    {
+        Directory.CreateDirectory(fakeBin);
+        File.WriteAllText(
+            fakeDotnet,
+            """
+            #!/usr/bin/env bash
+            printf '%s\n' "$@" > dotnet-arguments.txt
+
+            if [[ "${TEST_PLATFORM}" == "mtp" && "${COVERAGE}" == "true" ]]; then
+              mkdir -p artifacts/test-results/first artifacts/test-results/second
+              touch artifacts/test-results/first/first.cobertura.xml artifacts/test-results/second/second.cobertura.xml
+            fi
+            """);
+        File.SetUnixFileMode(
+            fakeDotnet,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        File.WriteAllText(commandScript, testStepScript);
+
+        async Task<(int ExitCode, string Output, string[] Arguments, string GitHubOutput, string[] CoverageFiles)> ExecuteTestStepAsync(
+            string platform,
+            string filter,
+            bool coverage)
+        {
+            if (File.Exists(commandArgumentsPath))
+            {
+                File.Delete(commandArgumentsPath);
+            }
+
+            File.WriteAllText(githubOutputPath, string.Empty);
+            var result = await Cli.Wrap(bash)
+                .WithArguments([commandScript])
+                .WithWorkingDirectory(tempRoot)
+                .WithEnvironmentVariables(new Dictionary<string, string?>
+                {
+                    ["PATH"] = fakeBin + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"),
+                    ["SOLUTION"] = "Example.slnx",
+                    ["CONFIGURATION"] = "Release",
+                    ["TEST_PLATFORM"] = platform,
+                    ["TEST_FILTER"] = filter,
+                    ["COVERAGE"] = coverage ? "true" : "false",
+                    ["GITHUB_OUTPUT"] = githubOutputPath
+                })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+
+            var arguments = File.Exists(commandArgumentsPath)
+                ? File.ReadAllLines(commandArgumentsPath)
+                : [];
+            var coverageFiles = Directory.Exists(Path.Combine(tempRoot, "artifacts", "test-results"))
+                ? Directory.EnumerateFiles(Path.Combine(tempRoot, "artifacts", "test-results"), "*.cobertura.xml", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(tempRoot, path).Replace('\\', '/'))
+                    .Order(StringComparer.Ordinal)
+                    .ToArray()
+                : [];
+            return (result.ExitCode, result.StandardOutput + result.StandardError, arguments, File.ReadAllText(githubOutputPath), coverageFiles);
+        }
+
+        var mtp = await ExecuteTestStepAsync("mtp", string.Empty, coverage: true);
+        var expectedMtpArguments = new[]
+        {
+            "test",
+            "--solution", "Example.slnx",
+            "--configuration", "Release",
+            "--no-build",
+            "--verbosity", "normal",
+            "--results-directory", "artifacts/test-results",
+            "--coverage",
+            "--coverage-output-format", "cobertura"
+        };
+        if (mtp.ExitCode != 0 || !mtp.Arguments.SequenceEqual(expectedMtpArguments, StringComparer.Ordinal))
+        {
+            AddFailure($"{workflowPath}: MTP must invoke dotnet test with --solution and MTP coverage options only. Arguments: {string.Join(" ", mtp.Arguments)}. {mtp.Output}");
+        }
+
+        if (mtp.Arguments.Any(argument => argument == "--logger" || argument.StartsWith("--collect:", StringComparison.Ordinal)))
+        {
+            AddFailure($"{workflowPath}: MTP invocation must not pass VSTest loggers or collectors.");
+        }
+
+        if (!mtp.GitHubOutput.Contains("coverage-reports=artifacts/test-results/**/*.cobertura.xml", StringComparison.Ordinal)
+            || mtp.CoverageFiles.Length != 2)
+        {
+            AddFailure($"{workflowPath}: MTP coverage must publish a recursive glob that accepts every generated Cobertura file.");
+        }
+
+        var rejectedMtpFilter = await ExecuteTestStepAsync("mtp", "Category=Fast", coverage: true);
+        if (rejectedMtpFilter.ExitCode == 0 || rejectedMtpFilter.Arguments.Length != 0)
+        {
+            AddFailure($"{workflowPath}: MTP must reject VSTest test-filter before invoking dotnet test.");
+        }
+
+        var vstest = await ExecuteTestStepAsync("vstest", "Category=Fast", coverage: true);
+        var expectedVstestArguments = new[]
+        {
+            "test", "Example.slnx",
+            "--configuration", "Release",
+            "--no-build",
+            "--verbosity", "normal",
+            "--logger", "trx;LogFilePrefix=test-results",
+            "--results-directory", "artifacts/test-results",
+            "--filter", "Category=Fast",
+            "--collect:XPlat Code Coverage"
+        };
+        if (vstest.ExitCode != 0 || !vstest.Arguments.SequenceEqual(expectedVstestArguments, StringComparer.Ordinal)
+            || !vstest.GitHubOutput.Contains("coverage-reports=artifacts/test-results/**/coverage.cobertura.xml", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: VSTest must preserve its logger, filter, collector, and coverage-report contract. Arguments: {string.Join(" ", vstest.Arguments)}. {vstest.Output}");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
         }
     }
 }

@@ -69,13 +69,18 @@ on:
         type: boolean
         required: false
         default: true
+      test-platform:
+        description: Test platform. Use vstest for the compatible default or mtp when the caller configures Microsoft.Testing.Platform in global.json.
+        type: string
+        required: false
+        default: vstest
       test-filter:
-        description: Optional dotnet test filter expression.
+        description: Optional VSTest dotnet test filter expression. MTP rejects this input because test-framework filter syntax is not portable.
         type: string
         required: false
         default: ""
       coverage:
-        description: Collects XPlat Code Coverage during tests.
+        description: Collects Cobertura coverage during tests. MTP callers must reference Microsoft.Testing.Extensions.CodeCoverage.
         type: boolean
         required: false
         default: true
@@ -253,30 +258,62 @@ jobs:
             -bl:artifacts/msbuild/build.binlog
 
       - name: Test ${{ inputs.solution }} @ ${{ inputs.configuration }} coverage=${{ inputs.coverage }}
+        id: test
         env:
           SOLUTION: ${{ inputs.solution }}
           CONFIGURATION: ${{ inputs.configuration }}
+          TEST_PLATFORM: ${{ inputs.test-platform }}
           TEST_FILTER: ${{ inputs.test-filter }}
           COVERAGE: ${{ inputs.coverage }}
         run: |
           mkdir -p artifacts/test-results
-          test_args=(
-            dotnet test "$SOLUTION"
-            --configuration "$CONFIGURATION"
-            --no-build
-            --verbosity normal
-            --logger "trx;LogFilePrefix=test-results"
-            --results-directory artifacts/test-results
-          )
+          case "$TEST_PLATFORM" in
+            vstest)
+              coverage_reports='artifacts/test-results/**/coverage.cobertura.xml'
+              test_args=(
+                dotnet test "$SOLUTION"
+                --configuration "$CONFIGURATION"
+                --no-build
+                --verbosity normal
+                --logger "trx;LogFilePrefix=test-results"
+                --results-directory artifacts/test-results
+              )
 
-          if [[ -n "$TEST_FILTER" ]]; then
-            test_args+=(--filter "$TEST_FILTER")
-          fi
+              if [[ -n "$TEST_FILTER" ]]; then
+                test_args+=(--filter "$TEST_FILTER")
+              fi
 
-          if [[ "$COVERAGE" == "true" ]]; then
-            test_args+=('--collect:XPlat Code Coverage')
-          fi
+              if [[ "$COVERAGE" == "true" ]]; then
+                test_args+=('--collect:XPlat Code Coverage')
+              fi
+              ;;
+            mtp)
+              if [[ -n "$TEST_FILTER" ]]; then
+                echo "::error title=Unsupported MTP test filter::test-filter is a VSTest expression. Use the test framework's MTP-native filtering option through the caller configuration."
+                exit 1
+              fi
 
+              coverage_reports='artifacts/test-results/**/*.cobertura.xml'
+              test_args=(
+                dotnet test
+                --solution "$SOLUTION"
+                --configuration "$CONFIGURATION"
+                --no-build
+                --verbosity normal
+                --results-directory artifacts/test-results
+              )
+
+              if [[ "$COVERAGE" == "true" ]]; then
+                test_args+=(--coverage --coverage-output-format cobertura)
+              fi
+              ;;
+            *)
+              echo "::error title=Invalid test platform::test-platform must be one of: vstest, mtp. Received: $TEST_PLATFORM"
+              exit 1
+              ;;
+          esac
+
+          echo "coverage-reports=$coverage_reports" >> "$GITHUB_OUTPUT"
           "${test_args[@]}"
 
       - name: Generate coverage report @ ${{ inputs.coverage-reporttypes }}
@@ -285,7 +322,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         with:
-          reports: artifacts/test-results/**/coverage.cobertura.xml
+          reports: ${{ steps.test.outputs.coverage-reports }}
           targetdir: artifacts/coverage/report
           reporttypes: ${{ inputs.coverage-reporttypes }}
           assemblyfilters: ${{ inputs.coverage-assemblyfilters }}
@@ -358,6 +395,7 @@ jobs:
         env:
           SOLUTION: ${{ inputs.solution }}
           CONFIGURATION: ${{ inputs.configuration }}
+          TEST_PLATFORM: ${{ inputs.test-platform }}
           COVERAGE: ${{ inputs.coverage }}
           COVERAGE_REPORT: ${{ inputs.coverage-report }}
           COVERAGE_PR_COMMENT: ${{ inputs.coverage-pr-comment }}
@@ -373,6 +411,7 @@ jobs:
             echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
             echo "| Solution | \`${SOLUTION}\` |"
             echo "| Configuration | \`${CONFIGURATION}\` |"
+            echo "| Test platform | \`${TEST_PLATFORM}\` |"
             echo "| Coverage | \`${COVERAGE}\` |"
             echo "| Coverage report | \`${COVERAGE_REPORT}\` |"
             echo "| Coverage PR comment | \`${COVERAGE_PR_COMMENT}\` |"
