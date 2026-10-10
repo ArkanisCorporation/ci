@@ -163,7 +163,7 @@ jobs:
 
       - name: Semantic Release (Dry Run) @ ${{ inputs.semantic-release-version }}
         id: semantic-release
-        uses: cycjimmy/semantic-release-action@v6.0.0
+        uses: cycjimmy/semantic-release-action@v7.1.2
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEBUG: '*'
