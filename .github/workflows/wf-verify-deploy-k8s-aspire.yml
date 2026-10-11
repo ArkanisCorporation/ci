@@ -236,7 +236,7 @@ jobs:
           host-config-path: ${{ steps.nuget-auth.outputs.host-config-path }}
 
       - name: Setup kubectl @ ${{ inputs.kubectl-version }}
-        uses: azure/setup-kubectl@v5.1.0
+        uses: azure/setup-kubectl@v5.2.0
         with:
           version: ${{ inputs.kubectl-version }}
 
