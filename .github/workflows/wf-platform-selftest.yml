@@ -53,7 +53,7 @@ jobs:
       - name: Set up Python 3.14
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
 
       - name: Install pyflakes 3.4.0 for actionlint
         run: python -m pip install --disable-pip-version-check "pyflakes==3.4.0"
