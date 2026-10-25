@@ -1917,9 +1917,15 @@ Preconditions:
 - The repository contains `.github/workflows`, `.github/actions`, `schemas/workflow-inputs`, policy files, fixtures, and docs.
 - The selected runner can install or run .NET 10.
 - The selected runner can run `actions/setup-python@v7` and install pyflakes with pip.
-- The selected runner can run `actions/setup-node@v6` or has Node.js 24 in the Actions tool cache.
+- The selected runner can run `actions/setup-node@v7` or has the pinned Node.js major in the Actions tool cache.
 - The selected runner can run `raven-actions/actionlint@v2` with actionlint `1.7.12`.
 - Local validator runs still use a system `actionlint` when available.
+
+Toolchain version contract:
+
+- `python-version` (`"X.Y"`) and `node-version` (`"N.x"`) are quoted literals in the `with:` blocks of this workflow and `wf-lint-github-actions.yml`. Renovate bumps them in place.
+- The validator reads both values from the workflows rather than hardcoding them. It requires the expected shape and the same value in both files.
+- Setup step names carry no version (`Set up Python`, `Set up Node.js + npm`), because Renovate does not rewrite step names. Installed versions appear in the step summary.
 
 Side effects:
 

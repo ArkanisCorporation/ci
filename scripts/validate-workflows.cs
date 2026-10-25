@@ -52,6 +52,7 @@ await ValidateDotNetTestPlatformInvocationContractAsync();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
 ValidatePlatformSelftestContract();
+ValidateLintToolchainVersionContract();
 ValidateReleaseBackpropagationContract();
 ValidateStateChangingWorkflowConcurrencyContract();
 ValidateRepositoryMainValidationConcurrencyContract();
@@ -1611,7 +1612,8 @@ void ValidateWorkflowLintContract()
         // setup-node and raven-actions/actionlint presence are enforced major-agnostically
         // by the ordering check below (both indices must be >= 0). ActionlintVersion stays a
         // literal on purpose -- it pins the actionlint binary, not the wrapper action major.
-        foreach (var requiredToken in new[] { "node-version: \"24.x\"", "package-manager-cache: false", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
+        // Python/Node versions are checked by ValidateLintToolchainVersionContract.
+        foreach (var requiredToken in new[] { "package-manager-cache: false", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
         {
             if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
             {
@@ -1626,7 +1628,7 @@ void ValidateWorkflowLintContract()
             AddFailure($"{workflowPath}: GitHub Actions lint workflow must set up Node.js before raven-actions/actionlint.");
         }
 
-        foreach (var requiredReportingToken in new[] { "Set up Python 3.15", "Set up Node.js 24 + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
+        foreach (var requiredReportingToken in new[] { "Set up Python", "Set up Node.js + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
         {
             if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
             {
@@ -1658,8 +1660,9 @@ void ValidatePlatformSelftestContract()
 
     // setup-python and setup-node presence is enforced major-agnostically by the ordering
     // checks below (setupPythonIndex / setupNodeIndex must be >= 0), so their `uses:` refs
-    // are intentionally absent from this literal token list.
-    foreach (var requiredToken in new[] { "python-version: \"3.15\"", "pyflakes==3.4.0", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
+    // are intentionally absent from this literal token list. Python/Node versions are checked
+    // by ValidateLintToolchainVersionContract.
+    foreach (var requiredToken in new[] { "pyflakes==3.4.0", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -1692,6 +1695,72 @@ void ValidatePlatformSelftestContract()
     if (!Regex.IsMatch(workflowText, @"(?m)^\s*flags:\s*-color\s*$"))
     {
         AddFailure($"{workflowPath}: platform selftest actionlint step must pass '-color' for consistent diagnostics.");
+    }
+}
+
+/*
+ * Summary:
+ *   Checks the Python and Node.js versions pinned by the two actionlint workflows without
+ *   hardcoding which versions they are.
+ *
+ * Remarks:
+ *   Renovate bumps `python-version` / `node-version` on actions/setup-python and
+ *   actions/setup-node in place (ci#28 moved 3.14 -> 3.15 and turned this validator red
+ *   because it required the old literal). The versions are read from the workflows, so a
+ *   Renovate bump passes untouched. What stays enforced: each version is an explicit literal
+ *   of the expected shape, both workflows agree, and the setup step names carry no version,
+ *   since Renovate never rewrites step names and a versioned name silently goes stale.
+ *   The installed versions are still reported at runtime via `python --version` / `node --version`.
+ */
+void ValidateLintToolchainVersionContract()
+{
+    var pins = new (string Action, string Input, string Pattern, string Example, string StepName)[]
+    {
+        ("actions/setup-python", "python-version", @"^\d+\.\d+$", "3.15", "Set up Python"),
+        ("actions/setup-node", "node-version", @"^\d+\.x$", "24.x", "Set up Node.js + npm"),
+    };
+
+    var workflowVersions = new List<(string Path, string Input, string Version)>();
+    foreach (var fileName in new[] { "wf-lint-github-actions.yml", "wf-platform-selftest.yml" })
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", fileName);
+        if (!File.Exists(workflowPath))
+        {
+            // Absence is already reported by the lint / selftest contracts.
+            continue;
+        }
+
+        var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
+        foreach (var (action, input, pattern, example, stepName) in pins)
+        {
+            var version = ActionWithInput(workflowText, action, input);
+            if (version is null)
+            {
+                AddFailure($"{workflowPath}: {action} step must pass a quoted literal {input} (e.g. {input}: \"{example}\").");
+                continue;
+            }
+
+            if (!Regex.IsMatch(version, pattern))
+            {
+                AddFailure($"{workflowPath}: {action} {input} must match {pattern} (e.g. \"{example}\"), found \"{version}\".");
+            }
+
+            if (!Regex.IsMatch(workflowText, $@"(?m)^\s*- name: {Regex.Escape(stepName)}\s*$"))
+            {
+                AddFailure($"{workflowPath}: {action} step must be named exactly '{stepName}' (no version; Renovate does not update step names).");
+            }
+
+            workflowVersions.Add((workflowPath, input, version));
+        }
+    }
+
+    foreach (var group in workflowVersions.GroupBy(entry => entry.Input))
+    {
+        if (group.Select(entry => entry.Version).Distinct(StringComparer.Ordinal).Count() > 1)
+        {
+            var found = string.Join(", ", group.Select(entry => $"{Path.GetFileName(entry.Path)}=\"{entry.Version}\""));
+            AddFailure($"Actionlint workflows must pin the same {group.Key}; found {found}.");
+        }
     }
 }
 
@@ -1840,7 +1909,7 @@ void ValidateStepDisplayNameContract()
         ],
         ["wf-lint-github-actions.yml"] =
         [
-            "      - name: Set up Python 3.15",
+            "      - name: Set up Python",
             "      - name: Actionlint @ caller workflows",
         ],
     };
@@ -2525,6 +2594,18 @@ static int UsesActionRefIndex(string text, string action)
 {
     var match = Regex.Match(text, @"uses:\s+" + Regex.Escape(action) + @"@v\d+");
     return match.Success ? match.Index : -1;
+}
+
+// Quoted literal value of `<input>:` in the `with:` block of the first `uses: <action>@vN`
+// step, or null when the step, the input, or the quoting is missing. Expects LF line endings.
+// The `(?!-)` stops the scan at the next `- name:` / `- uses:` so it never reads another step.
+static string? ActionWithInput(string text, string action, string input)
+{
+    var match = Regex.Match(
+        text,
+        @"uses:\s+" + Regex.Escape(action) + @"@v\d+[^\n]*\n[ \t]+with:[ \t]*\n(?:[ \t]+(?!-)[^\n]*\n)*?[ \t]+"
+            + Regex.Escape(input) + @":[ \t]*""(?<value>[^""\n]+)""");
+    return match.Success ? match.Groups["value"].Value : null;
 }
 
 void ValidateUsesReferences(string file, string[] lines)
