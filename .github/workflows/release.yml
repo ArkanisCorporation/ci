@@ -163,6 +163,19 @@ jobs:
       labels: |
         org.opencontainers.image.source=https://github.com/ArkanisCorporation/ci
 
+  docs-openviking:
+    name: docs-openviking dry-run @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-docs-openviking
+      cancel-in-progress: false
+    uses: ./.github/workflows/wf-publish-docs-openviking.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      dry-run: true
+
   verify-release:
     if: github.event_name == 'pull_request'
     name: repo
@@ -175,6 +188,7 @@ jobs:
       - dotnet-library-test
       - dotnet-nuget
       - dotnet-container
+      - docs-openviking
     uses: ./.github/workflows/wf-verify-release-semantic.yml
     permissions:
       contents: write
@@ -196,6 +210,7 @@ jobs:
       - dotnet-library-test
       - dotnet-nuget
       - dotnet-container
+      - docs-openviking
     uses: ./.github/workflows/wf-release-semantic.yml
     permissions:
       contents: write

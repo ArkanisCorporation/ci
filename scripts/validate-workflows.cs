@@ -51,6 +51,7 @@ ValidateCoverageReportContract();
 await ValidateDotNetTestPlatformInvocationContractAsync();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
+ValidateOpenVikingDocsContract();
 ValidatePlatformSelftestContract();
 ValidateLintToolchainVersionContract();
 ValidateReleaseBackpropagationContract();
@@ -1597,6 +1598,65 @@ void ValidateGeneratedCodeContract()
     }
 }
 
+/*
+ * Summary:
+ *   Pins wf-publish-docs-openviking.yml's cross-repository and credential contract.
+ *
+ * Remarks:
+ *   The default include-paths must equal ArkanisCorporation/repo-standards OPENVIKING_DOC_GLOBS
+ *   and the paths filter of its caller template, or adopted repos publish a different doc set
+ *   than the one that triggers them. The key is plain runner env, so the workflow must mask it
+ *   itself and keep it off curl's command line; the default-branch gate keeps PR content out of
+ *   the mirror.
+ */
+void ValidateOpenVikingDocsContract()
+{
+    string[] expectedDocGlobs =
+    [
+        "README.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/**/*.md",
+        ".claude/rules/**/*.md",
+        ".claude/context/**/*.md",
+        "openspec/specs/**/*.md",
+    ];
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-docs-openviking.yml");
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: OpenViking docs workflow is required.");
+        return;
+    }
+
+    var includePaths = ReadWorkflowInputs(workflowPath).GetValueOrDefault("include-paths")?.Default as string ?? "";
+    var actualDocGlobs = includePaths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    if (!actualDocGlobs.SequenceEqual(expectedDocGlobs, StringComparer.Ordinal))
+    {
+        AddFailure($"{workflowPath}: include-paths default must be exactly [{string.Join(", ", expectedDocGlobs)}] to match repo-standards OPENVIKING_DOC_GLOBS; found [{string.Join(", ", actualDocGlobs)}].");
+    }
+
+    var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
+    foreach (var requiredToken in new[]
+             {
+                 "echo \"::add-mask::${OPENVIKING_API_KEY}\"",
+                 "curl -K -",
+                 "DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}",
+                 "pull_request | pull_request_target)",
+                 "REPOSITORY_NAME: ${{ github.event.repository.name }}",
+             })
+    {
+        if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: OpenViking docs workflow must contain {requiredToken}.");
+        }
+    }
+
+    if (Regex.IsMatch(workflowText, @"X-API-Key:\s*\$\{?OPENVIKING_API_KEY") || workflowText.Contains("secrets.", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the OpenViking key must come only from runner env and never be passed as a curl argument.");
+    }
+}
+
 void ValidateWorkflowLintContract()
 {
     var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-lint-github-actions.yml");
@@ -1785,6 +1845,7 @@ void ValidateJobDisplayNameContract()
         ("wf-setup-dotnet-generated-code.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-lint-github-actions.yml", "    name: workflows @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-platform-selftest.yml", "    name: contracts @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-publish-docs-openviking.yml", "    name: docs @ ${{ github.head_ref || github.ref_name }}"),
     };
 
     foreach (var (fileName, expectedNameLine) in expectedWorkflowJobNames)
@@ -1820,6 +1881,7 @@ void ValidateJobDisplayNameContract()
                      "    name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: docs-openviking dry-run @ ${{ github.head_ref || github.ref_name }}",
                      "    name: repo",
                      "    name: repo @ publish",
                  })
@@ -1861,6 +1923,12 @@ void ValidateStepDisplayNameContract()
         [
             "      - name: Build image (Dry Run) @ ${{ inputs.image }}",
             "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-publish-docs-openviking.yml"] =
+        [
+            "      - name: Collect docs @ ${{ github.sha }}",
+            "      - name: Import docs into OpenViking @ ${{ steps.collect.outputs.target-uri }}",
+            "      - name: Upload diagnostics @ ${{ github.event.repository.name }}-docs-openviking-${{ github.run_id }}-${{ github.run_attempt }}",
         ],
         ["wf-deploy-k8s-aspire.yml"] =
         [
@@ -2213,6 +2281,7 @@ void ValidateStateChangingWorkflowConcurrencyContract()
     RequireWorkflowText("wf-publish-container-dotnet.yml", "cancel-in-progress: false");
     RequireWorkflowText("wf-publish-nuget.yml", "group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}");
     RequireWorkflowText("wf-deploy-k8s-aspire.yml", "group: deploy-k8s-${{ inputs.environment-name }}-${{ inputs.kubernetes-namespace }}");
+    RequireWorkflowText("wf-publish-docs-openviking.yml", "group: publish-docs-openviking-${{ github.repository }}-${{ inputs.target-root }}");
 
     void RequireWorkflowText(string workflowName, string expectedText)
     {
@@ -2254,6 +2323,7 @@ void ValidateRepositoryMainValidationConcurrencyContract()
                  "dotnet-library-test",
                  "dotnet-nuget",
                  "dotnet-container",
+                 "docs-openviking",
              })
     {
         var expectedGroup = Regex.Escape(mainPushGroupPrefix + jobId);

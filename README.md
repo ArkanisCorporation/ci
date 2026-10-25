@@ -39,6 +39,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying cluster changes. |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |
 | `wf-platform-selftest.yml` | Validate this platform repository. |
+| `wf-publish-docs-openviking.yml` | Mirror caller docs into OpenViking from the default branch (runs on `arkanis-runners`). |
 
 ## Runner Model
 

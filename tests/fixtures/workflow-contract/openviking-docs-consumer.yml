@@ -1,0 +1,27 @@
+name: OpenViking docs consumer fixture
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - AGENTS.md
+      - CLAUDE.md
+      - docs/**/*.md
+      - .claude/rules/**/*.md
+      - .claude/context/**/*.md
+      - openspec/specs/**/*.md
+      - .github/workflows/openviking-docs.yml
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  publish:
+    name: docs @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-docs-openviking.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: arkanis-runners
+      runs-on-self-hosted: true

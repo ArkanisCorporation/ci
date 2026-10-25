@@ -66,10 +66,12 @@ Recommended order:
 - `wf-verify-deploy-k8s-aspire.yml` verifies Aspire Kubernetes deployment inputs without applying cluster changes.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.
+- `wf-publish-docs-openviking.yml` mirrors caller docs into OpenViking from the default branch; it reads its key from `arkanis-runners` env and must mask it itself.
 
 ## Repository Workflows
 
 - `release.yml` runs platform selftest and fixture dogfood jobs before semantic-release verification on pull requests and before environment-gated semantic-release publication on main pushes and manual dispatch.
+- `openviking-docs.yml` mirrors this repository's docs into OpenViking through the released `@v1` workflow, so repo-standards' adoption check sees it like any consumer.
 
 ## Security Rules
 
