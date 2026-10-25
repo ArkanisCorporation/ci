@@ -62,7 +62,7 @@ jobs:
       # Python, so actionlint's `pipx install pyflakes` fallback failed on any replica that
       # had not. Installing pyflakes directly puts it on PATH, the action skips pipx, and the
       # outcome stops depending on which replica picks the job up. Bump it with actionlint.
-      - name: Set up Python 3.15
+      - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.15"
@@ -70,7 +70,7 @@ jobs:
       - name: Install pyflakes 3.4.0 for actionlint
         run: python -m pip install --disable-pip-version-check "pyflakes==3.4.0"
 
-      - name: Set up Node.js 24 + npm
+      - name: Set up Node.js + npm
         uses: actions/setup-node@v7
         with:
           node-version: "24.x"
