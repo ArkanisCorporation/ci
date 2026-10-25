@@ -13,7 +13,7 @@
   to `POST /api/v1/resources`. Per the OV docs, `to` is the final location: "If the target already
   exists, it is refreshed... files absent from the new import may be removed; unchanged content is
   reused". Tags are per request (`tags`, `tag_mode: replace`). `wait` makes the call block until
-  processing finishes. The deployed server (v0.5.2) rejects unknown body fields and has no
+  processing finishes; without it, the call returns after parsing and queues the processing. The deployed server (v0.5.2) rejects unknown body fields and has no
   `timeout` field, so the client bounds the wait. Auth header: `X-API-Key`.
 - **Consumers:** callers come from repo-standards' template (`templates/openviking-docs.yml`), which
   calls `@v1` with `runs-on: arkanis-runners` and `runs-on-self-hosted: true`. It triggers on push to
@@ -36,7 +36,7 @@
 **Non-Goals:**
 
 - Adoption measurement, templates, or PRs (repo-standards).
-- Non-Markdown content, LLM summaries (`semantic_and_vectors`), or OV watches.
+- Non-Markdown content or OV watches.
 - A hosted-runner path that reaches OV. Hosted runners can only dry-run.
 
 ## Decisions
@@ -120,14 +120,23 @@ The spec stays mechanism-agnostic, so either outcome satisfies it.
 - `max-archive-bytes` (default 20 MiB) bounds accidental bulk, for example a committed Markdown data
   dump. The summary lists the largest files.
 
-### D7. Synchronous import with bounded waits
+### D7. Semantic processing, accepted asynchronously
 
-The import request sends `wait: true`, and `curl --max-time` bounds the wait at
-`import-timeout-seconds` (default 300). The job has its own `timeout-minutes`. A successful response
-therefore means the vectors are written, `published=true` is truthful, and failures surface in the
-run that caused them. The first live run showed that OpenViking v0.5.2 rejects a `timeout` body field
-(`extra_forbidden`), so the request carries none. If curl gives up, the server may still finish the
-import, and the next run converges the mirror anyway.
+Imports use `semantic_and_vectors`. The first live import used `vectors_only`, and every mirrored
+record came back with no abstract. OpenViking's semantic pass writes the abstracts and overviews
+that context injection and `find` rank on, so vector-only docs surfaced poorly in practice.
+
+The semantic pass runs on the off-cluster extraction LLM and can take minutes to tens of minutes
+per repository. The request therefore sends `wait: false`: OpenViking parses the archive and
+queues the semantic and embedding work, then returns. `curl --max-time` bounds that request at
+`import-timeout-seconds` (default 120), because OpenViking v0.5.2 rejects a `timeout` body field
+(`extra_forbidden`). `published=true` means the import was accepted, not that processing finished.
+
+**Trade-off (accepted on ARK-642):** an upload, parse or permission failure still fails the run, but
+an LLM or embedding failure after acceptance only shows in OpenViking's task list
+(`GET /api/v1/tasks`). Waiting instead would hold one of the two shared `arkanis-runners` for the
+whole LLM pass and fail every docs run during an extraction-host outage. A later import converges
+the mirror either way.
 
 ### D8. Concurrency per repository and target
 
@@ -168,9 +177,9 @@ dogfood job in `release.yml` calls `./.github/workflows/wf-publish-docs-openviki
 | `runs-on-self-hosted` | boolean | `true` |
 | `include-paths` | string (newline globs) | the seven standard globs |
 | `target-root` | string | `viking://resources/arkanis/projects` |
-| `processing-mode` | string (`vectors_only` / `semantic_and_vectors`) | `vectors_only` |
+| `processing-mode` | string (`vectors_only` / `semantic_and_vectors`) | `semantic_and_vectors` |
 | `max-archive-bytes` | number | `20971520` |
-| `import-timeout-seconds` | number | `300` |
+| `import-timeout-seconds` | number | `120` |
 | `dry-run` | boolean | `false` |
 | `artifact-retention-days` | number | `14` |
 | `upload-diagnostics` | boolean | `true` |
