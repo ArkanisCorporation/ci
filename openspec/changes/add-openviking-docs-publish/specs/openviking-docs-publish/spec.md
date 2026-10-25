@@ -51,7 +51,7 @@ removed from the repository is absent from the mirror after the next successful 
 
 ### Requirement: Retrieval metadata
 
-Each import SHALL use `processing_mode` from the `processing-mode` input (default `vectors_only`)
+Each import SHALL use `processing_mode` from the `processing-mode` input (default `semantic_and_vectors`)
 and SHALL replace the mirror's tags with `repo=<repository name>` and `commit=<checked-out SHA>`.
 
 #### Scenario: Tags identify the source
@@ -136,7 +136,7 @@ older pending one, and a running import SHALL NOT be cancelled.
 
 Every run SHALL write a step summary (runner kind, requested labels, published file count, target
 URI, commit, outcome), `run-metadata.json`, and diagnostics uploaded even on failure, and SHALL
-expose outputs `published` (`true` only after a successful import), `file-count`, and `target-uri`.
+expose outputs `published` (`true` only after OpenViking accepted the import), `file-count`, and `target-uri`.
 OpenViking error responses SHALL be reported with their HTTP status and error body, with the key
 redacted.
 

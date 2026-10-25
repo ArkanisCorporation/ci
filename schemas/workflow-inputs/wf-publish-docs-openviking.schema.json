@@ -35,7 +35,7 @@
         "vectors_only",
         "semantic_and_vectors"
       ],
-      "default": "vectors_only"
+      "default": "semantic_and_vectors"
     },
     "max-archive-bytes": {
       "type": "integer",
@@ -45,8 +45,8 @@
     },
     "import-timeout-seconds": {
       "type": "integer",
-      "description": "Seconds to wait for OpenViking to finish processing the import.",
-      "default": 300,
+      "description": "Seconds to wait for OpenViking to accept the import.",
+      "default": 120,
       "minimum": 1
     },
     "dry-run": {

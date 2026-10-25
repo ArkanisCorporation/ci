@@ -53,20 +53,20 @@ on:
         required: false
         default: viking://resources/arkanis/projects
       processing-mode:
-        description: OpenViking processing_mode, vectors_only or semantic_and_vectors.
+        description: OpenViking processing_mode. semantic_and_vectors adds the LLM abstracts and overviews that retrieval ranks on; vectors_only skips the LLM.
         type: string
         required: false
-        default: vectors_only
+        default: semantic_and_vectors
       max-archive-bytes:
         description: Fail before uploading when the docs archive is larger than this many bytes.
         type: number
         required: false
         default: 20971520
       import-timeout-seconds:
-        description: Seconds to wait for OpenViking to finish processing the import before the request fails.
+        description: Seconds to wait for OpenViking to accept the import (upload parse and queueing; LLM and embedding processing continue after the job) before the request fails.
         type: number
         required: false
-        default: 300
+        default: 120
       dry-run:
         description: Collect and archive docs without contacting OpenViking. Allowed on any ref and event.
         type: boolean
@@ -89,7 +89,7 @@ on:
         default: 15
     outputs:
       published:
-        description: True only after OpenViking accepted the import.
+        description: True only after OpenViking accepted the import. Semantic and embedding processing may still be running.
         value: ${{ jobs.publish.outputs.published }}
       file-count:
         description: Number of docs selected for publishing.
@@ -307,15 +307,17 @@ jobs:
           fi
 
           # `to` replaces an existing target, so each run converges the mirror on this commit.
-          # `wait` blocks until processing finishes. OpenViking v0.5.2 has no server-side timeout
-          # field (it rejects unknown fields), so curl's --max-time is the only bound on the wait.
+          # `wait: false` returns once OpenViking has parsed the archive and queued the semantic and
+          # embedding work, so LLM processing on the extraction host never holds a shared runner.
+          # OpenViking v0.5.2 has no server-side timeout field (it rejects unknown fields), so curl's
+          # --max-time bounds the request.
           jq -n \
             --arg temp "$temp_file_id" \
             --arg to "$TARGET_URI" \
             --arg mode "$PROCESSING_MODE" \
             --arg repo "repo=${REPOSITORY_NAME}" \
             --arg commit "commit=${GITHUB_SHA}" \
-            '{temp_file_id: $temp, to: $to, processing_mode: $mode, tags: [$repo, $commit], tag_mode: "replace", wait: true}' \
+            '{temp_file_id: $temp, to: $to, processing_mode: $mode, tags: [$repo, $commit], tag_mode: "replace", wait: false}' \
             > "${RUNNER_TEMP}/import-request.json"
           cp "${RUNNER_TEMP}/import-request.json" artifacts/meta/openviking-import-request.json
           status="$(ov_curl --max-time "$IMPORT_TIMEOUT" -o "${RUNNER_TEMP}/import.json" -w '%{http_code}' \
@@ -323,7 +325,7 @@ jobs:
             "${base}/api/v1/resources")"
           check import "$status" "${RUNNER_TEMP}/import.json"
           echo "published=true" >> "$GITHUB_OUTPUT"
-          echo "Imported into ${TARGET_URI}"
+          echo "Import accepted into ${TARGET_URI}; OpenViking finishes processing in the background."
 
       - name: Write run metadata @ artifacts/meta/run-metadata.json
         id: metadata
@@ -399,7 +401,7 @@ jobs:
           TARGET_URI: ${{ steps.collect.outputs.target-uri }}
         run: |
           if [[ "$PUBLISHED" == "true" ]]; then
-            outcome="published"
+            outcome="published (OpenViking finishes processing in the background)"
           elif [[ "$SKIPPED" == "true" ]]; then
             outcome="skipped: no tracked file matches include-paths, mirror unchanged"
           elif [[ "$DRY_RUN" == "true" ]]; then

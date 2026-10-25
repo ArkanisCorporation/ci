@@ -19,7 +19,7 @@ secrets.
     `git ls-files`, then zips exactly that list with `git archive`;
   - uploads it (`POST /api/v1/resources/temp_upload`) and imports it with `to=<target-root>/<repo>`
     (`POST /api/v1/resources`), so each run replaces the repo's mirror, with `processing_mode`
-    `vectors_only` and tags `repo=<repo>`, `commit=<sha>`;
+    `semantic_and_vectors` and tags `repo=<repo>`, `commit=<sha>`;
   - reads the key and URL from the runner environment, masks the key, and fails closed when they
     are absent, unless `dry-run`;
   - publishes only from the caller's default branch, and refuses `pull_request` events;
