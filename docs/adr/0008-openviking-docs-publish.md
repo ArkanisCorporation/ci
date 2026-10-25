@@ -23,7 +23,7 @@ The organization is on GitHub Free, where organization Actions secrets are unava
 - **Publishing gate:** imports run only for pushes or dispatches on the caller's default branch, never for pull request events, so the mirror only ever holds reviewed content. Dry runs are allowed anywhere.
 - **Layout:** one import per run, `to = viking://resources/arkanis/projects/<repository name>`, preserving repository-relative paths so directory scopes work in search. The repository name comes from the event context, not caller input.
   Tags are `repo=<name>` and `commit=<sha>`; per-subtree tags were rejected because OpenViking applies tags per request.
-- **Processing:** `semantic_and_vectors`, so mirrored docs get the LLM abstracts and overviews that retrieval ranks on. The import is accepted asynchronously (`wait: false`), so the LLM pass never holds a shared runner; failures after acceptance show in OpenViking's task list, not in CI.
+- **Processing:** `semantic_and_vectors`, so mirrored docs get the LLM abstracts and overviews that retrieval ranks on. The import is accepted asynchronously (`wait: false`), so the LLM pass never holds a shared runner; failures after acceptance show in OpenViking's task list, not in CI. On v0.5.2 that includes parse errors: with `wait: false` the server returns a task id before parsing.
 - **Packaging:** `git ls-files` with `:(glob)` pathspecs selects tracked docs with GitHub `paths:` semantics; `git archive` zips exactly that list. An empty selection skips the import instead of wiping the mirror.
 - **Deletions:** each import replaces the `to` target. OpenViking documents that files absent from a re-import "may be removed"; observed behaviour is recorded below after live verification. If deletions do not propagate, a prune step that lists the target and deletes files absent from the archive is added before rollout.
 - **Adoption:** `ArkanisCorporation/repo-standards` owns the caller template, the adoption check, and the adoption PRs. The default doc paths are a contract between both repositories, pinned by validators on each side. Repositories opt out with the `openviking-docs-optout` topic.
@@ -37,6 +37,13 @@ Mirror content is visible to every user of the OpenViking account, which is why 
 
 ## Live verification
 
-Pending (task group 7 of `openspec/changes/add-openviking-docs-publish`): first import, stored layout, tags, scoped search, and deletion propagation, with the OpenViking version observed.
+Observed against OpenViking v0.5.2 on 2026-10-25 (ci v1.7.1, [run 40196559396](https://github.com/ArkanisCorporation/ci/actions/runs/40196559396)):
+
+- **API:** `add_resource` rejects unknown body fields and has no server-side `timeout`, so the request carries `wait: true` and curl bounds the wait (ci v1.7.1).
+- **First import:** 37 files parsed by `MarkdownParser`, 77 contexts embedded, about 18 seconds, `vectors_only` with no semantic calls. Search hits had no abstracts, so retrieval ranked them poorly.
+- **Semantic import (ci v1.7.2, [run 40199205439](https://github.com/ArkanisCorporation/ci/actions/runs/40199205439)):** the request returned within a second with only a `task_id`, so parsing is asynchronous too. The semantic pass on `ollama/qwen3:4b-instruct-2507-q8_0` then took about 12 minutes for 37 docs (about 130 semantic nodes, no errors) and wrote abstracts plus a `.overview.md` per directory. Summaries from that small model can misstate details (one called Tailscale a feature of this design), so treat them as navigation aids and read the source section.
+- **Layout:** no archive-root directory. Each Markdown file becomes a directory named after the file without `.md`, holding its sections, for example `.../ci/docs/adr/0008-openviking-docs-publish/`. Directory scopes such as `.../ci/docs/adr` work as intended.
+- **Scoped search:** a search under `.../projects/ci` returns the matching catalog section and ADR first.
+- **Deletion propagation:** pending (task 7.3).
 
 Related: ARK-642, ARK-651, ARK-652.
