@@ -23,6 +23,7 @@ Audience: consumers and platform maintainers.
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying changes. | untrusted or trusted-build |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build |
+| `wf-publish-docs-openviking.yml` | Mirror caller docs into OpenViking from the default branch. | publish |
 
 ## Public Workflow Permissions
 
@@ -45,14 +46,17 @@ Audience: consumers and platform maintainers.
 | `wf-verify-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | verification manifest |
 | `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
+| `wf-publish-docs-openviking.yml` | `contents: read` | `published`, `file-count`, `target-uri`, file list, OpenViking responses, metadata, manifest |
 
 ## Repository Workflows
 
 | Workflow | Purpose | Permissions |
 |---|---|---|
 | `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: write` for semantic-release dry-run tag push checks.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
+| `openviking-docs.yml` | Mirror this repository's docs into OpenViking through the released `@v1` workflow, like any adopted consumer. | `contents: read` |
 
 `release.yml` passes `vars.RUNNER_DEFAULT || 'daedalus'` and `runs-on-self-hosted: true` to every repository-local reusable workflow call.
+Its `docs-openviking` job calls `wf-publish-docs-openviking.yml` with `dry-run: true`, so pull requests prove doc collection without OpenViking access.
 
 ## Common Inputs
 
@@ -322,6 +326,27 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `labels` | string | no | `""` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-publish-docs-openviking.yml
+
+Schema: `schemas/workflow-inputs/wf-publish-docs-openviking.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"arkanis-runners"` | Single runner label used when runs-on-json is empty. Only arkanis-runners can reach OpenViking. |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `true` | n/a |
+| `include-paths` | string | no | `"README.md\nAGENTS.md\nCLAUDE.md\ndocs/**/*.md\n.claude/rules/**/*.md\n.claude/context/**/*.md\nopenspec/specs/**/*.md\n"` | Newline-separated globs (GitHub paths filter semantics) selecting tracked docs. Must equal repo-standards OPENVIKING_DOC_GLOBS by default. |
+| `target-root` | string | no | `"viking://resources/arkanis/projects"` | OpenViking URI under which the mirror is stored as <target-root>/<repository name>. |
+| `processing-mode` | string | no | `"vectors_only"` | Allowed: "vectors_only", "semantic_and_vectors" |
+| `max-archive-bytes` | integer | no | `20971520` | Fail before uploading when the docs archive is larger than this.<br>Minimum: 1 |
+| `import-timeout-seconds` | integer | no | `300` | Seconds OpenViking may spend processing the import.<br>Minimum: 1 |
+| `dry-run` | boolean | no | `false` | Collect and archive docs without contacting OpenViking. Allowed on any ref and event. |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `15` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
 
@@ -1880,6 +1905,91 @@ Side effects:
 - Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
 - Applies deployment changes.
 - Writes deploy output under `output-path/environment-name`.
+
+## OpenViking Docs Publish Workflow
+
+`wf-publish-docs-openviking.yml` mirrors a caller's docs into OpenViking, so agents in other repositories can find them by search ([ADR-0008](adr/0008-openviking-docs-publish.md)).
+Git stays the source of truth.
+Each run imports the tracked files matching `include-paths` as one archive to `<target-root>/<repository name>`, replacing the previous mirror.
+Consumer repositories normally adopt it through the adoption PR that `ArkanisCorporation/repo-standards` opens with its [caller template](https://github.com/ArkanisCorporation/repo-standards/blob/main/templates/openviking-docs.yml).
+Repositories opt out with the `openviking-docs-optout` topic.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> dry{dry-run?}
+  dry -->|no| gate{default branch, not a PR event?}
+  gate -->|no| refuse>Fail: publishing gate]
+  gate -->|yes| creds[[Check and mask runner credentials]]
+  creds --> collect[[git ls-files include-paths, git archive]]
+  dry -->|yes| collect
+  collect --> empty{any docs?}
+  empty -->|no| skip>Skip: mirror unchanged]
+  empty -->|yes| size{under max-archive-bytes?}
+  size -->|no| toobig>Fail: largest files listed]
+  size -->|yes, dry-run| summary>Step summary and diagnostics]
+  size -->|yes| ov[(OpenViking temp_upload and import)]
+  ov --> summary
+  summary --> outputs(("published, file-count, target-uri"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,creds,collect action
+  class dry,gate,empty,size decision
+  class refuse,skip,toobig,summary artifact
+  class outputs output
+  class ov external
+```
+
+Preconditions:
+
+- Publishing runs on `arkanis-runners` (the default), the only pool whose pods reach OpenViking in-cluster and receive `OPENVIKING_URL` and `OPENVIKING_API_KEY` from the runner (ARK-651, ARK-652).
+  There is no secret input; on any other runner the job fails closed unless `dry-run` is true.
+- The runner provides `git`, `curl`, and `jq`. The self-hosted preflight fails closed when one is missing.
+- Publishing requires a push or dispatch on the caller's default branch. Pull request events and other refs fail unless `dry-run` is true.
+
+Side effects:
+
+- One `POST /api/v1/resources/temp_upload` and one `POST /api/v1/resources` with `to`, `processing_mode`, tags `repo=<name>` and `commit=<sha>`, and `wait`.
+- No writes to the caller repository. Dry runs make no OpenViking request.
+- Runs for one repository and target are serialized and never cancelled mid-import.
+- The key is masked before use and passed to `curl` through a config on stdin, never on a command line.
+
+The default `include-paths` must equal `OPENVIKING_DOC_GLOBS` in `ArkanisCorporation/repo-standards` and the `paths:` filter of its caller template; the validator pins this side.
+
+Example:
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - AGENTS.md
+      - CLAUDE.md
+      - docs/**/*.md
+      - .claude/rules/**/*.md
+      - .claude/context/**/*.md
+      - openspec/specs/**/*.md
+      - .github/workflows/openviking-docs.yml
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-docs-openviking.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: arkanis-runners
+      runs-on-self-hosted: true
+```
 
 ## Platform Selftest Workflow
 

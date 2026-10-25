@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-publish-docs-openviking/v1/schema.json",
+  "title": "wf-publish-docs-openviking inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs-on": {
+      "type": "string",
+      "description": "Single runner label used when runs-on-json is empty. Only arkanis-runners can reach OpenViking.",
+      "default": "arkanis-runners"
+    },
+    "runs-on-json": {
+      "type": "string",
+      "default": ""
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": true
+    },
+    "include-paths": {
+      "type": "string",
+      "description": "Newline-separated globs (GitHub paths filter semantics) selecting tracked docs. Must equal repo-standards OPENVIKING_DOC_GLOBS by default.",
+      "default": "README.md\nAGENTS.md\nCLAUDE.md\ndocs/**/*.md\n.claude/rules/**/*.md\n.claude/context/**/*.md\nopenspec/specs/**/*.md\n"
+    },
+    "target-root": {
+      "type": "string",
+      "description": "OpenViking URI under which the mirror is stored as <target-root>/<repository name>.",
+      "pattern": "^viking://[A-Za-z0-9._/~-]+$",
+      "default": "viking://resources/arkanis/projects"
+    },
+    "processing-mode": {
+      "type": "string",
+      "enum": [
+        "vectors_only",
+        "semantic_and_vectors"
+      ],
+      "default": "vectors_only"
+    },
+    "max-archive-bytes": {
+      "type": "integer",
+      "description": "Fail before uploading when the docs archive is larger than this.",
+      "default": 20971520,
+      "minimum": 1
+    },
+    "import-timeout-seconds": {
+      "type": "integer",
+      "description": "Seconds OpenViking may spend processing the import.",
+      "default": 300,
+      "minimum": 1
+    },
+    "dry-run": {
+      "type": "boolean",
+      "description": "Collect and archive docs without contacting OpenViking. Allowed on any ref and event.",
+      "default": false
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 14,
+      "minimum": 1,
+      "maximum": 90
+    },
+    "upload-diagnostics": {
+      "type": "boolean",
+      "default": true
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 15,
+      "minimum": 1
+    }
+  }
+}

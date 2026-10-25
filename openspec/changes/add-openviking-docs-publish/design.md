@@ -78,9 +78,11 @@ git archive --format=zip -o "$RUNNER_TEMP/docs.zip" HEAD -- "${files[@]}"
   the list comes from `git ls-files` (which tolerates misses) and the archive is built from that
   exact list. Verified locally.
 - Only tracked files at `HEAD` are included. Generated or untracked files cannot leak in.
-- No `zip` binary is needed. The job needs `git`, `curl`, and `python3` (for JSON request bodies and
-  response parsing). The self-hosted preflight records all three and fails closed if any is missing.
-  Hosted runners have them.
+- No `zip` binary is needed. The job needs `git`, `curl`, and `jq` (for JSON request bodies and
+  response parsing). All three are installed explicitly in the upstream `actions/runner` image that
+  `arkanis-runners` uses, and hosted runners have them. `python3` was the first choice, but it is only
+  a transitive dependency there. The self-hosted preflight records all three and fails closed if any
+  is missing.
 
 Checkout is a normal shallow checkout with `persist-credentials: false`.
 
@@ -145,8 +147,10 @@ empty `runs-on`. On a hosted runner, D1's env check fails closed with a message 
 
 ### D10. This repo adopts the workflow through the repo-standards template
 
-`.github/workflows/openviking-docs.yml` in `ci` is the repo-standards template verbatim, calling
-`ArkanisCorporation/ci/...@v1`. The full reference is what the adoption check detects; a local
+`.github/workflows/openviking-docs.yml` in `ci` follows the repo-standards template and calls
+`ArkanisCorporation/ci/...@v1`. It differs in two places: this repo's validator requires top-level
+`permissions: {}` in every workflow (the template uses `contents: read` there, because alint's
+`gha-workflow-contents-read` rule expects it in consumers), and it adds the job display name. The full reference is what the adoption check detects; a local
 `./` call would leave `ci` FAIL. Its first push run will race the release that moves `v1` and may
 fail with a missing workflow. The verification task dispatches it after the release. The PR-time
 dogfood job in `release.yml` calls `./.github/workflows/wf-publish-docs-openviking.yml` with
@@ -165,9 +169,12 @@ dogfood job in `release.yml` calls `./.github/workflows/wf-publish-docs-openviki
 | `max-archive-bytes` | number | `20971520` |
 | `import-timeout-seconds` | number | `300` |
 | `dry-run` | boolean | `false` |
+| `artifact-retention-days` | number | `14` |
+| `upload-diagnostics` | boolean | `true` |
 | `timeout-minutes` | number | `15` |
 
-Outputs: `published`, `file-count`, `target-uri`. No secrets.
+Outputs: `published`, `file-count`, `target-uri`, plus the repo-standard `artifact-manifest` and
+`run-metadata` paths. No secrets.
 
 ## Risks / Trade-offs
 
@@ -176,8 +183,9 @@ Outputs: `published`, `file-count`, `target-uri`. No secrets.
 - **[Archive root wrapping]** If OV nests the archive under an extra directory (for example
   `docs.zip/`), paths change. Verification checks the stored layout. The fix would be a `source_name`
   or archive-prefix adjustment.
-- **[`python3` missing on the ARC runner image]** Preflight fails closed with a clear message. The
-  first live run will show it. The fallback is `actions/setup-python` on the self-hosted path.
+- **[A tool missing on the ARC runner image]** `git`, `curl` and `jq` are explicit packages in the
+  upstream runner Dockerfile. If a future image drops one, preflight fails closed with a clear
+  message.
 - **[Pool contention]** Imports share `arkanis-runners` (`maxRunners: 2`) with deploys. Imports are
   short, the `paths:` filter limits how often they run, and concurrency stops pile-ups. This cost was
   accepted on ARK-642.

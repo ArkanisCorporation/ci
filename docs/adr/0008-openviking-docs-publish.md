@@ -1,0 +1,42 @@
+# ADR-0008: OpenViking docs publish from in-cluster runners
+
+Status: accepted
+
+Audience: platform maintainers, security reviewers, and repository owners adopting the docs mirror.
+Last verified: 2026-10-25.
+
+## Context
+
+ARK-642 mirrors every Arkanis repository's docs into OpenViking, so an agent working in one repository can find another repository's knowledge by search.
+Git stays the source of truth and OpenViking holds a read-only copy.
+OpenViking's API is a ClusterIP service with no public endpoint; its Tailscale ingress is admin-only.
+The organization is on GitHub Free, where organization Actions secrets are unavailable to private repositories, so a per-repository secret would mean manual setup in every consumer.
+
+## Decision
+
+- **Reachability:** publishing runs on the in-cluster `arkanis-runners` ARC pool, whose pods a NetworkPolicy admits to OpenViking (ARK-651).
+  A Tailscale step on GitHub-hosted runners was rejected: it needs an ACL grant to the cluster ingress tag and would expose every internal admin UI to CI.
+- **Identity:** a dedicated non-admin OpenViking user `ci`, limited to importing resources (ARK-651).
+- **Credential delivery:** the runner pool exposes `OPENVIKING_URL` and `OPENVIKING_API_KEY` as plain container env from 1Password via External Secrets (ARK-652), following *Runner-Advertised Capabilities* in [runner-contract.md](../runner-contract.md).
+  The workflow takes no secret input. Because GitHub does not mask plain env, the workflow masks the key itself and passes it to `curl` through a config on stdin.
+  Any job on the pool can read the key; that is accepted because the pool already runs with the deployer service account, and the key is non-admin.
+- **Publishing gate:** imports run only for pushes or dispatches on the caller's default branch, never for pull request events, so the mirror only ever holds reviewed content. Dry runs are allowed anywhere.
+- **Layout:** one import per run, `to = viking://resources/arkanis/projects/<repository name>`, preserving repository-relative paths so directory scopes work in search. The repository name comes from the event context, not caller input.
+  Tags are `repo=<name>` and `commit=<sha>`; per-subtree tags were rejected because OpenViking applies tags per request.
+- **Processing:** `vectors_only`, deterministic and independent of the off-cluster extraction LLM.
+- **Packaging:** `git ls-files` with `:(glob)` pathspecs selects tracked docs with GitHub `paths:` semantics; `git archive` zips exactly that list. An empty selection skips the import instead of wiping the mirror.
+- **Deletions:** each import replaces the `to` target. OpenViking documents that files absent from a re-import "may be removed"; observed behaviour is recorded below after live verification. If deletions do not propagate, a prune step that lists the target and deletes files absent from the archive is added before rollout.
+- **Adoption:** `ArkanisCorporation/repo-standards` owns the caller template, the adoption check, and the adoption PRs. The default doc paths are a contract between both repositories, pinned by validators on each side. Repositories opt out with the `openviking-docs-optout` topic.
+
+## Consequences
+
+Consumers adopt with one caller file and no secrets or inputs.
+The workflow only works on `arkanis-runners`; elsewhere it can only dry-run.
+Imports share the pool's two runners with deployments; the callers' `paths:` filter and per-repository concurrency keep that load small.
+Mirror content is visible to every user of the OpenViking account, which is why the opt-out topic exists.
+
+## Live verification
+
+Pending (task group 7 of `openspec/changes/add-openviking-docs-publish`): first import, stored layout, tags, scoped search, and deletion propagation, with the OpenViking version observed.
+
+Related: ARK-642, ARK-651, ARK-652.

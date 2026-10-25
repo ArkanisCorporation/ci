@@ -1,0 +1,442 @@
+# Summary:
+#   Reusable workflow that mirrors a caller repository's docs into OpenViking (ARK-642).
+# Remarks:
+#   Git stays the source of truth; OpenViking holds a read-only, cross-repository discovery copy.
+#   Each run imports the tracked files matching include-paths as one archive to
+#   <target-root>/<repository name>, replacing the previous mirror.
+#   Trust zone: publish. It writes to an external store, but only from a push or dispatch on the
+#   caller's default branch; any other ref or a pull request event fails unless dry-run is true.
+#   Preconditions: the runner provides OPENVIKING_URL and OPENVIKING_API_KEY as environment
+#   variables. Only the in-cluster arkanis-runners pool does (ARK-651 network, ARK-652 key), so
+#   that is the default. There is no secret input. The key is plain runner env, so this workflow
+#   masks it itself and passes it to curl on stdin, never on a command line.
+#   Side effects: one temp upload and one resource import per run. Nothing is written to the
+#   caller repository. Dry runs make no OpenViking request.
+#   The default include-paths must equal ArkanisCorporation/repo-standards OPENVIKING_DOC_GLOBS
+#   and the paths filter of its templates/openviking-docs.yml caller.
+
+name: wf-publish-docs-openviking
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Single runner label used when runs-on-json is empty. Only arkanis-runners can reach OpenViking.
+        type: string
+        required: false
+        default: arkanis-runners
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels. Overrides runs-on when set.
+        type: string
+        required: false
+        default: ""
+      runs-on-self-hosted:
+        description: True when the effective runner selection targets self-hosted runners.
+        type: boolean
+        required: false
+        default: true
+      include-paths:
+        description: Newline-separated globs (GitHub paths filter semantics) selecting tracked docs to publish.
+        type: string
+        required: false
+        default: |
+          README.md
+          AGENTS.md
+          CLAUDE.md
+          docs/**/*.md
+          .claude/rules/**/*.md
+          .claude/context/**/*.md
+          openspec/specs/**/*.md
+      target-root:
+        description: OpenViking URI under which the repository mirror is stored as <target-root>/<repository name>.
+        type: string
+        required: false
+        default: viking://resources/arkanis/projects
+      processing-mode:
+        description: OpenViking processing_mode, vectors_only or semantic_and_vectors.
+        type: string
+        required: false
+        default: vectors_only
+      max-archive-bytes:
+        description: Fail before uploading when the docs archive is larger than this many bytes.
+        type: number
+        required: false
+        default: 20971520
+      import-timeout-seconds:
+        description: Seconds OpenViking may spend processing the import before the request fails.
+        type: number
+        required: false
+        default: 300
+      dry-run:
+        description: Collect and archive docs without contacting OpenViking. Allowed on any ref and event.
+        type: boolean
+        required: false
+        default: false
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+      upload-diagnostics:
+        description: Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact.
+        type: boolean
+        required: false
+        default: true
+      timeout-minutes:
+        description: Publish job timeout.
+        type: number
+        required: false
+        default: 15
+    outputs:
+      published:
+        description: True only after OpenViking accepted the import.
+        value: ${{ jobs.publish.outputs.published }}
+      file-count:
+        description: Number of docs selected for publishing.
+        value: ${{ jobs.publish.outputs.file-count }}
+      target-uri:
+        description: OpenViking URI of the repository mirror.
+        value: ${{ jobs.publish.outputs.target-uri }}
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.publish.outputs.artifact-manifest }}
+      run-metadata:
+        description: Path to the generated run metadata.
+        value: ${{ jobs.publish.outputs.run-metadata }}
+
+permissions: {}
+
+jobs:
+  publish:
+    name: docs @ ${{ github.head_ref || github.ref_name }}
+    runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # Never cut off an import mid-request; GitHub keeps only the newest pending run per group,
+    # so the mirror converges on the latest commit.
+    concurrency:
+      group: publish-docs-openviking-${{ github.repository }}-${{ inputs.target-root }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    outputs:
+      published: ${{ steps.import.outputs.published || 'false' }}
+      file-count: ${{ steps.collect.outputs.file-count }}
+      target-uri: ${{ steps.collect.outputs.target-uri }}
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+      run-metadata: ${{ steps.metadata.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DRY_RUN: ${{ inputs.dry-run }}
+    steps:
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+        run: |
+          mkdir -p artifacts/meta
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Dry run: ${DRY_RUN}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            for tool in git curl jq; do
+              path="$(command -v "$tool" || true)"
+              echo "${tool}: ${path:-unavailable}"
+            done
+          } | tee artifacts/meta/runner-contract.txt
+
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            echo "Workspace: ${GITHUB_WORKSPACE}"
+          } | tee artifacts/meta/self-hosted-preflight.txt
+          missing=()
+          for tool in git curl jq; do
+            command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error title=Missing tools::This workflow needs ${missing[*]} on the runner."
+            exit 1
+          fi
+
+      # The mirror represents reviewed content, so only the default branch may overwrite it.
+      - name: Check publishing gate @ ${{ github.ref_name }}
+        if: ${{ !inputs.dry-run }}
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request | pull_request_target)
+              echo "::error title=Publishing gate::Docs are published only from the default branch, never on ${EVENT_NAME}. Use dry-run: true to verify on pull requests."
+              exit 1
+              ;;
+          esac
+          if [[ "$GITHUB_REF" != "$DEFAULT_REF" ]]; then
+            echo "::error title=Publishing gate::Docs are published only from ${DEFAULT_REF}, not ${GITHUB_REF}. Use dry-run: true elsewhere."
+            exit 1
+          fi
+
+      - name: Check OpenViking credentials @ runner environment
+        if: ${{ !inputs.dry-run }}
+        run: |
+          if [[ -z "${OPENVIKING_API_KEY:-}" || -z "${OPENVIKING_URL:-}" ]]; then
+            echo "::error title=No OpenViking credentials::OPENVIKING_URL and OPENVIKING_API_KEY must come from the runner. Run this job on arkanis-runners (runs-on: arkanis-runners, runs-on-self-hosted: true), or set dry-run: true."
+            exit 1
+          fi
+          # Plain runner env is not auto-masked like a GitHub secret.
+          echo "::add-mask::${OPENVIKING_API_KEY}"
+          if [[ ! "$OPENVIKING_URL" =~ ^https?://[^[:space:]]+$ ]]; then
+            echo "::error title=Invalid OPENVIKING_URL::OPENVIKING_URL must be an http(s) URL."
+            exit 1
+          fi
+          echo "OpenViking endpoint: ${OPENVIKING_URL%/}"
+
+      - name: Collect docs @ ${{ github.sha }}
+        id: collect
+        env:
+          INCLUDE_PATHS: ${{ inputs.include-paths }}
+          TARGET_ROOT: ${{ inputs.target-root }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+          MAX_ARCHIVE_BYTES: ${{ inputs.max-archive-bytes }}
+        run: |
+          if [[ ! "$TARGET_ROOT" =~ ^viking://[A-Za-z0-9._/~-]+$ ]]; then
+            echo "::error title=Invalid target-root::target-root must be a viking:// URI of letters, digits, '.', '_', '-', '~' and '/'."
+            exit 1
+          fi
+          target_uri="${TARGET_ROOT%/}/${REPOSITORY_NAME}"
+          echo "target-uri=${target_uri}" >> "$GITHUB_OUTPUT"
+
+          # Each line becomes a :(glob) pathspec, whose ** matches zero or more directories
+          # like a GitHub paths filter. Reject pathspec magic and paths leaving the repository.
+          pathspecs=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            if [[ "$line" == /* || "$line" == :* || "$line" == *..* ]]; then
+              echo "::error title=Invalid include-paths::'${line}' must be a repository-relative glob without '..' or a leading ':' or '/'."
+              exit 1
+            fi
+            pathspecs+=(":(glob)${line}")
+          done <<< "$INCLUDE_PATHS"
+          if (( ${#pathspecs[@]} == 0 )); then
+            echo "::error title=Invalid include-paths::include-paths has no globs."
+            exit 1
+          fi
+
+          # git ls-files tolerates globs that match nothing; git archive would abort on them,
+          # so the archive is built from this exact list. Only tracked files are published.
+          mapfile -d '' files < <(git ls-files -z -- "${pathspecs[@]}")
+          echo "file-count=${#files[@]}" >> "$GITHUB_OUTPUT"
+          if (( ${#files[@]} == 0 )); then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "No tracked file matches include-paths; the mirror is left unchanged."
+            exit 0
+          fi
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${files[@]}" > artifacts/meta/files.txt
+
+          archive="${RUNNER_TEMP}/openviking-docs.zip"
+          git archive --format=zip -o "$archive" HEAD -- "${files[@]}"
+          size="$(stat -c %s "$archive")"
+          echo "archive-bytes=${size}" >> "$GITHUB_OUTPUT"
+          echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+          echo "Collected ${#files[@]} docs into ${size} bytes for ${target_uri}"
+          if (( size > MAX_ARCHIVE_BYTES )); then
+            {
+              echo "Archive is ${size} bytes, over max-archive-bytes ${MAX_ARCHIVE_BYTES}. Largest files:"
+              for f in "${files[@]}"; do printf '%s\t%s\n' "$(stat -c %s "$f")" "$f"; done | sort -rn | head -10
+            } | tee artifacts/meta/largest-files.txt
+            echo "::error title=Docs archive too large::${size} bytes exceeds max-archive-bytes ${MAX_ARCHIVE_BYTES}; see largest-files.txt."
+            exit 1
+          fi
+
+      - name: Import docs into OpenViking @ ${{ steps.collect.outputs.target-uri }}
+        id: import
+        if: ${{ !inputs.dry-run && steps.collect.outputs.skipped == 'false' }}
+        env:
+          ARCHIVE: ${{ steps.collect.outputs.archive }}
+          TARGET_URI: ${{ steps.collect.outputs.target-uri }}
+          PROCESSING_MODE: ${{ inputs.processing-mode }}
+          IMPORT_TIMEOUT: ${{ inputs.import-timeout-seconds }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          base="${OPENVIKING_URL%/}"
+          responses=artifacts/meta/openviking
+
+          # The key travels in a curl config read from stdin (printf is a shell builtin), so it
+          # never appears on a process command line. Config strings need \ and " escaped.
+          config_key="${OPENVIKING_API_KEY//\\/\\\\}"
+          config_key="${config_key//\"/\\\"}"
+          ov_curl() {
+            printf 'header = "X-API-Key: %s"\n' "$config_key" | curl -K - --silent --show-error "$@"
+          }
+          # Keep the response for diagnostics and fail with the HTTP status and OpenViking's error
+          # body. Responses never echo request headers, so they cannot contain the key.
+          check() {
+            local name="$1" status="$2" body="$3"
+            cp "$body" "${responses}-${name}.json"
+            if [[ "$status" != 2* ]] || [[ "$(jq -r '.status // "ok"' "$body" 2>/dev/null)" == "error" ]]; then
+              echo "::error title=OpenViking ${name} failed::HTTP ${status}: $(head -c 2000 "${responses}-${name}.json")"
+              exit 1
+            fi
+          }
+
+          status="$(ov_curl --max-time 120 -o "${RUNNER_TEMP}/upload.json" -w '%{http_code}' \
+            -F "file=@${ARCHIVE};filename=${REPOSITORY_NAME}-docs.zip;type=application/zip" \
+            "${base}/api/v1/resources/temp_upload")"
+          check upload "$status" "${RUNNER_TEMP}/upload.json"
+          temp_file_id="$(jq -r '.result.temp_file_id // empty' "${RUNNER_TEMP}/upload.json")"
+          if [[ -z "$temp_file_id" ]]; then
+            echo "::error title=OpenViking upload failed::temp_upload returned no temp_file_id."
+            exit 1
+          fi
+
+          # `to` replaces an existing target, so each run converges the mirror on this commit.
+          jq -n \
+            --arg temp "$temp_file_id" \
+            --arg to "$TARGET_URI" \
+            --arg mode "$PROCESSING_MODE" \
+            --arg repo "repo=${REPOSITORY_NAME}" \
+            --arg commit "commit=${GITHUB_SHA}" \
+            --argjson timeout "$IMPORT_TIMEOUT" \
+            '{temp_file_id: $temp, to: $to, processing_mode: $mode, tags: [$repo, $commit], tag_mode: "replace", wait: true, timeout: $timeout}' \
+            > "${RUNNER_TEMP}/import-request.json"
+          cp "${RUNNER_TEMP}/import-request.json" artifacts/meta/openviking-import-request.json
+          status="$(ov_curl --max-time "$(( IMPORT_TIMEOUT + 60 ))" -o "${RUNNER_TEMP}/import.json" -w '%{http_code}' \
+            -H 'Content-Type: application/json' --data-binary "@${RUNNER_TEMP}/import-request.json" \
+            "${base}/api/v1/resources")"
+          check import "$status" "${RUNNER_TEMP}/import.json"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "Imported into ${TARGET_URI}"
+
+      - name: Write run metadata @ artifacts/meta/run-metadata.json
+        id: metadata
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+        run: |
+          mkdir -p artifacts/meta
+          git_version="$(git --version 2>/dev/null | awk '{print $3}')"
+          curl_version="$(curl --version 2>/dev/null | awk 'NR==1{print $2}')"
+          jq_version="$(jq --version 2>/dev/null)"
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-publish-docs-openviking",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${RUNS_ON_JSON}
+            },
+            "tool_versions": {
+              "git": "${git_version:-unavailable}",
+              "curl": "${curl_version:-unavailable}",
+              "jq": "${jq_version:-unavailable}"
+            }
+          }
+          JSON
+          echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
+
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-publish-docs-openviking",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "publish"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-docs-openviking-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary @ ${{ steps.collect.outputs.target-uri || github.run_id }}
+        if: always()
+        env:
+          FILE_COUNT: ${{ steps.collect.outputs.file-count || '0' }}
+          ARCHIVE_BYTES: ${{ steps.collect.outputs.archive-bytes || '0' }}
+          SKIPPED: ${{ steps.collect.outputs.skipped }}
+          PUBLISHED: ${{ steps.import.outputs.published || 'false' }}
+          TARGET_URI: ${{ steps.collect.outputs.target-uri }}
+        run: |
+          if [[ "$PUBLISHED" == "true" ]]; then
+            outcome="published"
+          elif [[ "$SKIPPED" == "true" ]]; then
+            outcome="skipped: no tracked file matches include-paths, mirror unchanged"
+          elif [[ "$DRY_RUN" == "true" ]]; then
+            outcome="dry run: nothing sent to OpenViking"
+          else
+            outcome="not published (see the failed step)"
+          fi
+          {
+            echo "# OpenViking docs"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Outcome | ${outcome} |"
+            echo "| Target | \`${TARGET_URI}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Docs | ${FILE_COUNT} |"
+            echo "| Archive bytes | ${ARCHIVE_BYTES} |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
+            if [[ -s artifacts/meta/files.txt ]]; then
+              echo
+              echo "<details><summary>Published files</summary>"
+              echo
+              tick='`'
+              while IFS= read -r f; do echo "- ${tick}${f}${tick}"; done < artifacts/meta/files.txt
+              echo
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-docs-openviking-${{ github.run_id }}-${{ github.run_attempt }}
+        if: ${{ always() && inputs.upload-diagnostics }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-docs-openviking-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts
+            ${{ runner.debug != '1' && '!artifacts/**/bin/**' || '' }}
+            ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}
