@@ -1923,7 +1923,7 @@ Preconditions:
 
 Toolchain version contract:
 
-- `python-version` (`"X.Y"`) and `node-version` (`"N.x"`) are quoted literals in the `with:` blocks of this workflow and `wf-lint-github-actions.yml`. Renovate bumps them in place.
+- `python-version` (`"X.Y"`) and `node-version` (`"N.x"`) are quoted literals in the `with:` blocks of this workflow and the GitHub Actions lint workflow. Renovate bumps them in place.
 - The validator reads both values from the workflows rather than hardcoding them. It requires the expected shape and the same value in both files.
 - Setup step names carry no version (`Set up Python`, `Set up Node.js + npm`), because Renovate does not rewrite step names. Installed versions appear in the step summary.
 
