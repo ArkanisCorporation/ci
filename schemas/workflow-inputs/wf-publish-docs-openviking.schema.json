@@ -45,7 +45,7 @@
     },
     "import-timeout-seconds": {
       "type": "integer",
-      "description": "Seconds OpenViking may spend processing the import.",
+      "description": "Seconds to wait for OpenViking to finish processing the import.",
       "default": 300,
       "minimum": 1
     },

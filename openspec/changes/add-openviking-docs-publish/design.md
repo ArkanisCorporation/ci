@@ -12,8 +12,9 @@
   `POST /api/v1/resources/temp_upload` (multipart `file`), and the returned `temp_file_id` is passed
   to `POST /api/v1/resources`. Per the OV docs, `to` is the final location: "If the target already
   exists, it is refreshed... files absent from the new import may be removed; unchanged content is
-  reused". Tags are per request (`tags`, `tag_mode: replace`). `wait`/`timeout` make the call block
-  until processing finishes. Auth header: `X-API-Key`.
+  reused". Tags are per request (`tags`, `tag_mode: replace`). `wait` makes the call block until
+  processing finishes. The deployed server (v0.5.2) rejects unknown body fields and has no
+  `timeout` field, so the client bounds the wait. Auth header: `X-API-Key`.
 - **Consumers:** callers come from repo-standards' template (`templates/openviking-docs.yml`), which
   calls `@v1` with `runs-on: arkanis-runners` and `runs-on-self-hosted: true`. It triggers on push to
   the default branch (with a `paths:` filter for the doc globs and the caller itself) and on
@@ -121,10 +122,12 @@ The spec stays mechanism-agnostic, so either outcome satisfies it.
 
 ### D7. Synchronous import with bounded waits
 
-The import request sends `wait: true` with `timeout` derived from `import-timeout-seconds` (default
-300). `curl --max-time` is set slightly above that value, and the job has its own `timeout-minutes`.
-A successful response therefore means the vectors are written, `published=true` is truthful, and
-failures surface in the run that caused them.
+The import request sends `wait: true`, and `curl --max-time` bounds the wait at
+`import-timeout-seconds` (default 300). The job has its own `timeout-minutes`. A successful response
+therefore means the vectors are written, `published=true` is truthful, and failures surface in the
+run that caused them. The first live run showed that OpenViking v0.5.2 rejects a `timeout` body field
+(`extra_forbidden`), so the request carries none. If curl gives up, the server may still finish the
+import, and the next run converges the mirror anyway.
 
 ### D8. Concurrency per repository and target
 

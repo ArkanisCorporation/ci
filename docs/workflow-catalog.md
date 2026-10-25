@@ -342,7 +342,7 @@ Schema: `schemas/workflow-inputs/wf-publish-docs-openviking.schema.json`.
 | `target-root` | string | no | `"viking://resources/arkanis/projects"` | OpenViking URI under which the mirror is stored as <target-root>/<repository name>. |
 | `processing-mode` | string | no | `"vectors_only"` | Allowed: "vectors_only", "semantic_and_vectors" |
 | `max-archive-bytes` | integer | no | `20971520` | Fail before uploading when the docs archive is larger than this.<br>Minimum: 1 |
-| `import-timeout-seconds` | integer | no | `300` | Seconds OpenViking may spend processing the import.<br>Minimum: 1 |
+| `import-timeout-seconds` | integer | no | `300` | Seconds to wait for OpenViking to finish processing the import.<br>Minimum: 1 |
 | `dry-run` | boolean | no | `false` | Collect and archive docs without contacting OpenViking. Allowed on any ref and event. |
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |

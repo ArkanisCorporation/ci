@@ -63,7 +63,7 @@ on:
         required: false
         default: 20971520
       import-timeout-seconds:
-        description: Seconds OpenViking may spend processing the import before the request fails.
+        description: Seconds to wait for OpenViking to finish processing the import before the request fails.
         type: number
         required: false
         default: 300
@@ -307,17 +307,18 @@ jobs:
           fi
 
           # `to` replaces an existing target, so each run converges the mirror on this commit.
+          # `wait` blocks until processing finishes. OpenViking v0.5.2 has no server-side timeout
+          # field (it rejects unknown fields), so curl's --max-time is the only bound on the wait.
           jq -n \
             --arg temp "$temp_file_id" \
             --arg to "$TARGET_URI" \
             --arg mode "$PROCESSING_MODE" \
             --arg repo "repo=${REPOSITORY_NAME}" \
             --arg commit "commit=${GITHUB_SHA}" \
-            --argjson timeout "$IMPORT_TIMEOUT" \
-            '{temp_file_id: $temp, to: $to, processing_mode: $mode, tags: [$repo, $commit], tag_mode: "replace", wait: true, timeout: $timeout}' \
+            '{temp_file_id: $temp, to: $to, processing_mode: $mode, tags: [$repo, $commit], tag_mode: "replace", wait: true}' \
             > "${RUNNER_TEMP}/import-request.json"
           cp "${RUNNER_TEMP}/import-request.json" artifacts/meta/openviking-import-request.json
-          status="$(ov_curl --max-time "$(( IMPORT_TIMEOUT + 60 ))" -o "${RUNNER_TEMP}/import.json" -w '%{http_code}' \
+          status="$(ov_curl --max-time "$IMPORT_TIMEOUT" -o "${RUNNER_TEMP}/import.json" -w '%{http_code}' \
             -H 'Content-Type: application/json' --data-binary "@${RUNNER_TEMP}/import-request.json" \
             "${base}/api/v1/resources")"
           check import "$status" "${RUNNER_TEMP}/import.json"
