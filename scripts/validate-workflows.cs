@@ -1626,7 +1626,7 @@ void ValidateWorkflowLintContract()
             AddFailure($"{workflowPath}: GitHub Actions lint workflow must set up Node.js before raven-actions/actionlint.");
         }
 
-        foreach (var requiredReportingToken in new[] { "Set up Python 3.14", "Set up Node.js 24 + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
+        foreach (var requiredReportingToken in new[] { "Set up Python 3.15", "Set up Node.js 24 + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
         {
             if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
             {
@@ -1659,7 +1659,7 @@ void ValidatePlatformSelftestContract()
     // setup-python and setup-node presence is enforced major-agnostically by the ordering
     // checks below (setupPythonIndex / setupNodeIndex must be >= 0), so their `uses:` refs
     // are intentionally absent from this literal token list.
-    foreach (var requiredToken in new[] { "python-version: \"3.14\"", "pyflakes==3.4.0", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
+    foreach (var requiredToken in new[] { "python-version: \"3.15\"", "pyflakes==3.4.0", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -1840,7 +1840,7 @@ void ValidateStepDisplayNameContract()
         ],
         ["wf-lint-github-actions.yml"] =
         [
-            "      - name: Set up Python 3.14",
+            "      - name: Set up Python 3.15",
             "      - name: Actionlint @ caller workflows",
         ],
     };
