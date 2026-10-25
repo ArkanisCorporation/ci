@@ -73,6 +73,14 @@ Summaries must be useful without exposing secrets.
 6. Run a bounded `act` smoke test when the workflow can run locally.
 7. Update docs, schemas, fixtures, and references.
 
+## Planning (OpenSpec)
+
+Non-trivial changes are planned with [OpenSpec](https://github.com/Fission-AI/OpenSpec) in `openspec/`.
+Propose a change (`/opsx:propose` in Claude Code, the `openspec-propose` skill elsewhere), get the proposal reviewed, implement with apply, then archive so the delta merges into `openspec/specs/`.
+Bounded, obvious changes need no proposal.
+The generated `.claude/{skills,commands}` and `.agents/skills` files come from `openspec init --tools claude,agents`; refresh them with `openspec update` instead of editing by hand.
+Older plans in `docs/superpowers/` stay as history.
+
 ## Review Checklist
 
 - API stable?
