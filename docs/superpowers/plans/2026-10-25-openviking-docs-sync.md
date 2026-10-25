@@ -9,7 +9,7 @@ prerequisite:
 |---|---|
 | `ci` | `wf-publish-docs-openviking.yml` reusable workflow + canonical caller template |
 | `repo-standards` | adoption check, scorecard column, automated adoption PRs (issue fallback) |
-| `Infrastructure` | ARK-651: OV reachable from in-cluster runners + a non-admin OV `ci` identity |
+| `Infrastructure` | ARK-651 (done): OV reachable from `arkanis-runners` + non-admin OV `ci` user; ARK-652: runner provides the key |
 
 > Diagram: how a merged doc change reaches OV, and how repo-standards drives adoption.
 
@@ -52,6 +52,11 @@ flowchart LR
 - **Runner pool (2026-10-25):** the existing `arkanis-runners` pool, no new scale set. Accepted
   costs: syncs share its `maxRunners: 2` with deploys, and run under the `arc-deployer` service
   account they do not need.
+- **Credential (2026-10-25): runner-provided**, per the *Runner-Advertised Capabilities* pattern in
+  `docs/runner-contract.md`. Org-level Actions secrets are unavailable to private repos on GitHub
+  Free, so ARK-652 has the pool expose `OPENVIKING_API_KEY` (from 1Password via ESO) and
+  `OPENVIKING_URL`. No GitHub secret, no per-repo setup. Accepted: every job on the pool can read
+  the key, well below the deployer service account they already hold.
 - **Repo-standards remediation is a pull request**, not only an issue: the fix is a deterministic
   templated file, which is exactly the bar the compliance catalog sets for `pull-request`.
 
@@ -77,19 +82,6 @@ flowchart LR
   `feat(...)` for the repo-standards check; adoption PRs are `ci: publish repo docs to OpenViking
   (repo-standards)` so they never cut a release in consumer repos.
 
-## Open decision
-
-**How the job gets the OV key.** Org-level Actions secrets are not available to private repos on
-GitHub Free (the org's plan), so a single org secret is out. Recommended: the `arkanis-runners`
-pool provides it, following the *Runner-Advertised Capabilities* pattern in
-`docs/runner-contract.md`: ARK-651 adds an ExternalSecret (1Password -> `arc-runners` namespace)
-and exposes it to the runner container as a file or env var; the workflow reads it in a shell step
-when `runs-on-self-hosted` is true. No GitHub secret anywhere, no per-repo setup, rotation in one
-place. Cost: every job on that pool can read the key, the same trust level as the network reach
-and far below the deployer service account those jobs already hold. Alternative: a per-repo
-secret, set by hand or by the repo-standards App (needs **Secrets: write** plus holding the key),
-which multiplies copies of the key across repos.
-
 ## Tasks
 
 ### ci - `wf-publish-docs-openviking.yml`
@@ -98,9 +90,10 @@ which multiplies copies of the key across repos.
    `permissions: {}`, job `contents: read`. Inputs: `runs-on` (default `arkanis-runners`),
    `runs-on-json`, `runs-on-self-hosted` (default `true`), `include-paths` (newline globs, default
    the standard set), `openviking-url` (default
-   `http://openviking.openviking.svc.cluster.local:1933`), `target-root` (default
+   the runner's `OPENVIKING_URL`, else `http://openviking.openviking.svc.cluster.local:1933`), `target-root` (default
    `viking://resources/arkanis/projects`), `processing-mode` (default `vectors_only`), `dry-run`
-   (default `false`). Credential source: per the open decision.
+   (default `false`). No secret input: the key comes from the runner's `OPENVIKING_API_KEY`, read in
+   a shell step; the job fails closed when it is absent (wrong pool), unless `dry-run`.
 2. **Steps:** checkout caller (shallow) -> self-hosted preflight (record curl/zip/python3) ->
    collect matching tracked files via `git ls-files` -> fail closed above a size cap -> zip ->
    `dry-run` stops here with a file list -> `POST /api/v1/resources/temp_upload` ->
@@ -109,7 +102,7 @@ which multiplies copies of the key across repos.
 3. **Safety:** `concurrency: openviking-docs-<repo>` with `cancel-in-progress: true` (newest content
    wins). Repo name from `github.repository`, never caller text. Key only via env, never echoed.
 4. **Dogfood in this repo:** a `dry-run` job in `release.yml` on PRs (no secret) proves collection
-   and zipping. After ARK-651, a live run for `ci` itself on `main`.
+   and zipping. After ARK-652, a live run for `ci` itself on `main`.
 5. **Caller template:** `templates/openviking-docs.yml` (canonical, consumed by repo-standards):
    `on: push` to the default branch with a `paths:` filter for the standard globs **plus the caller
    file itself**, so merging the adoption PR performs the first import; `workflow_dispatch` for
@@ -137,7 +130,7 @@ which multiplies copies of the key across repos.
 12. **Tests** alongside the existing ones (check states incl. opt-out, column render, catalog,
     enforce happy path + dedupe + fallback). **Docs:** README, AGENTS.md, `docs/github-app-setup.md`.
 
-### Live verification (after ARK-651)
+### Live verification (after ARK-652)
 
 13. Run against `ci`: files appear under `viking://resources/arkanis/projects/ci/`, `find` returns
     them, tags present.
@@ -148,7 +141,7 @@ which multiplies copies of the key across repos.
 
 ## Human steps (not agent-doable)
 
-- **ARK-651** merged; OV `ci` user minted with the root key; key stored in 1Password.
+- **ARK-652** merged (ARK-651 already done: network peer + `ci` user + 1Password item).
 - **repo-standards App permission:** add **Workflows: Read and write** and accept the pending
   permission request on the org installation. The App already has Contents write for the existing
   BOM/EditorConfig/gitattributes PRs, but GitHub rejects any App push that creates or changes a
@@ -163,7 +156,7 @@ which multiplies copies of the key across repos.
 2. ci workflow + template + dry-run dogfood (no OV needed) -> PR.
 3. repo-standards check + column + catalog + enforce path -> PR (scorecard shows the column
    immediately; PRs only when enforce is dispatched).
-4. ARK-651 + human steps -> live verification (13-15) -> enforce rollout in capped batches.
+4. ARK-652 + human steps -> live verification (13-15) -> enforce rollout in capped batches.
 
 ## Out of scope / related
 
