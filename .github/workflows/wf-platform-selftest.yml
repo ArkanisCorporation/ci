@@ -50,7 +50,7 @@ jobs:
       # Python, so actionlint's `pipx install pyflakes` fallback failed on any replica that
       # had not. Installing pyflakes directly puts it on PATH, the action skips pipx, and the
       # outcome stops depending on which replica picks the job up. Bump it with actionlint.
-      - name: Set up Python 3.14
+      - name: Set up Python 3.15
         uses: actions/setup-python@v7
         with:
           python-version: "3.15"
