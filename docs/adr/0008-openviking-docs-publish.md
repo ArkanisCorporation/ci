@@ -37,6 +37,12 @@ Mirror content is visible to every user of the OpenViking account, which is why 
 
 ## Live verification
 
-Pending (task group 7 of `openspec/changes/add-openviking-docs-publish`): first import, stored layout, tags, scoped search, and deletion propagation, with the OpenViking version observed.
+Observed against OpenViking v0.5.2 on 2026-10-25 (ci v1.7.1, [run 40196559396](https://github.com/ArkanisCorporation/ci/actions/runs/40196559396)):
+
+- **API:** `add_resource` rejects unknown body fields and has no server-side `timeout`, so the request carries `wait: true` and curl bounds the wait (ci v1.7.1).
+- **First import:** 37 files parsed by `MarkdownParser`, 77 contexts embedded, about 18 seconds, `vectors_only` with no semantic calls.
+- **Layout:** no archive-root directory. Each Markdown file becomes a directory named after the file without `.md`, holding its sections, for example `.../ci/docs/adr/0008-openviking-docs-publish/`. Directory scopes such as `.../ci/docs/adr` work as intended.
+- **Scoped search:** a search under `.../projects/ci` returns the matching catalog section and ADR first.
+- **Deletion propagation:** pending (task 7.3).
 
 Related: ARK-642, ARK-651, ARK-652.
