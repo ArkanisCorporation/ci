@@ -49,6 +49,9 @@ flowchart LR
   Tailscale step on GitHub-hosted runners, which would need an ACL grant to
   `tag:production-k8s-ingress` and expose every internal admin UI to CI. Infrastructure side is
   ARK-651.
+- **Runner pool (2026-10-25):** the existing `arkanis-runners` pool, no new scale set. Accepted
+  costs: syncs share its `maxRunners: 2` with deploys, and run under the `arc-deployer` service
+  account they do not need.
 - **Repo-standards remediation is a pull request**, not only an issue: the fix is a deterministic
   templated file, which is exactly the bar the compliance catalog sets for `pull-request`.
 
@@ -67,33 +70,37 @@ flowchart LR
 - **Empty doc set skips** the import (summary says so) rather than wiping the target.
 - **Opt-out** for sensitive repos: a repo topic `openviking-docs-optout` makes the check N/A and
   suppresses the adoption PR. `viking://resources` is account-wide, so this is the visibility
-  control.
-- **CI credential:** org-level Actions secret `OPENVIKING_CI_API_KEY` (the ARK-651 `ci` user key),
-  passed explicitly by the caller, never `secrets: inherit`.
+  control. **Every automated adoption PR and compliance issue states the opt-out topic in its
+  first lines**, before any other content: what it does, and the exact command to set it
+  (`gh repo edit <org>/<repo> --add-topic openviking-docs-optout`).
 - **Commit/PR types:** `feat(...)` for the ci workflow (it ships in the `v1` release consumers pin);
   `feat(...)` for the repo-standards check; adoption PRs are `ci: publish repo docs to OpenViking
   (repo-standards)` so they never cut a release in consumer repos.
 
 ## Open decision
 
-**Which runner pool.** `arkanis-runners` is the deploy-only pool: `maxRunners: 2`, warm runner
-reserved for deploys, and jobs run under the `arc-deployer` cluster service account. Docs syncs on
-it would queue deploys and run with cluster-deploy privilege for no reason. Recommended: a small
-dedicated scale set (`arkanis-docs-sync`, `minRunners: 0`, no deployer service account) and ARK-651's
-NetworkPolicy targets only that set. Alternative: reuse `arkanis-runners` and accept both costs.
-The workflow takes `runs-on`, so this only changes the default and ARK-651's scope.
+**How the job gets the OV key.** Org-level Actions secrets are not available to private repos on
+GitHub Free (the org's plan), so a single org secret is out. Recommended: the `arkanis-runners`
+pool provides it, following the *Runner-Advertised Capabilities* pattern in
+`docs/runner-contract.md`: ARK-651 adds an ExternalSecret (1Password -> `arc-runners` namespace)
+and exposes it to the runner container as a file or env var; the workflow reads it in a shell step
+when `runs-on-self-hosted` is true. No GitHub secret anywhere, no per-repo setup, rotation in one
+place. Cost: every job on that pool can read the key, the same trust level as the network reach
+and far below the deployer service account those jobs already hold. Alternative: a per-repo
+secret, set by hand or by the repo-standards App (needs **Secrets: write** plus holding the key),
+which multiplies copies of the key across repos.
 
 ## Tasks
 
 ### ci - `wf-publish-docs-openviking.yml`
 
 1. **Workflow contract** (per `.github/workflows/AGENTS.md`): `on.workflow_call`, top-level
-   `permissions: {}`, job `contents: read`. Inputs: `runs-on` (default: the chosen pool),
+   `permissions: {}`, job `contents: read`. Inputs: `runs-on` (default `arkanis-runners`),
    `runs-on-json`, `runs-on-self-hosted` (default `true`), `include-paths` (newline globs, default
    the standard set), `openviking-url` (default
    `http://openviking.openviking.svc.cluster.local:1933`), `target-root` (default
    `viking://resources/arkanis/projects`), `processing-mode` (default `vectors_only`), `dry-run`
-   (default `false`). Secret: `OPENVIKING_API_KEY`, required unless `dry-run`.
+   (default `false`). Credential source: per the open decision.
 2. **Steps:** checkout caller (shallow) -> self-hosted preflight (record curl/zip/python3) ->
    collect matching tracked files via `git ls-files` -> fail closed above a size cap -> zip ->
    `dry-run` stops here with a file list -> `POST /api/v1/resources/temp_upload` ->
@@ -119,12 +126,14 @@ The workflow takes `runs-on`, so this only changes the default and ARK-651's sco
 8. **Scorecard:** `OV Docs` column in each *GitHub Actions CI* table, with the column guide line.
 9. **Catalog entry** (`src/compliance.ts`): remediation `pull-request`; resolution, acceptance and
    references point at the ci template and ADR.
-10. **Enforce path:** add the caller template where missing, on bot branch
+10. **Enforce path:** add the caller template where missing, PR body opening with the opt-out
+    notice, on bot branch
     `repo-standards-bot/add-openviking-docs`, labels `automated` + `automated/repo-standards`, under
     the existing `maxPrsPerRun` cap and open-PR dedupe. Template is fetched from `ci` at a pinned
     ref so the two cannot drift.
 11. **Issue fallback:** when the PR cannot be opened (push or permission rejected), reconcile a
-    compliance issue for that repo instead of failing silently.
+    compliance issue for that repo instead of failing silently. The issue body opens with the same
+    opt-out notice.
 12. **Tests** alongside the existing ones (check states incl. opt-out, column render, catalog,
     enforce happy path + dedupe + fallback). **Docs:** README, AGENTS.md, `docs/github-app-setup.md`.
 
@@ -140,11 +149,11 @@ The workflow takes `runs-on`, so this only changes the default and ARK-651's sco
 ## Human steps (not agent-doable)
 
 - **ARK-651** merged; OV `ci` user minted with the root key; key stored in 1Password.
-- **Org secret** `OPENVIKING_CI_API_KEY` created from that key (scope: all private repos, or the
-  selected set).
-- **repo-standards App permission:** add **Workflows: Read and write** (pushing under
-  `.github/workflows/` requires it; the App has Contents/PRs/Issues only) and accept the pending
-  permission request on the org installation.
+- **repo-standards App permission:** add **Workflows: Read and write** and accept the pending
+  permission request on the org installation. The App already has Contents write for the existing
+  BOM/EditorConfig/gitattributes PRs, but GitHub rejects any App push that creates or changes a
+  file under `.github/workflows/` unless the App also holds the separate `workflows` permission.
+  Without it, step 10 cannot work and adoption falls back to issues only.
 - **ci release:** merge -> semantic-release moves `v1` so consumers pick the workflow up.
 - **Opt-out topics** on any repo whose docs must not be account-wide visible.
 
