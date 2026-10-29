@@ -35,9 +35,9 @@
 ## 7. Live verification (before repo-standards#25 merges)
 
 - [x] 7.1 Dispatch `openviking-docs` in `ci`; verify the run succeeds on `arkanis-runners`, the `git`/`curl`/`jq` preflight passes, and the summary shows the file count and target URI
-- [ ] 7.2 Verify the stored layout: `viking://resources/arkanis/projects/ci/README.md` and `.../ci/docs/adr/` exist (no extra archive-root directory), tags `repo=ci` and `commit=<sha>` are present, and a search scoped to the target returns them
-- [ ] 7.3 Verify deletions: land a `docs:` commit that deletes or renames an obsolete doc, let the caller run, and confirm the old path is gone from the mirror; if it remains, implement D5's prune step (and request delete rights for the `ci` user) before continuing
-- [ ] 7.4 Record the observed deletion behaviour and OV version in ADR-0008, then hand off to merging repo-standards#25
+- [x] 7.2 Verify the stored layout: `viking://resources/arkanis/projects/ci/README.md` and `.../ci/docs/adr/` exist (no extra archive-root directory), tags `repo=ci` and `commit=<sha>` are present, and a search scoped to the target returns them (layout and search verified; each `.md` becomes a directory of sections; tags are accepted but no user tool shows them, see ADR-0008)
+- [x] 7.3 Verify deletions: land a `docs:` commit that deletes or renames an obsolete doc, let the caller run, and confirm the old path is gone from the mirror; if it remains, implement D5's prune step (and request delete rights for the `ci` user) before continuing (it was removed; no prune step needed)
+- [x] 7.4 Record the observed deletion behaviour and OV version in ADR-0008, then hand off to merging repo-standards#25
 
 ## Workflow follow-up
 

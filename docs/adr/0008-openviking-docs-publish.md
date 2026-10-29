@@ -3,7 +3,7 @@
 Status: accepted
 
 Audience: platform maintainers, security reviewers, and repository owners adopting the docs mirror.
-Last verified: 2026-10-25.
+Last verified: 2026-10-29.
 
 ## Context
 
@@ -25,7 +25,7 @@ The organization is on GitHub Free, where organization Actions secrets are unava
   Tags are `repo=<name>` and `commit=<sha>`; per-subtree tags were rejected because OpenViking applies tags per request.
 - **Processing:** `semantic_and_vectors`, so mirrored docs get the LLM abstracts and overviews that retrieval ranks on. The import is accepted asynchronously (`wait: false`), so the LLM pass never holds a shared runner; failures after acceptance show in OpenViking's task list, not in CI. On v0.5.2 that includes parse errors: with `wait: false` the server returns a task id before parsing.
 - **Packaging:** `git ls-files` with `:(glob)` pathspecs selects tracked docs with GitHub `paths:` semantics; `git archive` zips exactly that list. An empty selection skips the import instead of wiping the mirror.
-- **Deletions:** each import replaces the `to` target. OpenViking documents that files absent from a re-import "may be removed"; observed behaviour is recorded below after live verification. If deletions do not propagate, a prune step that lists the target and deletes files absent from the archive is added before rollout.
+- **Deletions:** each import replaces the `to` target, and OpenViking v0.5.2 removes files absent from the re-import (verified below), so the workflow has no prune step.
 - **Adoption:** `ArkanisCorporation/repo-standards` owns the caller template, the adoption check, and the adoption PRs. The default doc paths are a contract between both repositories, pinned by validators on each side. Repositories opt out with the `openviking-docs-optout` topic.
 
 ## Consequences
@@ -44,6 +44,8 @@ Observed against OpenViking v0.5.2 on 2026-10-25 (ci v1.7.1, [run 40196559396](h
 - **Semantic import (ci v1.7.2, [run 40199205439](https://github.com/ArkanisCorporation/ci/actions/runs/40199205439)):** the request returned within a second with only a `task_id`, so parsing is asynchronous too. The semantic pass on `ollama/qwen3:4b-instruct-2507-q8_0` then took about 12 minutes for 37 docs (about 130 semantic nodes, no errors) and wrote abstracts plus a `.overview.md` per directory. Summaries from that small model can misstate details (one called Tailscale a feature of this design), so treat them as navigation aids and read the source section.
 - **Layout:** no archive-root directory. Each Markdown file becomes a directory named after the file without `.md`, holding its sections, for example `.../ci/docs/adr/0008-openviking-docs-publish/`. Directory scopes such as `.../ci/docs/adr` work as intended.
 - **Scoped search:** a search under `.../projects/ci` returns the matching catalog section and ADR first.
-- **Deletion propagation:** pending (task 7.3).
+- **Push trigger:** merging a doc change starts the caller's `openviking-docs` run without a dispatch ([run 40222234309](https://github.com/ArkanisCorporation/ci/actions/runs/40222234309)).
+- **Deletion propagation:** a probe doc added in ci#36 appeared at `.../ci/docs/openviking-mirror-probe/`; after ci#38 deleted it, the push-triggered re-import ([run 40225284968](https://github.com/ArkanisCorporation/ci/actions/runs/40225284968)) removed it from both the listing and search.
+- **Tags:** the server accepts `repo=<name>` and `commit=<sha>`, but no user-facing tool shows stored tags, so they are not independently confirmed.
 
 Related: ARK-642, ARK-651, ARK-652.
