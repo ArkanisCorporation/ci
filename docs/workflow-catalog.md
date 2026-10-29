@@ -339,7 +339,7 @@ Schema: `schemas/workflow-inputs/wf-publish-docs-openviking.schema.json`.
 | `runs-on-json` | string | no | `""` | n/a |
 | `runs-on-self-hosted` | boolean | no | `true` | n/a |
 | `include-paths` | string | no | `"README.md\nAGENTS.md\nCLAUDE.md\ndocs/**/*.md\n.claude/rules/**/*.md\n.claude/context/**/*.md\nopenspec/specs/**/*.md\n"` | Newline-separated globs (GitHub paths filter semantics) selecting tracked docs. Must equal repo-standards OPENVIKING_DOC_GLOBS by default. |
-| `target-root` | string | no | `"viking://resources/arkanis/projects"` | OpenViking URI under which the mirror is stored as <target-root>/<repository name>. |
+| `target-root` | string | no | `"viking://resources/arkanis/projects"` | OpenViking URI under which the mirror is stored as <target-root>/<lowercased repository name>. |
 | `processing-mode` | string | no | `"semantic_and_vectors"` | Allowed: "vectors_only", "semantic_and_vectors" |
 | `max-archive-bytes` | integer | no | `20971520` | Fail before uploading when the docs archive is larger than this.<br>Minimum: 1 |
 | `import-timeout-seconds` | integer | no | `120` | Seconds to wait for OpenViking to accept the import.<br>Minimum: 1 |
@@ -1910,7 +1910,7 @@ Side effects:
 
 `wf-publish-docs-openviking.yml` mirrors a caller's docs into OpenViking, so agents in other repositories can find them by search ([ADR-0008](adr/0008-openviking-docs-publish.md)).
 Git stays the source of truth.
-Each run imports the tracked files matching `include-paths` as one archive to `<target-root>/<repository name>`, replacing the previous mirror.
+Each run imports the tracked files matching `include-paths` as one archive to `<target-root>/<lowercased repository name>`, replacing the previous mirror.
 Consumer repositories normally adopt it through the adoption PR that `ArkanisCorporation/repo-standards` opens with its [caller template](https://github.com/ArkanisCorporation/repo-standards/blob/main/templates/openviking-docs.yml).
 Repositories opt out with the `openviking-docs-optout` topic.
 
