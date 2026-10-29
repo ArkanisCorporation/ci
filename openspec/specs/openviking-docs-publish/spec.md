@@ -33,7 +33,7 @@ matches nothing SHALL NOT fail the run.
 ### Requirement: Mirror layout and replacement
 
 The workflow SHALL import the selected files as one archive to
-`<target-root>/<repository name>`, preserving repository-relative paths, where the default
+`<target-root>/<lowercased repository name>`, preserving repository-relative paths, where the default
 `target-root` is `viking://resources/arkanis/projects` and the repository name comes from the
 event context, never from caller input. Each import SHALL replace the previous mirror, so a doc
 removed from the repository is absent from the mirror after the next successful run.
@@ -41,7 +41,7 @@ removed from the repository is absent from the mirror after the next successful 
 #### Scenario: Paths are preserved
 
 - **WHEN** `docs/adr/0001.md` is published for repository `Infrastructure`
-- **THEN** it is stored at `viking://resources/arkanis/projects/Infrastructure/docs/adr/0001.md`
+- **THEN** it is stored at `viking://resources/arkanis/projects/infrastructure/docs/adr/0001.md`
 
 #### Scenario: Deleted doc disappears
 
