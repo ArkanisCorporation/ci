@@ -3,7 +3,7 @@
 # Remarks:
 #   Git stays the source of truth; OpenViking holds a read-only, cross-repository discovery copy.
 #   Each run imports the tracked files matching include-paths as one archive to
-#   <target-root>/<repository name>, replacing the previous mirror.
+#   <target-root>/<lowercased repository name>, replacing the previous mirror.
 #   Trust zone: publish. It writes to an external store, but only from a push or dispatch on the
 #   caller's default branch; any other ref or a pull request event fails unless dry-run is true.
 #   Preconditions: the runner provides OPENVIKING_URL and OPENVIKING_API_KEY as environment
@@ -48,7 +48,7 @@ on:
           .claude/context/**/*.md
           openspec/specs/**/*.md
       target-root:
-        description: OpenViking URI under which the repository mirror is stored as <target-root>/<repository name>.
+        description: OpenViking URI under which the repository mirror is stored as <target-root>/<lowercased repository name>.
         type: string
         required: false
         default: viking://resources/arkanis/projects
@@ -217,7 +217,9 @@ jobs:
             echo "::error title=Invalid target-root::target-root must be a viking:// URI of letters, digits, '.', '_', '-', '~' and '/'."
             exit 1
           fi
-          target_uri="${TARGET_ROOT%/}/${REPOSITORY_NAME}"
+          # Lowercased so mirror URIs match the rest of the shared tree. GitHub repository names are
+          # case-insensitive, so two repositories never share a target.
+          target_uri="${TARGET_ROOT%/}/${REPOSITORY_NAME,,}"
           echo "target-uri=${target_uri}" >> "$GITHUB_OUTPUT"
 
           # Each line becomes a :(glob) pathspec, whose ** matches zero or more directories
