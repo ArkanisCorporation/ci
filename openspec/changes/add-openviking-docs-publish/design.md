@@ -100,6 +100,8 @@ subtree and a non-mirrored layout. Path scoping covers the same need.
 
 ### D5. Deletions rely on `to` replacement, verified live before rollout
 
+**Outcome (2026-10-25, OpenViking v0.5.2):** deletions propagate. A probe doc deleted in ci#38 left the mirror on the next push-triggered import, so the prune fallback below was not needed.
+
 The docs say absent files "may be removed". That is weaker than the spec's *Deleted doc disappears*
 scenario. The live verification (task 7) deletes a doc and re-runs.
 
