@@ -1,0 +1,50 @@
+name: Rust workspace local fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    # Expected: success.
+    name: rust-workspace check @ local
+    uses: ./.github/workflows/wf-rust-check.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      working-directory: tests/fixtures/mock-projects/rust-workspace
+      enable-cache: false
+      upload-diagnostics: false
+
+  test:
+    # Expected: success.
+    name: rust-workspace test @ local
+    uses: ./.github/workflows/wf-rust-test.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      working-directory: tests/fixtures/mock-projects/rust-workspace
+      require-docker: true
+      enable-cache: false
+      upload-diagnostics: false
+
+  container:
+    # Expected: success. The binary prints "mock-service 1.2.3-ci.1" because VERSION is stamped at build time.
+    name: rust-workspace container-verify @ local
+    uses: ./.github/workflows/wf-verify-publish-container-generic.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ubuntu-latest
+      runs-on-self-hosted: false
+      image: local/mock-rust-service
+      context: tests/fixtures/mock-projects/rust-workspace
+      dockerfile: tests/fixtures/mock-projects/rust-workspace/Dockerfile
+      version: 1.2.3-ci.1
+      version-tag: v1.2.3-ci.1
+      enable-cache: false

@@ -63,6 +63,10 @@ Recommended order:
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
 - `wf-verify-publish-container-dotnet.yml` stamps .NET versions and builds OCI images without pushing.
 - `wf-publish-container-dotnet.yml` stamps .NET versions before publishing OCI images through Docker Buildx.
+- `wf-verify-publish-container-generic.yml` builds OCI images from any Dockerfile without pushing or stamping.
+- `wf-publish-container-generic.yml` publishes OCI images from any Dockerfile; the version reaches the build only as a build arg.
+- `wf-rust-check.yml` verifies rustfmt, clippy `-D warnings`, cargo-deny, and an opt-in sqlx prepare check.
+- `wf-rust-test.yml` runs cargo-nextest with optional Docker preflight for testcontainers.
 - `wf-verify-deploy-k8s-aspire.yml` verifies Aspire Kubernetes deployment inputs without applying cluster changes.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-rust-test/v1/schema.json",
+  "title": "wf-rust-test inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs-on": {
+      "type": "string",
+      "default": "ubuntu-latest"
+    },
+    "runs-on-json": {
+      "type": "string",
+      "default": ""
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "working-directory": {
+      "type": "string",
+      "default": ".",
+      "description": "Directory containing the Cargo workspace root and rust-toolchain.toml."
+    },
+    "nextest-profile": {
+      "type": "string",
+      "default": "ci",
+      "description": "cargo-nextest profile passed to --profile. The profile must exist in .config/nextest.toml unless it is default."
+    },
+    "nextest-arguments": {
+      "type": "string",
+      "default": "--workspace --all-features --locked",
+      "description": "Whitespace-separated cargo nextest run arguments added after --profile."
+    },
+    "nextest-version": {
+      "type": "string",
+      "default": "0.9.150",
+      "description": "cargo-nextest version installed from a prebuilt binary."
+    },
+    "sqlx-offline": {
+      "type": "boolean",
+      "default": false,
+      "description": "Exports SQLX_OFFLINE=true so sqlx query macros compile against committed .sqlx metadata."
+    },
+    "require-docker": {
+      "type": "boolean",
+      "default": false,
+      "description": "Fails before compiling when no Docker daemon is reachable. Set true for testcontainers integration tests."
+    },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true,
+      "description": "Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access."
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 14,
+      "minimum": 1,
+      "maximum": 90
+    },
+    "upload-diagnostics": {
+      "type": "boolean",
+      "default": true,
+      "description": "Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact."
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1
+    }
+  }
+}

@@ -81,7 +81,7 @@ Rules for reading one:
 
 ## Remote BuildKit
 
-`wf-verify-publish-container-dotnet.yml` and `wf-publish-container-dotnet.yml` accept `buildkit-endpoint`.
+`wf-verify-publish-container-dotnet.yml`, `wf-publish-container-dotnet.yml`, and their generic counterparts `wf-verify-publish-container-generic.yml` and `wf-publish-container-generic.yml` accept `buildkit-endpoint`.
 When set, the workflow uses Docker Buildx with the `remote` driver.
 When empty and `runs-on-self-hosted` is true, the workflow uses the runner's own `BUILDKIT_HOST` environment variable if it is set (see *Runner-Advertised Capabilities* above).
 A runner pool advertises a shared builder this way without every caller hard-coding its address (daedalus: a bounded `buildkitd` run by `ci-runners`).
@@ -89,7 +89,14 @@ Otherwise the workflow creates a local `docker-container` builder.
 If an endpoint is selected but unreachable, Buildx setup fails; there is no fallback to a local builder.
 While an endpoint is in use, the workflow imports the generated `type=gha` build cache but does not export to it: a shared builder already keeps the layers between jobs, and concurrent matrix jobs exporting the same layer blob collide on the Actions cache reservation (`failed to reserve cache`), which fails the build. An explicit `cache-to` input still wins.
 This is intended for self-hosted or ARC runners that should not run Docker-in-Docker.
-The runner must also support Bash and .NET SDK setup before Docker Buildx runs.
+The .NET container workflows also need Bash and .NET SDK setup before Docker Buildx runs; the generic ones need only Bash.
+
+## Rust Workflows
+
+`wf-rust-check.yml` and `wf-rust-test.yml` need no runner label beyond OS and architecture: they install rustup when missing, the toolchain from the caller's `rust-toolchain.toml`, and every cargo subcommand from prebuilt binaries.
+Self-hosted runners need Bash, Git, curl, and outbound access to `static.rust-lang.org`, crates.io, and GitHub releases.
+`wf-rust-test.yml` with `require-docker: true` additionally needs a reachable Docker daemon (label `docker`); testcontainers 0.27 resolves the bridge gateway when the runner itself is a container, so Docker-out-of-Docker runners such as `daedalus` work.
+The opt-in sqlx job in `wf-rust-check.yml` runs in a job container with a Postgres service, so the runner must be able to start containers.
 
 ## Kubernetes Access
 

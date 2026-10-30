@@ -163,6 +163,54 @@ jobs:
       labels: |
         org.opencontainers.image.source=https://github.com/ArkanisCorporation/ci
 
+  rust-check:
+    name: rust-workspace check @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-rust-check
+      cancel-in-progress: false
+    uses: ./.github/workflows/wf-rust-check.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      working-directory: tests/fixtures/mock-projects/rust-workspace
+      enable-cache: false
+
+  rust-test:
+    name: rust-workspace test @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-rust-test
+      cancel-in-progress: false
+    uses: ./.github/workflows/wf-rust-test.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      working-directory: tests/fixtures/mock-projects/rust-workspace
+      nextest-profile: ci
+      require-docker: true
+
+  rust-container:
+    name: rust-workspace container-verify @ ${{ github.head_ref || github.ref_name }}
+    concurrency:
+      group: main-validation-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || github.run_id }}-rust-container
+      cancel-in-progress: false
+    uses: ./.github/workflows/wf-verify-publish-container-generic.yml
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      image: local/mock-rust-service
+      context: tests/fixtures/mock-projects/rust-workspace
+      dockerfile: tests/fixtures/mock-projects/rust-workspace/Dockerfile
+      version: 1.2.3-ci.1
+      version-tag: v1.2.3-ci.1
+      labels: |
+        org.opencontainers.image.source=https://github.com/ArkanisCorporation/ci
+
   docs-openviking:
     name: docs-openviking dry-run @ ${{ github.head_ref || github.ref_name }}
     concurrency:
@@ -188,6 +236,9 @@ jobs:
       - dotnet-library-test
       - dotnet-nuget
       - dotnet-container
+      - rust-check
+      - rust-test
+      - rust-container
       - docs-openviking
     uses: ./.github/workflows/wf-verify-release-semantic.yml
     permissions:
@@ -210,6 +261,9 @@ jobs:
       - dotnet-library-test
       - dotnet-nuget
       - dotnet-container
+      - rust-check
+      - rust-test
+      - rust-container
       - docs-openviking
     uses: ./.github/workflows/wf-release-semantic.yml
     permissions:
