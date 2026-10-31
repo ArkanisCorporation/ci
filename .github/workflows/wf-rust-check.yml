@@ -462,12 +462,17 @@ jobs:
 
       - name: Install sqlx-cli @ ${{ inputs.sqlx-cli-version }}
         env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
           SQLX_CLI_VERSION: ${{ inputs.sqlx-cli-version }}
         run: |
+          # cargo is a rustup proxy, and a rustup that setup-rust-toolchain just installed has no
+          # default toolchain: run from working-directory so the caller's rust-toolchain.toml
+          # selects one.
+          cd "$WORKING_DIRECTORY"
           # Prebuilt binaries only: with the compile strategy disabled, a missing binary fails here
           # instead of silently building sqlx-cli from source.
           cargo binstall --no-confirm --disable-strategies compile "sqlx-cli@${SQLX_CLI_VERSION}"
-          cargo sqlx --version | tee artifacts/meta/sqlx-cli-version.txt
+          cargo sqlx --version | tee "$GITHUB_WORKSPACE/artifacts/meta/sqlx-cli-version.txt"
 
       - name: Start Postgres @ ${{ inputs.sqlx-postgres-image }}
         id: postgres
