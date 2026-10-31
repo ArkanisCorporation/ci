@@ -60,7 +60,8 @@ No artifact crosses into a higher-trust zone without a manifest and digest or pr
 
 Each workflow writes a step summary, run metadata, artifact manifest, tool versions, and failure diagnostics.
 Use log groups for noisy commands.
-Upload diagnostics with `if: always()`.
+Upload diagnostics with `if: ${{ always() && inputs.upload-diagnostics }}` and `continue-on-error: true`: an artifact upload never decides whether a job passes.
+Only uploads another job downloads stay required ([docs/artifacts.md](docs/artifacts.md#best-effort-and-required-uploads)).
 Summaries must be useful without exposing secrets.
 
 ## Development Workflow

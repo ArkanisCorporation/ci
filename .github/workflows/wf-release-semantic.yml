@@ -61,6 +61,11 @@ on:
         type: number
         required: false
         default: 14
+      upload-diagnostics:
+        description: Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job.
+        type: boolean
+        required: false
+        default: true
     outputs:
       new-version:
         description: Newly published version.
@@ -235,7 +240,8 @@ jobs:
           JSON
 
       - name: Upload release diagnostics @ ${{ github.event.repository.name }}-semantic-release-${{ github.run_id }}-${{ github.run_attempt }}
-        if: always()
+        if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-semantic-release-${{ github.run_id }}-${{ github.run_attempt }}

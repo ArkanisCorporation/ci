@@ -60,7 +60,7 @@
     "sqlx-prepare-check": {
       "type": "boolean",
       "default": false,
-      "description": "Runs cargo sqlx prepare --check against a throwaway Postgres service in a separate job when true."
+      "description": "Runs cargo sqlx prepare --check against a throwaway Postgres container in a separate job when true. Needs Docker on the runner."
     },
     "sqlx-prepare-arguments": {
       "type": "string",
@@ -85,12 +85,13 @@
     "sqlx-postgres-image": {
       "type": "string",
       "default": "postgres:17-alpine",
-      "description": "Postgres service image for the sqlx prepare check."
+      "description": "Postgres image started with docker run for the sqlx prepare check."
     },
     "sqlx-container-image": {
       "type": "string",
       "default": "rust:1-trixie",
-      "description": "Job container image for the sqlx prepare check. Needs bash, git, and rustup or curl."
+      "deprecated": true,
+      "description": "Deprecated and ignored. The sqlx job no longer runs in a job container; a non-default value only logs a deprecation warning. Removed in the next major."
     },
     "enable-cache": {
       "type": "boolean",
@@ -99,7 +100,7 @@
     },
     "artifact-retention-days": {
       "type": "integer",
-      "default": 14,
+      "default": 7,
       "minimum": 1,
       "maximum": 90
     },

@@ -45,7 +45,7 @@ Recommended order:
 6. Build, test, package, publish, or deploy.
 7. Write metadata and artifact manifest.
 8. Write step summary.
-9. Upload diagnostics with `if: always()`.
+9. Upload diagnostics with `if: ${{ always() && inputs.upload-diagnostics }}` and `continue-on-error: true`; only uploads a later job downloads stay required (`docs/artifacts.md`).
 
 ## Current Public Workflows
 

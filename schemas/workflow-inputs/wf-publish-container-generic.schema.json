@@ -139,6 +139,11 @@
       "default": 30,
       "minimum": 1,
       "maximum": 90
+    },
+    "upload-diagnostics": {
+      "type": "boolean",
+      "default": true,
+      "description": "Uploads the image metadata artifact when true. The upload is best-effort and never fails the job."
     }
   }
 }

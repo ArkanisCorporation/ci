@@ -117,7 +117,12 @@ on:
         description: Metadata artifact retention in days.
         type: number
         required: false
-        default: 30
+        default: 7
+      upload-diagnostics:
+        description: Uploads the image metadata artifact when true. The upload is best-effort and never fails the job.
+        type: boolean
+        required: false
+        default: true
     outputs:
       metadata:
         description: Build metadata JSON produced by docker/build-push-action.
@@ -452,7 +457,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload container metadata @ ${{ github.event.repository.name }}-container-generic-verify-${{ github.run_id }}-${{ github.run_attempt }}
-        if: always()
+        if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-container-generic-verify-${{ github.run_id }}-${{ github.run_attempt }}

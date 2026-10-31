@@ -176,6 +176,9 @@ jobs:
       runs-on-self-hosted: true
       working-directory: tests/fixtures/mock-projects/rust-workspace
       enable-cache: false
+      # Exercises the container-free sqlx job (docker run Postgres via the bridge gateway) on daedalus.
+      sqlx-prepare-check: true
+      sqlx-migrations-source: migrations
 
   rust-test:
     name: rust-workspace test @ ${{ github.head_ref || github.ref_name }}

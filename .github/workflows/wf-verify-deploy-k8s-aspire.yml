@@ -90,7 +90,12 @@ on:
         description: Deployment verification artifact retention in days.
         type: number
         required: false
-        default: 30
+        default: 7
+      upload-diagnostics:
+        description: Uploads the dry-run deploy report artifact when true. The upload is best-effort and never fails the job.
+        type: boolean
+        required: false
+        default: true
     secrets:
       NUGET_AUTH_JSON:
         description: Optional JSON credentials for private NuGet package sources used during restore.
@@ -342,7 +347,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deployment artifacts (Dry Run) @ ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}
-        if: always()
+        if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}

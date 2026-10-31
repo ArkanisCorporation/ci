@@ -96,7 +96,9 @@ The .NET container workflows also need Bash and .NET SDK setup before Docker Bui
 `wf-rust-check.yml` and `wf-rust-test.yml` need no runner label beyond OS and architecture: they install rustup when missing, the toolchain from the caller's `rust-toolchain.toml`, and every cargo subcommand from prebuilt binaries.
 Self-hosted runners need Bash, Git, curl, and outbound access to `static.rust-lang.org`, crates.io, and GitHub releases.
 `wf-rust-test.yml` with `require-docker: true` additionally needs a reachable Docker daemon (label `docker`); testcontainers 0.27 resolves the bridge gateway when the runner itself is a container, so Docker-out-of-Docker runners such as `daedalus` work.
-The opt-in sqlx job in `wf-rust-check.yml` runs in a job container with a Postgres service, so the runner must be able to start containers.
+The opt-in sqlx job in `wf-rust-check.yml` runs on the runner itself and starts Postgres with `docker run`, so the runner needs the `docker` CLI and a reachable daemon.
+It uses no job container or service container: on Docker-out-of-Docker runners such as `daedalus` the runner's externals (`/__e/node24`) do not exist inside job containers, so the first JavaScript action fails.
+When `/.dockerenv` exists the job reaches Postgres through the default bridge gateway, the address at which a container runner sees ports the host daemon publishes; otherwise it uses `127.0.0.1`.
 
 ## Kubernetes Access
 
