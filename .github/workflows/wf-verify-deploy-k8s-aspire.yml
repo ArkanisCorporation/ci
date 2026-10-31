@@ -128,18 +128,18 @@ jobs:
         shell: bash
     steps:
       - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
 
       - name: Checkout platform NuGet auth action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
           repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
@@ -172,7 +172,7 @@ jobs:
 
       - name: Load private NuGet auth values from 1Password
         if: steps.nuget-auth-prepare.outputs.op-required == 'true'
-        uses: 1password/load-secrets-action@v5
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
           export-env: true
         env:
@@ -217,7 +217,7 @@ jobs:
       # (ARK-502). The tilde is expanded later, at save and restore time.
       - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache && steps.nuget-folder.outputs.persistent != 'true'
-        uses: runs-on/cache@v5.0.7
+        uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
@@ -241,12 +241,12 @@ jobs:
           host-config-path: ${{ steps.nuget-auth.outputs.host-config-path }}
 
       - name: Setup kubectl @ ${{ inputs.kubectl-version }}
-        uses: azure/setup-kubectl@v5.2.0
+        uses: azure/setup-kubectl@bda439f5f36b99b262ebdcd3613869bddb064c8e # v5.2.0
         with:
           version: ${{ inputs.kubectl-version }}
 
       - name: Setup Helm @ ${{ inputs.helm-version }}
-        uses: azure/setup-helm@v5.0.1
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ inputs.helm-version }}
 
@@ -349,7 +349,7 @@ jobs:
       - name: Upload deployment artifacts (Dry Run) @ ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}
         if: ${{ always() && inputs.upload-diagnostics }}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ github.event.repository.name }}-k8s-verify-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/artifact-manifest.json
