@@ -61,7 +61,7 @@ jobs:
       - name: Set up Node.js + npm
         uses: actions/setup-node@v7
         with:
-          node-version: "24.x"
+          node-version: "26.x"
           package-manager-cache: false
 
       - name: Actionlint @ 1.7.12

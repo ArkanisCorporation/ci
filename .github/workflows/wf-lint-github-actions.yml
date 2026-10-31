@@ -73,7 +73,7 @@ jobs:
       - name: Set up Node.js + npm
         uses: actions/setup-node@v7
         with:
-          node-version: "24.x"
+          node-version: "26.x"
           package-manager-cache: false
 
       - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
