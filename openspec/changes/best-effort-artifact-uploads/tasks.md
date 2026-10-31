@@ -22,7 +22,7 @@
 ## 4. Verification
 
 - [x] 4.1 Run `scripts/validate-workflows.cs`, `scripts/generate-docs.cs --check`, `actionlint`, and `openspec validate best-effort-artifact-uploads --strict`
-- [ ] 4.2 Prove the sqlx job and best-effort uploads in the pull request run on `daedalus`
+- [x] 4.2 Prove the sqlx job and best-effort uploads in the pull request run on `daedalus`
 
 ## Workflow follow-up
 
