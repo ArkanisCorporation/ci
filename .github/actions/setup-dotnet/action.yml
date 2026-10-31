@@ -111,7 +111,7 @@ runs:
 
     - name: Setup .NET
       id: setup-dotnet
-      uses: actions/setup-dotnet@v6
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
         global-json-file: ${{ inputs.global-json-file }}
@@ -140,7 +140,7 @@ runs:
 
     - name: Load private NuGet auth values from 1Password
       if: steps.nuget-auth-prepare.outputs.op-required == 'true'
-      uses: 1password/load-secrets-action@v5
+      uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
       with:
         export-env: true
       env:
@@ -191,7 +191,7 @@ runs:
     - name: Cache NuGet packages
       if: inputs.enable-cache == 'true' && steps.nuget-folder.outputs.persistent != 'true'
       id: nuget-cache
-      uses: runs-on/cache@v5.0.7
+      uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
       with:
         path: ${{ inputs.nuget-packages || '~/.nuget/packages' }}
         key: ${{ runner.os }}-nuget-${{ hashFiles(inputs.cache-dependency-path, '.config/dotnet-tools.json') }}

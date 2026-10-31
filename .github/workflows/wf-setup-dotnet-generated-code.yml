@@ -142,17 +142,17 @@ jobs:
         shell: bash
     steps:
       - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup .NET action tooling @ 10.0.x
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 10.0.x
 
       - name: Checkout platform NuGet auth action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
           repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
@@ -165,13 +165,13 @@ jobs:
 
       - name: Setup .NET @ ${{ inputs.global-json-file }}
         if: inputs.global-json-file != ''
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: ${{ inputs.global-json-file }}
 
       - name: Setup .NET @ ${{ inputs.dotnet-version }}
         if: inputs.global-json-file == ''
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
@@ -197,7 +197,7 @@ jobs:
 
       - name: Load private NuGet auth values from 1Password
         if: steps.nuget-auth-prepare.outputs.op-required == 'true'
-        uses: 1password/load-secrets-action@v5
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
           export-env: true
         env:
@@ -242,7 +242,7 @@ jobs:
       # (ARK-502). The tilde is expanded later, at save and restore time.
       - name: Cache NuGet packages @ ${{ runner.os }}-${{ runner.arch }}
         if: inputs.enable-cache && steps.nuget-folder.outputs.persistent != 'true'
-        uses: runs-on/cache@v5.0.7
+        uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '.config/dotnet-tools.json') }}
@@ -322,7 +322,7 @@ jobs:
         run: dotnet build "$SOLUTION" --configuration "$CONFIGURATION" --no-restore
 
       - name: Checkout platform action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
           repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
@@ -391,7 +391,7 @@ jobs:
       - name: Upload diagnostics @ ${{ github.event.repository.name }}-generated-code-${{ github.run_id }}-${{ github.run_attempt }}
         if: ${{ always() && inputs.upload-diagnostics }}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ github.event.repository.name }}-generated-code-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
