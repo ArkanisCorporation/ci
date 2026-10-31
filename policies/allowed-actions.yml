@@ -19,6 +19,9 @@ allow:
   - NuGet/login
   - helm/chart-releaser-action
   - step-security/harden-runner
+  - actions-rust-lang/setup-rust-toolchain
+  - Swatinem/rust-cache
+  - taiki-e/install-action
 review_required:
   - dorny/paths-filter
 blocked_patterns:

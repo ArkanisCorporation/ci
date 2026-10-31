@@ -1,0 +1,323 @@
+# Summary:
+#   Reusable Rust test workflow running cargo-nextest.
+# Remarks:
+#   This workflow runs in the caller repository context with a read-only token and no secrets.
+#   The toolchain always comes from the caller's rust-toolchain.toml (or rust-toolchain) in working-directory.
+#   cargo-nextest installs from a prebuilt binary (taiki-e/install-action with fallback none).
+#   Integration tests that start containers (testcontainers) use the runner's Docker daemon; require-docker fails fast when none is reachable.
+#   It does not lint (wf-rust-check.yml), build images, publish, or deploy.
+
+name: wf-rust-test
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Single runner label used when runs-on-json is empty.
+        type: string
+        required: false
+        default: ubuntu-latest
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels. Overrides runs-on when set.
+        type: string
+        required: false
+        default: ""
+      runs-on-self-hosted:
+        description: True when the effective runner selection targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      working-directory:
+        description: Directory containing the Cargo workspace root and rust-toolchain.toml.
+        type: string
+        required: false
+        default: .
+      nextest-profile:
+        description: cargo-nextest profile passed to --profile. The profile must exist in .config/nextest.toml unless it is default.
+        type: string
+        required: false
+        default: ci
+      nextest-arguments:
+        description: Whitespace-separated cargo nextest run arguments added after --profile.
+        type: string
+        required: false
+        default: --workspace --all-features --locked
+      nextest-version:
+        description: cargo-nextest version installed from a prebuilt binary.
+        type: string
+        required: false
+        default: 0.9.150
+      sqlx-offline:
+        description: Exports SQLX_OFFLINE=true so sqlx query macros compile against committed .sqlx metadata.
+        type: boolean
+        required: false
+        default: false
+      require-docker:
+        description: Fails before compiling when no Docker daemon is reachable. Set true for testcontainers integration tests.
+        type: boolean
+        required: false
+        default: false
+      enable-cache:
+        description: Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access.
+        type: boolean
+        required: false
+        default: true
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+      upload-diagnostics:
+        description: Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact.
+        type: boolean
+        required: false
+        default: true
+      timeout-minutes:
+        description: Test job timeout.
+        type: number
+        required: false
+        default: 30
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest.
+        value: ${{ jobs.test.outputs.artifact-manifest }}
+      run-metadata:
+        description: Path to the generated run metadata.
+        value: ${{ jobs.test.outputs.run-metadata }}
+
+permissions: {}
+
+jobs:
+  test:
+    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}
+    runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+      run-metadata: ${{ steps.metadata.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+          REQUIRE_DOCKER: ${{ inputs.require-docker }}
+        run: |
+          mkdir -p artifacts/meta artifacts/rust
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Rust build cache enabled: ${ENABLE_CACHE}"
+            echo "Docker required: ${REQUIRE_DOCKER}"
+          } | tee artifacts/meta/runner-contract.txt
+
+          # setup-rust-toolchain falls back to stable without a toolchain file; fail instead so CI
+          # never tests with a different compiler than the caller pinned.
+          if [[ ! -f "${WORKING_DIRECTORY}/rust-toolchain.toml" && ! -f "${WORKING_DIRECTORY}/rust-toolchain" ]]; then
+            echo "::error::${WORKING_DIRECTORY}/rust-toolchain.toml (or rust-toolchain) is required to select the Rust toolchain."
+            exit 2
+          fi
+
+          if [[ ! -f "${WORKING_DIRECTORY}/Cargo.toml" ]]; then
+            echo "::error::${WORKING_DIRECTORY}/Cargo.toml is required."
+            exit 2
+          fi
+
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            echo "Workspace: ${GITHUB_WORKSPACE}"
+            command -v git
+            command -v curl
+            command -v rustup || echo "rustup: not preinstalled (setup-rust-toolchain installs it)"
+            command -v docker || echo "docker: not on PATH"
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Verify Docker daemon @ require-docker=${{ inputs.require-docker }}
+        if: inputs.require-docker
+        run: |
+          # testcontainers talks to the daemon through DOCKER_HOST or the default socket; fail here,
+          # in seconds, instead of after compiling the whole test suite.
+          if ! docker info > artifacts/meta/docker-info.txt 2>&1; then
+            cat artifacts/meta/docker-info.txt
+            echo "::error::require-docker is true but no Docker daemon is reachable from this runner."
+            exit 2
+          fi
+          docker version --format 'Docker server {{.Server.Version}}' | tee -a artifacts/meta/runner-contract.txt
+
+      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml
+        id: toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2.0.0
+        with:
+          rust-src-dir: ${{ inputs.working-directory }}
+          cache: false
+          rustflags: ""
+          build-warnings: ""
+          matcher: true
+
+      - name: Restore Rust cache @ ${{ inputs.working-directory }}
+        if: inputs.enable-cache
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: ${{ inputs.working-directory }}
+          key: rust-test
+          cache-on-failure: false
+
+      - name: Install cargo-nextest @ ${{ inputs.nextest-version }}
+        uses: taiki-e/install-action@v2.88.1
+        with:
+          tool: cargo-nextest@${{ inputs.nextest-version }}
+          fallback: none
+
+      - name: Test ${{ inputs.working-directory }} @ nextest profile ${{ inputs.nextest-profile }}
+        id: nextest
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          NEXTEST_PROFILE: ${{ inputs.nextest-profile }}
+          NEXTEST_ARGUMENTS: ${{ inputs.nextest-arguments }}
+          SQLX_OFFLINE: ${{ inputs.sqlx-offline && 'true' || '' }}
+        run: |
+          set -o pipefail
+          cd "$WORKING_DIRECTORY"
+          if [[ -z "$SQLX_OFFLINE" ]]; then
+            unset SQLX_OFFLINE
+          fi
+          # Split caller arguments without shell evaluation.
+          read -r -a nextest_args <<< "$NEXTEST_ARGUMENTS"
+          cargo nextest run --profile "$NEXTEST_PROFILE" "${nextest_args[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/nextest.log"
+
+      - name: Collect JUnit report @ target/nextest/${{ inputs.nextest-profile }}
+        if: always()
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          NEXTEST_PROFILE: ${{ inputs.nextest-profile }}
+        run: |
+          # nextest writes JUnit only when the profile configures [profile.<name>.junit].
+          report_dir="${WORKING_DIRECTORY}/target/nextest/${NEXTEST_PROFILE}"
+          if compgen -G "${report_dir}/*.xml" > /dev/null; then
+            mkdir -p artifacts/test-results
+            cp "${report_dir}"/*.xml artifacts/test-results/
+            echo "JUnit report collected from ${report_dir}."
+          else
+            echo "No JUnit report in ${report_dir}; configure [profile.${NEXTEST_PROFILE}.junit] to emit one."
+          fi
+
+      - name: Write run metadata @ artifacts/meta/run-metadata.json
+        id: metadata
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          RUSTC_VERSION: ${{ steps.toolchain.outputs.rustc-version }}
+          CARGO_VERSION: ${{ steps.toolchain.outputs.cargo-version }}
+          NEXTEST_VERSION: ${{ inputs.nextest-version }}
+        run: |
+          mkdir -p artifacts/meta
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-rust-test",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${RUNS_ON_JSON}
+            },
+            "tool_versions": {
+              "rustc": "${RUSTC_VERSION}",
+              "cargo": "${CARGO_VERSION}",
+              "cargo-nextest": "${NEXTEST_VERSION}"
+            }
+          }
+          JSON
+          echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
+
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-rust-test",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "test"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-rust-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
+        if: always()
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          NEXTEST_PROFILE: ${{ inputs.nextest-profile }}
+          RUSTC_VERSION: ${{ steps.toolchain.outputs.rustc-version }}
+        run: |
+          {
+            echo "# Rust test"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
+            echo "| Working directory | \`${WORKING_DIRECTORY}\` |"
+            echo "| rustc | \`${RUSTC_VERSION:-unknown}\` |"
+            echo "| cargo-nextest | \`${{ inputs.nextest-version }}\` |"
+            echo "| nextest profile | \`${NEXTEST_PROFILE}\` |"
+            echo "| SQLX_OFFLINE | \`${{ inputs.sqlx-offline }}\` |"
+            echo "| Docker required | \`${{ inputs.require-docker }}\` |"
+            echo "| Outcome | \`${{ steps.nextest.outcome || 'skipped' }}\` |"
+            echo "| Rust cache | \`${{ inputs.enable-cache }}\` |"
+            echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
+            echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-rust-test-${{ github.run_id }}-${{ github.run_attempt }}
+        if: ${{ always() && inputs.upload-diagnostics }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-rust-test-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts
+            ${{ runner.debug != '1' && '!artifacts/**/bin/**' || '' }}
+            ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

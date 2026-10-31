@@ -8,6 +8,7 @@ They live under `tests/fixtures` so they can exercise the shared workflows witho
 | `typescript-pnpm`      | TypeScript package with pnpm lint, test, and build scripts. | `wf-node-lint.yml`, `wf-node-test.yml`, `wf-node-build.yml`                 |
 | `dotnet-nuget-library` | .NET 10 library plus xUnit tests and package metadata.      | `wf-dotnet-format.yml`, `wf-dotnet-test.yml`, `wf-verify-publish-nuget.yml` |
 | `dotnet-container-app` | Runnable .NET 10 ASP.NET Core app with Dockerfile.          | `wf-verify-publish-container-dotnet.yml`                                    |
+| `rust-workspace`       | Dependency-free Cargo workspace (library + binary) with `rust-toolchain.toml`, `deny.toml`, a nextest `ci` profile, and a Dockerfile that stamps the `VERSION` build arg into the binary. | `wf-rust-check.yml`, `wf-rust-test.yml`, `wf-verify-publish-container-generic.yml` |
 
 Local workflow callers live in `tests/fixtures/workflow-contract/*-local.yml`.
 They call `./.github/workflows/...` so changes in this repository can be tested before a stable `vN` release.

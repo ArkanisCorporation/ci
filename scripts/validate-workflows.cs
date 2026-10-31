@@ -42,6 +42,8 @@ ValidateStepDisplayNameContract();
 ValidateCompositeActions();
 ValidateDotNetActionFileScriptBuildIsolation();
 ValidateContainerPublishContract();
+ValidateGenericContainerPublishContract();
+ValidateRustWorkflowContract();
 ValidateNuGetPublishContract();
 ValidateNuGetCompositeActionsContract();
 ValidatePrivateNuGetCredentialContract();
@@ -448,6 +450,159 @@ void ValidateContainerPublishContract()
             {
                 AddFailure($"{actionPath}: dotnet-setversion action must expose {requiredInput} input.");
             }
+        }
+    }
+}
+
+// Generic container pair (ADR-0009): the .NET pair's Buildx, tag, and cache behaviour without any
+// language stamping, so any Dockerfile repository can publish. The release version reaches the
+// image only through the version-build-arg Docker build argument.
+void ValidateGenericContainerPublishContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-container-generic.yml");
+    var verifyWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-verify-publish-container-generic.yml");
+
+    foreach (var (path, expectedName, push) in new[]
+             {
+                 (workflowPath, "wf-publish-container-generic", "push: true"),
+                 (verifyWorkflowPath, "wf-verify-publish-container-generic", "push: false"),
+             })
+    {
+        if (!File.Exists(path))
+        {
+            AddFailure($"{path}: generic container workflow is required.");
+            continue;
+        }
+
+        var text = File.ReadAllText(path);
+        if (!Regex.IsMatch(text, $@"(?m)^name:\s*{Regex.Escape(expectedName)}\s*$"))
+        {
+            AddFailure($"{path}: workflow name must be {expectedName}.");
+        }
+
+        foreach (var forbidden in new[] { "dotnet-setversion", "setup-nuget-auth", "NUGET_AUTH_JSON", "csproj", ".ci/arkanis-ci" })
+        {
+            if (text.Contains(forbidden, StringComparison.Ordinal))
+            {
+                AddFailure($"{path}: generic container workflow must not depend on .NET stamping or NuGet credentials ({forbidden}).");
+            }
+        }
+
+        if (!text.Contains(push, StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: generic container workflow must build with '{push}'.");
+        }
+
+        var versionBuildArg = ReadWorkflowInputs(path).GetValueOrDefault("version-build-arg");
+        if (versionBuildArg is null || !string.Equals(NormalizeWorkflowDefault(versionBuildArg), "string:VERSION", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: generic container workflow must expose version-build-arg defaulting to VERSION.");
+        }
+
+        if (!text.Contains("printf '%s=%s\\n' \"$VERSION_BUILD_ARG\" \"$VERSION\"", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: generic container workflow must pass the release version through version-build-arg.");
+        }
+
+        ValidateContainerBuildCacheContract(path);
+    }
+
+    if (File.Exists(workflowPath))
+    {
+        var text = File.ReadAllText(workflowPath);
+        if (!Regex.IsMatch(text, @"(?m)^\s*environment:\s*\$\{\{\s*inputs\.environment-name\s*\}\}\s*$"))
+        {
+            AddFailure($"{workflowPath}: generic container publish job must bind inputs.environment-name.");
+        }
+
+        foreach (var forbidden in new[] { "id-token: write", "attestations: write" })
+        {
+            if (text.Contains(forbidden, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: buildx provenance and SBOM need no {forbidden}; keep the publish job least-privilege.");
+            }
+        }
+    }
+}
+
+// Rust workflows (ADR-0009): toolchain from the caller's rust-toolchain.toml, clippy always denies
+// warnings, tools come from prebuilt binaries only, and the Rust build cache honours enable-cache.
+void ValidateRustWorkflowContract()
+{
+    foreach (var workflowName in new[] { "wf-rust-check.yml", "wf-rust-test.yml" })
+    {
+        var path = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(path))
+        {
+            AddFailure($"{path}: Rust workflow is required.");
+            continue;
+        }
+
+        var text = File.ReadAllText(path);
+        var lines = File.ReadAllLines(path);
+
+        if (!text.Contains("uses: actions-rust-lang/setup-rust-toolchain@", StringComparison.Ordinal)
+            || !text.Contains("rust-src-dir: ${{ inputs.working-directory }}", StringComparison.Ordinal)
+            || !text.Contains("cache: false", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: Rust workflows must install the caller's rust-toolchain.toml with setup-rust-toolchain (rust-src-dir from working-directory, its own cache off).");
+        }
+
+        if (!text.Contains("rust-toolchain.toml (or rust-toolchain) is required", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: Rust workflows must fail when the caller has no toolchain file instead of falling back to stable.");
+        }
+
+        if (Regex.IsMatch(text, @"(?m)^\s*[^#\n]*\bcargo install\b"))
+        {
+            AddFailure($"{path}: Rust workflows must not compile tools with cargo install; use prebuilt binaries.");
+        }
+
+        var installActionCount = Regex.Matches(text, @"uses: taiki-e/install-action@").Count;
+        var noFallbackCount = Regex.Matches(text, @"(?m)^\s+fallback: none\s*$").Count;
+        if (installActionCount == 0 || installActionCount != noFallbackCount)
+        {
+            AddFailure($"{path}: every taiki-e/install-action step must set 'fallback: none' so tools are never compiled from source.");
+        }
+
+        if (text.Contains("cargo binstall", StringComparison.Ordinal)
+            && !text.Contains("--disable-strategies compile", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: cargo binstall must disable the compile strategy.");
+        }
+
+        var enableCache = ReadWorkflowInputs(path).GetValueOrDefault("enable-cache");
+        if (enableCache is null || !string.Equals(NormalizeWorkflowDefault(enableCache), "boolean:true", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: Rust workflows must expose boolean enable-cache defaulting to true.");
+        }
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!lines[index].Contains("uses: Swatinem/rust-cache@", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (index == 0 || !lines[index - 1].Contains("if: inputs.enable-cache", StringComparison.Ordinal))
+            {
+                AddFailure($"{path}:{index + 1}: Swatinem/rust-cache step must be gated with 'if: inputs.enable-cache'.");
+            }
+        }
+    }
+
+    var checkPath = Path.Combine(repoRoot, ".github", "workflows", "wf-rust-check.yml");
+    if (File.Exists(checkPath))
+    {
+        var text = File.ReadAllText(checkPath);
+        if (!text.Contains("cargo clippy \"${clippy_args[@]}\" -- -D warnings", StringComparison.Ordinal))
+        {
+            AddFailure($"{checkPath}: clippy must always run with -D warnings after the caller arguments.");
+        }
+
+        if (!Regex.IsMatch(text, @"(?m)^    if: inputs\.sqlx-prepare-check\s*$"))
+        {
+            AddFailure($"{checkPath}: the sqlx job (and its Postgres service) must only run when sqlx-prepare-check is true.");
         }
     }
 }
@@ -1214,6 +1369,7 @@ void ValidateSplitVerificationWorkflowsContract()
         "wf-verify-release-semantic.yml",
         "wf-verify-publish-nuget.yml",
         "wf-verify-publish-container-dotnet.yml",
+        "wf-verify-publish-container-generic.yml",
         "wf-verify-deploy-k8s-aspire.yml",
     };
 
@@ -1836,6 +1992,11 @@ void ValidateJobDisplayNameContract()
         ("wf-verify-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }}"),
         ("wf-verify-publish-nuget.yml", "    name: ${{ inputs.version }}"),
         ("wf-verify-publish-container-dotnet.yml", "    name: ${{ inputs.version || inputs.version-tag }}"),
+        ("wf-publish-container-generic.yml", "    name: ${{ inputs.version || inputs.version-tag }} @ ${{ inputs.environment-name }}"),
+        ("wf-verify-publish-container-generic.yml", "    name: ${{ inputs.version || inputs.version-tag }}"),
+        ("wf-rust-check.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-rust-check.yml", "    name: sqlx prepare ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-rust-test.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-verify-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }}"),
         ("wf-node-lint.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-test.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
@@ -1881,6 +2042,9 @@ void ValidateJobDisplayNameContract()
                      "    name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: rust-workspace check @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: rust-workspace test @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: rust-workspace container-verify @ ${{ github.head_ref || github.ref_name }}",
                      "    name: docs-openviking dry-run @ ${{ github.head_ref || github.ref_name }}",
                      "    name: repo",
                      "    name: repo @ publish",
@@ -1923,6 +2087,29 @@ void ValidateStepDisplayNameContract()
         [
             "      - name: Build image (Dry Run) @ ${{ inputs.image }}",
             "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-publish-container-generic.yml"] =
+        [
+            "      - name: Publish image ${{ inputs.image }} @ ${{ inputs.platforms }}",
+            "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-verify-publish-container-generic.yml"] =
+        [
+            "      - name: Build image (Dry Run) @ ${{ inputs.image }}",
+            "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-rust-check.yml"] =
+        [
+            "      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml",
+            "      - name: Verify formatting @ ${{ inputs.working-directory }}",
+            "      - name: Clippy ${{ inputs.working-directory }} @ -D warnings",
+            "      - name: cargo-deny ${{ inputs.working-directory }} @ ${{ inputs.cargo-deny-checks || 'all' }}",
+            "      - name: Verify sqlx offline metadata @ ${{ inputs.working-directory }}",
+        ],
+        ["wf-rust-test.yml"] =
+        [
+            "      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml",
+            "      - name: Test ${{ inputs.working-directory }} @ nextest profile ${{ inputs.nextest-profile }}",
         ],
         ["wf-publish-docs-openviking.yml"] =
         [
@@ -2135,7 +2322,10 @@ void ValidateRepositoryPipelineContract()
         + "      - dotnet-library-format\n"
         + "      - dotnet-library-test\n"
         + "      - dotnet-nuget\n"
-        + "      - dotnet-container\n";
+        + "      - dotnet-container\n"
+        + "      - rust-check\n"
+        + "      - rust-test\n"
+        + "      - rust-container\n";
     var repositoryPrerequisiteWorkflowUses = new[]
     {
         ("platform selftest", "uses: ./.github/workflows/wf-platform-selftest.yml"),
@@ -2146,6 +2336,9 @@ void ValidateRepositoryPipelineContract()
         (".NET library test fixture", "uses: ./.github/workflows/wf-dotnet-test.yml"),
         ("NuGet publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-nuget.yml"),
         ("container image publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml"),
+        ("Rust check fixture", "uses: ./.github/workflows/wf-rust-check.yml"),
+        ("Rust test fixture", "uses: ./.github/workflows/wf-rust-test.yml"),
+        ("generic container publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-container-generic.yml"),
     };
     var localDotNetFormatToolSetup =
         "      working-directory: tests/fixtures/mock-projects/dotnet-nuget-library\n"
@@ -2279,6 +2472,8 @@ void ValidateStateChangingWorkflowConcurrencyContract()
     RequireWorkflowText("wf-release-backpropagation.yml", "cancel-in-progress: false");
     RequireWorkflowText("wf-publish-container-dotnet.yml", "group: publish-container-${{ inputs.environment-name }}-${{ inputs.registry }}-${{ inputs.image }}");
     RequireWorkflowText("wf-publish-container-dotnet.yml", "cancel-in-progress: false");
+    RequireWorkflowText("wf-publish-container-generic.yml", "group: publish-container-generic-${{ inputs.environment-name }}-${{ inputs.registry }}-${{ inputs.image }}");
+    RequireWorkflowText("wf-publish-container-generic.yml", "cancel-in-progress: false");
     RequireWorkflowText("wf-publish-nuget.yml", "group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}");
     RequireWorkflowText("wf-deploy-k8s-aspire.yml", "group: deploy-k8s-${{ inputs.environment-name }}-${{ inputs.kubernetes-namespace }}");
     RequireWorkflowText("wf-publish-docs-openviking.yml", "group: publish-docs-openviking-${{ github.repository }}-${{ inputs.target-root }}");

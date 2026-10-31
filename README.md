@@ -36,6 +36,10 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-publish-nuget.yml` | Pack and publish NuGet packages through Trusted Publishing or API-key fallback. |
 | `wf-verify-publish-container-dotnet.yml` | Stamp .NET versions and build OCI images without pushing. |
 | `wf-publish-container-dotnet.yml` | Stamp .NET versions and publish OCI images through Docker Buildx. |
+| `wf-verify-publish-container-generic.yml` | Build any Dockerfile without pushing; the release version reaches the build as a build arg. |
+| `wf-publish-container-generic.yml` | Publish an OCI image from any Dockerfile through Docker Buildx, no language-specific stamping. |
+| `wf-rust-check.yml` | Verify Rust formatting, clippy with `-D warnings`, cargo-deny, and optionally sqlx offline metadata. |
+| `wf-rust-test.yml` | Run Rust tests with cargo-nextest, with Docker available for testcontainers. |
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying cluster changes. |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |
 | `wf-platform-selftest.yml` | Validate this platform repository. |
@@ -289,6 +293,8 @@ Package publishing, image publishing, and deployment consume release outputs in 
 Use `wf-verify-publish-*` and `wf-verify-deploy-*` workflows for dry-run style validation without environments.
 Container publishing passes the bare semantic-release version as `version` and the tagged release ref as `version-tag`.
 For .NET images, use `wf-publish-container-dotnet.yml` so assemblies are stamped before Docker Buildx runs.
+For any other Dockerfile (Rust, Go, static sites), use `wf-publish-container-generic.yml`; it passes the version as the `VERSION` build arg (renamable with `version-build-arg`) and the Dockerfile stamps it, for example into a compile-time env for Rust.
+Versions are stamped at build time, never committed back to the default branch.
 Use `extra-tags` for additional mutable tags such as `latest`.
 Jobs that call reusable workflows can use `strategy.matrix` for independent publish targets.
 Use that shape for multiple container images, NuGet packages, verification targets, or deploy targets that share the same release outputs.

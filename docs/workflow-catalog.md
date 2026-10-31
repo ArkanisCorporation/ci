@@ -20,6 +20,10 @@ Audience: consumers and platform maintainers.
 | `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish |
 | `wf-verify-publish-container-dotnet.yml` | Stamp and build one .NET OCI image without pushing. | untrusted or trusted-build |
 | `wf-publish-container-dotnet.yml` | Stamp and publish one .NET OCI image. | publish |
+| `wf-verify-publish-container-generic.yml` | Build one OCI image from any Dockerfile without pushing. | untrusted or trusted-build |
+| `wf-publish-container-generic.yml` | Publish one OCI image from any Dockerfile, no language stamping. | publish |
+| `wf-rust-check.yml` | Verify rustfmt, clippy `-D warnings`, cargo-deny, and optionally sqlx offline metadata. | untrusted or trusted-build |
+| `wf-rust-test.yml` | Run Rust tests with cargo-nextest. | untrusted or trusted-build |
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying changes. | untrusted or trusted-build |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build |
@@ -43,6 +47,10 @@ Audience: consumers and platform maintainers.
 | `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`packages: read` for GitHub Packages restore<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
 | `wf-verify-publish-container-dotnet.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | Buildx metadata, manifest |
 | `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
+| `wf-verify-publish-container-generic.yml` | `contents: read` | Buildx metadata, manifest |
+| `wf-publish-container-generic.yml` | `contents: read`<br>`packages: write` when pushing to GHCR | digest, Buildx metadata, manifest |
+| `wf-rust-check.yml` | `contents: read` | rustfmt, clippy, cargo-deny, and sqlx logs, metadata, manifest |
+| `wf-rust-test.yml` | `contents: read` | nextest log, JUnit report when configured, metadata, manifest |
 | `wf-verify-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | verification manifest |
 | `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
@@ -329,6 +337,42 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 
 Outputs: schema does not define workflow outputs.
 
+### wf-publish-container-generic.yml
+
+Schema: `schemas/workflow-inputs/wf-publish-container-generic.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `environment-name` | string | no | `"container"` | GitHub environment guarding image publication. |
+| `image` | string | yes | none | Fully-qualified image name without tag. |
+| `context` | string | no | `"."` | Docker build context. |
+| `dockerfile` | string | no | `"Dockerfile"` | Dockerfile path. |
+| `target` | string | no | `""` | Optional Dockerfile target stage. |
+| `platforms` | string | no | `"linux/amd64"` | Comma-delimited target platforms. |
+| `version` | string | yes | none | Required bare version without leading v, passed to the Dockerfile through the version-build-arg Docker build argument. |
+| `version-build-arg` | string | no | `"VERSION"` | Docker build argument name that receives version. Empty disables it. A same-named entry in build-args wins. |
+| `version-tag` | string | no | `""` | Optional release version tag to apply to the image, usually prefixed with v. |
+| `version-channel` | string | no | `""` | Optional channel tag to apply. |
+| `channel-latest` | boolean | no | `true` | Adds a mutable <version-channel>-latest tag when version-channel is set. |
+| `extra-tags` | string | no | `""` | Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through. |
+| `registry` | string | no | `"ghcr.io"` | Registry host used for docker/login-action. |
+| `registry-username` | string | no | `""` | Registry username; defaults to github.actor when empty. |
+| `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
+| `build-args` | string | no | `""` | Optional newline-delimited Docker build arguments. Do not pass secrets here because Docker build args can persist in image metadata or logs. |
+| `enable-cache` | boolean | no | `true` | Enables the generated GitHub Actions BuildKit cache when cache-from and cache-to are empty. |
+| `cache-from` | string | no | `""` | Optional Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
+| `cache-to` | string | no | `""` | Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
+| `sbom` | string | no | `"true"` | Docker Buildx sbom input. |
+| `provenance` | string | no | `"mode=max"` | Docker Buildx provenance input. |
+| `labels` | string | no | `""` | Optional newline-delimited OCI labels. |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
 ### wf-publish-docs-openviking.yml
 
 Schema: `schemas/workflow-inputs/wf-publish-docs-openviking.schema.json`.
@@ -424,6 +468,59 @@ Schema: `schemas/workflow-inputs/wf-release-semantic.schema.json`.
 
 Outputs: schema does not define workflow outputs.
 
+### wf-rust-check.yml
+
+Schema: `schemas/workflow-inputs/wf-rust-check.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `working-directory` | string | no | `"."` | Directory containing the Cargo workspace root and rust-toolchain.toml. |
+| `rustfmt` | boolean | no | `true` | Runs cargo fmt --all --check when true. |
+| `clippy` | boolean | no | `true` | Runs cargo clippy with -D warnings when true. |
+| `clippy-arguments` | string | no | `"--workspace --all-targets --all-features --locked"` | Whitespace-separated cargo clippy arguments placed before the enforced "-- -D warnings". |
+| `cargo-deny` | boolean | no | `true` | Runs cargo deny check with the caller's deny.toml when true. |
+| `cargo-deny-checks` | string | no | `""` | Optional whitespace-separated cargo-deny check names (advisories, bans, licenses, sources). Empty runs every check. |
+| `cargo-deny-version` | string | no | `"0.20.2"` | cargo-deny version installed from a prebuilt binary. |
+| `sqlx-offline` | boolean | no | `false` | Exports SQLX_OFFLINE=true to clippy so sqlx query macros use committed .sqlx metadata. |
+| `sqlx-prepare-check` | boolean | no | `false` | Runs cargo sqlx prepare --check against a throwaway Postgres service in a separate job when true. |
+| `sqlx-prepare-arguments` | string | no | `"--workspace"` | Whitespace-separated arguments for cargo sqlx prepare, before the enforced --check. |
+| `sqlx-migrations-source` | string | no | `""` | Optional migrations directory, relative to working-directory, applied with sqlx migrate run before the prepare check. |
+| `sqlx-cli-version` | string | no | `"0.9.0"` | sqlx-cli version installed from a prebuilt binary through cargo-binstall. |
+| `cargo-binstall-version` | string | no | `"1.26.1"` | cargo-binstall version used to install sqlx-cli. |
+| `sqlx-postgres-image` | string | no | `"postgres:17-alpine"` | Postgres service image for the sqlx prepare check. |
+| `sqlx-container-image` | string | no | `"rust:1-trixie"` | Job container image for the sqlx prepare check. Needs bash, git, and rustup or curl. |
+| `enable-cache` | boolean | no | `true` | Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access. |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads diagnostics artifacts when true. Set false for local act smoke tests that cannot emulate upload-artifact. |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-rust-test.yml
+
+Schema: `schemas/workflow-inputs/wf-rust-test.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `working-directory` | string | no | `"."` | Directory containing the Cargo workspace root and rust-toolchain.toml. |
+| `nextest-profile` | string | no | `"ci"` | cargo-nextest profile passed to --profile. The profile must exist in .config/nextest.toml unless it is default. |
+| `nextest-arguments` | string | no | `"--workspace --all-features --locked"` | Whitespace-separated cargo nextest run arguments added after --profile. |
+| `nextest-version` | string | no | `"0.9.150"` | cargo-nextest version installed from a prebuilt binary. |
+| `sqlx-offline` | boolean | no | `false` | Exports SQLX_OFFLINE=true so sqlx query macros compile against committed .sqlx metadata. |
+| `require-docker` | boolean | no | `false` | Fails before compiling when no Docker daemon is reachable. Set true for testcontainers integration tests. |
+| `enable-cache` | boolean | no | `true` | Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access. |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact. |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
 ### wf-setup-dotnet-generated-code.yml
 
 Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
@@ -511,6 +608,37 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `cache-from` | string | no | `""` | Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
 | `cache-to` | string | no | `""` | Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
 | `labels` | string | no | `""` | n/a |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-verify-publish-container-generic.yml
+
+Schema: `schemas/workflow-inputs/wf-verify-publish-container-generic.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `image` | string | yes | none | Fully-qualified image name without tag. |
+| `context` | string | no | `"."` | Docker build context. |
+| `dockerfile` | string | no | `"Dockerfile"` | Dockerfile path. |
+| `target` | string | no | `""` | Optional Dockerfile target stage. |
+| `platforms` | string | no | `"linux/amd64"` | Comma-delimited target platforms. |
+| `version` | string | yes | none | Required bare version without leading v, passed to the Dockerfile through the version-build-arg Docker build argument. |
+| `version-build-arg` | string | no | `"VERSION"` | Docker build argument name that receives version. Empty disables it. A same-named entry in build-args wins. |
+| `version-tag` | string | no | `""` | Optional release version tag to apply to the image, usually prefixed with v. |
+| `version-channel` | string | no | `""` | Optional channel tag to apply. |
+| `channel-latest` | boolean | no | `true` | Adds a mutable <version-channel>-latest tag when version-channel is set. |
+| `extra-tags` | string | no | `""` | Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through. |
+| `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
+| `build-args` | string | no | `""` | Optional newline-delimited Docker build arguments. Do not pass secrets here because Docker build args can persist in image metadata or logs. |
+| `enable-cache` | boolean | no | `true` | Enables the generated GitHub Actions BuildKit cache when cache-from and cache-to are empty. |
+| `cache-from` | string | no | `""` | Optional Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
+| `cache-to` | string | no | `""` | Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
+| `labels` | string | no | `""` | Optional newline-delimited OCI labels. |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
 
@@ -1785,6 +1913,341 @@ jobs:
       environment-name: container
     secrets:
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+## Generic Container Publish Verification Workflow
+
+`wf-verify-publish-container-generic.yml` builds any caller Dockerfile with Docker Buildx without pushing.
+Audience: consumers.
+It is the .NET verification workflow without .NET stamping or NuGet credentials: it modifies no caller files and installs no SDK.
+The release version reaches the build only as the `version-build-arg` Docker build argument (default `VERSION`); an empty `version-build-arg` disables it and a same-named entry in `build-args` wins.
+`target` selects a Dockerfile stage.
+It uses read-only repository permissions and disables SBOM and provenance emission.
+Cache and BuildKit selection behave exactly like the .NET workflows.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> inputs[[Validate version and version-build-arg]]
+  inputs --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| builder{remote BuildKit?}
+  sh --> builder
+  builder -->|yes| remote[[Set up remote Buildx]]
+  builder -->|no| local[[Set up Docker Buildx]]
+  remote --> tags[[Resolve image tags]]
+  local --> tags
+  tags --> args[[Resolve build args incl. VERSION]]
+  args --> cache[[Resolve BuildKit cache]]
+  cache --> build[[docker/build-push-action build only]]
+  build --> metadata[/Buildx metadata/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> upload[/Container metadata artifact/]
+  manifest --> outputs(("metadata, artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,inputs,sh,remote,local,tags,args,cache,build action
+  class preflight,builder decision
+  class metadata,manifest,summary,upload artifact
+  class outputs output
+```
+
+Preconditions:
+
+- The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
+- `version` is a required bare version without a leading `v`.
+- The Dockerfile declares `ARG <version-build-arg>` where it needs the version.
+
+Side effects:
+
+- Builds container layers without pushing them.
+- Reads and writes BuildKit cache when `enable-cache` is true (import only on a remote BuildKit).
+- Passes Docker build args to BuildKit; never put secrets in `build-args`.
+
+## Generic Container Publish Workflow
+
+`wf-publish-container-generic.yml` publishes an OCI image from any caller Dockerfile through Docker Buildx.
+Audience: consumers and release managers.
+Use it for Rust, Go, or any non-.NET image; use the .NET container publish workflow when `.csproj` versions must be stamped.
+Tags: `sha-<12-char sha>` always, plus `version-tag`, `version-channel`, `<channel>-latest` (with `channel-latest`), and `extra-tags` when set.
+The release version reaches the build only as the `version-build-arg` Docker build argument (default `VERSION`). Rust consumers expose it to rustc in the Dockerfile, for example:
+
+```dockerfile
+ARG VERSION=0.0.0-dev
+ENV APP_VERSION=${VERSION}
+RUN cargo build --release --locked
+```
+
+and read it with `option_env!("APP_VERSION")`. Nothing is committed back to the repository.
+Buildx provenance (`provenance`, default `mode=max`) and SBOM (`sbom`, default `true`) attestations are attached to the pushed image index.
+The publish job binds `environment-name` and serializes per environment, registry, and image with `cancel-in-progress: false`.
+
+Requirements:
+
+| Requirement | Permission | Mode |
+|---|---|---|
+| Caller repository checkout. | `contents: read` | always |
+| Registry write token for pushed images. | `packages: write` for GHCR, or registry-specific write scope | always |
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> inputs[[Validate version and version-build-arg]]
+  inputs --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| builder{remote BuildKit?}
+  sh --> builder
+  builder -->|yes| remote[[Set up remote Buildx]]
+  builder -->|no| local[[Set up Docker Buildx]]
+  remote --> tags[[Resolve image tags]]
+  local --> tags
+  tags --> args[[Resolve build args incl. VERSION]]
+  args --> cache[[Resolve BuildKit cache]]
+  cache --> envGate[["Environment-gated publish job"]]
+  envGate --> registry[("Container registry")]
+  registry --> build[[docker/build-push-action push with provenance and SBOM]]
+  build --> metadata[/Buildx metadata/]
+  build --> digest(("digest"))
+  metadata --> manifest[/artifact-manifest.json/]
+  digest --> manifest
+  manifest --> summary>Step summary]
+  summary --> upload[/Container metadata artifact/]
+  manifest --> outputs(("digest, metadata, artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,inputs,sh,remote,local,tags,args,cache,envGate,build action
+  class preflight,builder decision
+  class metadata,manifest,summary,upload artifact
+  class digest,outputs output
+  class registry external
+```
+
+Preconditions:
+
+- The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
+- Registry credentials are available (`REGISTRY_TOKEN`, default `github.token`).
+- `version` is a required bare version without a leading `v`.
+
+Side effects:
+
+- Pushes registry tags, including mutable channel, channel-latest, and extra tags when configured.
+- Reads and writes BuildKit cache when `enable-cache` is true.
+- Emits a digest output for downstream deploys.
+
+Failure modes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `version must be a bare semantic version without leading v` | Tag-form release output passed to `version`. | Pass `new-version` to `version` and `new-tag` to `version-tag`. |
+| Binary reports `0.0.0-dev` | Dockerfile lacks `ARG VERSION` in the build stage, or declares it before `FROM`. | Re-declare the `ARG` inside the stage that compiles. |
+| `denied: permission_denied` on push | Caller job did not grant `packages: write`, or the package is not linked to the repository. | Grant `packages: write`; link the GHCR package to the repository. |
+
+Example:
+
+```yaml
+jobs:
+  publish_image:
+    name: ${{ needs.release.outputs.new-tag }} @ ghcr.io
+    if: ${{ needs.release.outputs.new-version != '' }}
+    needs: release
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-generic.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      image: ghcr.io/arkaniscorporation/example-rust-service
+      dockerfile: Dockerfile
+      version: ${{ needs.release.outputs.new-version }}
+      version-tag: ${{ needs.release.outputs.new-tag }}
+      extra-tags: |
+        latest
+      environment-name: container
+```
+
+## Rust Check Workflow
+
+`wf-rust-check.yml` verifies a Cargo workspace without running tests.
+Audience: consumers.
+It installs the toolchain from the caller's `rust-toolchain.toml` (or `rust-toolchain`) in `working-directory` and fails when neither exists.
+It runs `cargo fmt --all --check`, then `cargo clippy <clippy-arguments> -- -D warnings`, then `cargo deny check`; each step can be switched off, and all enabled steps run so one failure does not hide another.
+`-D warnings` is always appended; `clippy-arguments` (default `--workspace --all-targets --all-features --locked`) only selects what clippy checks.
+cargo-deny installs from a prebuilt binary (`taiki-e/install-action`, `fallback: none`).
+`sqlx-offline: true` exports `SQLX_OFFLINE=true` to clippy so sqlx query macros use committed `.sqlx/` metadata.
+`sqlx-prepare-check: true` adds a second job that runs in a job container (`sqlx-container-image`) next to a Postgres service (`sqlx-postgres-image`), applies `sqlx-migrations-source` when set, and runs `cargo sqlx prepare --check <sqlx-prepare-arguments>`. sqlx-cli installs through `cargo binstall` with the compile strategy disabled. The container shares a network with the service, so this works on hosted runners and on runners that are themselves containers.
+Caching uses `Swatinem/rust-cache` when `enable-cache` is true; see [caching.md](caching.md#rust).
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract and toolchain file]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| toolchain[[setup-rust-toolchain from rust-toolchain.toml]]
+  sh --> toolchain
+  toolchain --> cache[("rust-cache")]
+  cache --> tools[[install-action cargo-deny]]
+  tools --> fmt[[cargo fmt --check]]
+  fmt --> clippy[[cargo clippy -D warnings]]
+  clippy --> deny[[cargo deny check]]
+  deny --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  validate --> sqlxGate{sqlx-prepare-check?}
+  sqlxGate -->|yes| sqlx[[sqlx job: Postgres service, migrate, prepare --check]]
+  sqlx --> diagnostics
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,sh,toolchain,tools,fmt,clippy,deny,sqlx action
+  class preflight,sqlxGate decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class cache external
+```
+
+Preconditions:
+
+- `working-directory` contains `Cargo.toml` and `rust-toolchain.toml` (or `rust-toolchain`); the toolchain file should list `rustfmt` and `clippy` components (the workflow adds them either way).
+- `deny.toml` exists when `cargo-deny` is true.
+- With `sqlx-prepare-check`, the runner can start job and service containers, and `.sqlx/` is committed.
+
+Side effects:
+
+- Restores and saves the Rust build cache when `enable-cache` is true.
+- Installs rustup on runners that lack it.
+- Starts a throwaway Postgres container only when `sqlx-prepare-check` is true.
+
+Failure modes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `rust-toolchain.toml (or rust-toolchain) is required` | No toolchain file in `working-directory`. | Commit a pinned `rust-toolchain.toml`. |
+| install-action fails with an unsupported version | `cargo-deny-version` has no prebuilt binary for the runner. | Pick a released version; never fall back to source builds. |
+| clippy fails on `--locked` | `Cargo.lock` out of date. | Run `cargo update -w` locally and commit the lockfile. |
+| sqlx job: `prepare --check` reports changed queries | `.sqlx/` not regenerated after a query change. | Run `cargo sqlx prepare --workspace` and commit `.sqlx/`. |
+| sqlx job: `cargo binstall` fails | No prebuilt sqlx-cli for that version. | Bump `sqlx-cli-version` to a version quickinstall publishes, or disable the check. |
+
+## Rust Test Workflow
+
+`wf-rust-test.yml` runs `cargo nextest run --profile <nextest-profile> <nextest-arguments>`.
+Audience: consumers.
+The default profile is `ci`; define it in `.config/nextest.toml` (for example `fail-fast = false`, `retries = 1`, and `[profile.ci.junit]` to emit a JUnit report).
+The default arguments are `--workspace --all-features --locked`.
+cargo-nextest installs from a prebuilt binary (`taiki-e/install-action`, `fallback: none`).
+`require-docker: true` runs `docker info` before compiling so testcontainers suites fail in seconds when no daemon is reachable.
+`sqlx-offline: true` exports `SQLX_OFFLINE=true`.
+When the profile writes JUnit, the report is copied to `artifacts/test-results/`.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract and toolchain file]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| dockerGate{require-docker?}
+  sh --> dockerGate
+  dockerGate -->|yes| docker[[docker info]]
+  dockerGate -->|no| toolchain[[setup-rust-toolchain from rust-toolchain.toml]]
+  docker --> toolchain
+  toolchain --> cache[("rust-cache")]
+  cache --> tools[[install-action cargo-nextest]]
+  tools --> test[[cargo nextest run]]
+  test --> junit[/JUnit report/]
+  junit --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,sh,docker,toolchain,tools,test action
+  class preflight,dockerGate decision
+  class junit,metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class cache external
+```
+
+Preconditions:
+
+- `working-directory` contains `Cargo.toml` and `rust-toolchain.toml` (or `rust-toolchain`).
+- The nextest profile exists in `.config/nextest.toml` unless it is `default`.
+- Integration tests that start containers need a Docker daemon; set `require-docker: true`.
+
+Side effects:
+
+- Restores and saves the Rust build cache when `enable-cache` is true.
+- Test code may start containers on the runner's Docker daemon.
+
+Failure modes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `require-docker is true but no Docker daemon is reachable` | Runner has no Docker or socket access. | Use a runner with the `docker` capability, or a hosted Ubuntu runner. |
+| `profile "ci" not found` | `.config/nextest.toml` lacks `[profile.ci]`. | Add the profile or pass `nextest-profile: default`. |
+| sqlx macro errors about `DATABASE_URL` | `sqlx-offline` false and no database. | Set `sqlx-offline: true` and commit `.sqlx/`. |
+
+## Rust Caller Pattern
+
+A MentionBot-shaped repository (Cargo workspace, committed `.sqlx/`, testcontainers) verifies pull requests with both Rust workflows:
+
+```yaml
+jobs:
+  rust-check:
+    name: rust check @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-rust-check.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      sqlx-offline: true
+      sqlx-prepare-check: true
+      sqlx-migrations-source: crates/mentionbot-db/migrations
+
+  rust-test:
+    name: rust test @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-rust-test.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      sqlx-offline: true
+      require-docker: true
 ```
 
 ## Aspire Kubernetes Deploy Verification Workflow

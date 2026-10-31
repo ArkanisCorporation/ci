@@ -1,0 +1,565 @@
+# Summary:
+#   Reusable Rust static verification workflow: rustfmt, clippy, cargo-deny, and an opt-in sqlx offline-metadata check.
+# Remarks:
+#   This workflow runs in the caller repository context with a read-only token and no secrets.
+#   The toolchain always comes from the caller's rust-toolchain.toml (or rust-toolchain) in working-directory.
+#   Clippy always runs with -D warnings; clippy-arguments only selects what clippy checks.
+#   Cargo subcommands install from prebuilt binaries only (taiki-e/install-action with fallback none, cargo-binstall without the compile strategy).
+#   The sqlx job runs only when sqlx-prepare-check is true. It runs in a job container next to a Postgres service so the
+#   database is reachable by service name on hosted runners and on self-hosted runners that are themselves containers (ADR-0009).
+#   It does not run tests (wf-rust-test.yml), build images, publish, or deploy.
+
+name: wf-rust-check
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Single runner label used when runs-on-json is empty.
+        type: string
+        required: false
+        default: ubuntu-latest
+      runs-on-json:
+        description: JSON array passed to runs-on, including GitHub-hosted image labels or self-hosted runner labels. Overrides runs-on when set.
+        type: string
+        required: false
+        default: ""
+      runs-on-self-hosted:
+        description: True when the effective runner selection targets self-hosted runners.
+        type: boolean
+        required: false
+        default: false
+      working-directory:
+        description: Directory containing the Cargo workspace root and rust-toolchain.toml.
+        type: string
+        required: false
+        default: .
+      rustfmt:
+        description: Runs cargo fmt --all --check when true.
+        type: boolean
+        required: false
+        default: true
+      clippy:
+        description: Runs cargo clippy with -D warnings when true.
+        type: boolean
+        required: false
+        default: true
+      clippy-arguments:
+        description: Whitespace-separated cargo clippy arguments placed before the enforced "-- -D warnings".
+        type: string
+        required: false
+        default: --workspace --all-targets --all-features --locked
+      cargo-deny:
+        description: Runs cargo deny check with the caller's deny.toml when true.
+        type: boolean
+        required: false
+        default: true
+      cargo-deny-checks:
+        description: Optional whitespace-separated cargo-deny check names (advisories, bans, licenses, sources). Empty runs every check.
+        type: string
+        required: false
+        default: ""
+      cargo-deny-version:
+        description: cargo-deny version installed from a prebuilt binary.
+        type: string
+        required: false
+        default: 0.20.2
+      sqlx-offline:
+        description: Exports SQLX_OFFLINE=true to clippy so sqlx query macros use committed .sqlx metadata.
+        type: boolean
+        required: false
+        default: false
+      sqlx-prepare-check:
+        description: Runs cargo sqlx prepare --check against a throwaway Postgres service in a separate job when true.
+        type: boolean
+        required: false
+        default: false
+      sqlx-prepare-arguments:
+        description: Whitespace-separated arguments for cargo sqlx prepare, before the enforced --check.
+        type: string
+        required: false
+        default: --workspace
+      sqlx-migrations-source:
+        description: Optional migrations directory, relative to working-directory, applied with sqlx migrate run before the prepare check.
+        type: string
+        required: false
+        default: ""
+      sqlx-cli-version:
+        description: sqlx-cli version installed from a prebuilt binary through cargo-binstall.
+        type: string
+        required: false
+        default: 0.9.0
+      cargo-binstall-version:
+        description: cargo-binstall version used to install sqlx-cli.
+        type: string
+        required: false
+        default: 1.26.1
+      sqlx-postgres-image:
+        description: Postgres service image for the sqlx prepare check.
+        type: string
+        required: false
+        default: postgres:17-alpine
+      sqlx-container-image:
+        description: Job container image for the sqlx prepare check. Needs bash, git, and rustup or curl.
+        type: string
+        required: false
+        default: rust:1-trixie
+      enable-cache:
+        description: Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access.
+        type: boolean
+        required: false
+        default: true
+      artifact-retention-days:
+        description: Diagnostic artifact retention in days.
+        type: number
+        required: false
+        default: 14
+      upload-diagnostics:
+        description: Uploads diagnostics artifacts when true. Set false for local act smoke tests that cannot emulate upload-artifact.
+        type: boolean
+        required: false
+        default: true
+      timeout-minutes:
+        description: Timeout for each job.
+        type: number
+        required: false
+        default: 30
+    outputs:
+      artifact-manifest:
+        description: Path to the generated artifact manifest of the check job.
+        value: ${{ jobs.check.outputs.artifact-manifest }}
+      run-metadata:
+        description: Path to the generated run metadata of the check job.
+        value: ${{ jobs.check.outputs.run-metadata }}
+
+permissions: {}
+
+jobs:
+  check:
+    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}
+    runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      artifact-manifest: ${{ steps.manifest.outputs.path }}
+      run-metadata: ${{ steps.metadata.outputs.path }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          ENABLE_CACHE: ${{ inputs.enable-cache }}
+        run: |
+          mkdir -p artifacts/meta artifacts/rust
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Rust build cache enabled: ${ENABLE_CACHE}"
+          } | tee artifacts/meta/runner-contract.txt
+
+          # setup-rust-toolchain falls back to stable without a toolchain file; fail instead so CI
+          # never checks the workspace with a different compiler than the caller pinned.
+          if [[ ! -f "${WORKING_DIRECTORY}/rust-toolchain.toml" && ! -f "${WORKING_DIRECTORY}/rust-toolchain" ]]; then
+            echo "::error::${WORKING_DIRECTORY}/rust-toolchain.toml (or rust-toolchain) is required to select the Rust toolchain."
+            exit 2
+          fi
+
+          if [[ ! -f "${WORKING_DIRECTORY}/Cargo.toml" ]]; then
+            echo "::error::${WORKING_DIRECTORY}/Cargo.toml is required."
+            exit 2
+          fi
+
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight"
+            echo
+            df -h .
+            echo
+            echo "Workspace: ${GITHUB_WORKSPACE}"
+            command -v git
+            command -v curl
+            command -v rustup || echo "rustup: not preinstalled (setup-rust-toolchain installs it)"
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml
+        id: toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2.0.0
+        with:
+          rust-src-dir: ${{ inputs.working-directory }}
+          components: rustfmt, clippy
+          cache: false
+          rustflags: ""
+          build-warnings: ""
+          matcher: true
+
+      - name: Restore Rust cache @ ${{ inputs.working-directory }}
+        if: inputs.enable-cache
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: ${{ inputs.working-directory }}
+          key: rust-check
+          cache-on-failure: false
+
+      - name: Install cargo-deny @ ${{ inputs.cargo-deny-version }}
+        if: inputs.cargo-deny
+        uses: taiki-e/install-action@v2.88.1
+        with:
+          tool: cargo-deny@${{ inputs.cargo-deny-version }}
+          fallback: none
+
+      - name: Verify formatting @ ${{ inputs.working-directory }}
+        id: rustfmt
+        if: inputs.rustfmt
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          set -o pipefail
+          cd "$WORKING_DIRECTORY"
+          cargo fmt --all --check 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/rustfmt.log"
+
+      - name: Clippy ${{ inputs.working-directory }} @ -D warnings
+        id: clippy
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' && inputs.clippy }}
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          CLIPPY_ARGUMENTS: ${{ inputs.clippy-arguments }}
+          SQLX_OFFLINE: ${{ inputs.sqlx-offline && 'true' || '' }}
+        run: |
+          set -o pipefail
+          cd "$WORKING_DIRECTORY"
+          if [[ -z "$SQLX_OFFLINE" ]]; then
+            unset SQLX_OFFLINE
+          fi
+          # Split caller arguments without shell evaluation.
+          read -r -a clippy_args <<< "$CLIPPY_ARGUMENTS"
+          cargo clippy "${clippy_args[@]}" -- -D warnings 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/clippy.log"
+
+      - name: cargo-deny ${{ inputs.working-directory }} @ ${{ inputs.cargo-deny-checks || 'all' }}
+        id: deny
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' && inputs.cargo-deny }}
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          CARGO_DENY_CHECKS: ${{ inputs.cargo-deny-checks }}
+        run: |
+          set -o pipefail
+          cd "$WORKING_DIRECTORY"
+          read -r -a deny_checks <<< "$CARGO_DENY_CHECKS"
+          cargo deny check "${deny_checks[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/cargo-deny.log"
+
+      - name: Write run metadata @ artifacts/meta/run-metadata.json
+        id: metadata
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          RUSTC_VERSION: ${{ steps.toolchain.outputs.rustc-version }}
+          CARGO_VERSION: ${{ steps.toolchain.outputs.cargo-version }}
+          CARGO_DENY_VERSION: ${{ inputs.cargo-deny && inputs.cargo-deny-version || '' }}
+        run: |
+          mkdir -p artifacts/meta
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-rust-check",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${RUNS_ON_JSON}
+            },
+            "tool_versions": {
+              "rustc": "${RUSTC_VERSION}",
+              "cargo": "${CARGO_VERSION}",
+              "cargo-deny": "${CARGO_DENY_VERSION}"
+            }
+          }
+          JSON
+          echo "path=artifacts/meta/run-metadata.json" >> "$GITHUB_OUTPUT"
+
+      - name: Write artifact manifest @ artifacts/artifact-manifest.json
+        id: manifest
+        if: always()
+        env:
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-rust-check",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "check"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-rust-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          echo "path=artifacts/artifact-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Publish summary @ ${{ steps.manifest.outputs.path || github.run_id }}
+        if: always()
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          RUSTC_VERSION: ${{ steps.toolchain.outputs.rustc-version }}
+        run: |
+          {
+            echo "# Rust check"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}\` |"
+            echo "| Working directory | \`${WORKING_DIRECTORY}\` |"
+            echo "| rustc | \`${RUSTC_VERSION:-unknown}\` |"
+            echo "| rustfmt | \`${{ steps.rustfmt.outcome || 'skipped' }}\` |"
+            echo "| clippy | \`${{ steps.clippy.outcome || 'skipped' }}\` |"
+            echo "| cargo-deny | \`${{ steps.deny.outcome || 'skipped' }}\` |"
+            echo "| sqlx prepare check | \`${{ inputs.sqlx-prepare-check && 'separate job' || 'disabled' }}\` |"
+            echo "| Rust cache | \`${{ inputs.enable-cache }}\` |"
+            echo "| Artifact manifest | \`${{ steps.manifest.outputs.path }}\` |"
+            echo "| Run metadata | \`${{ steps.metadata.outputs.path }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-rust-check-${{ github.run_id }}-${{ github.run_attempt }}
+        if: ${{ always() && inputs.upload-diagnostics }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-rust-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts
+            ${{ runner.debug != '1' && '!artifacts/**/bin/**' || '' }}
+            ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  sqlx:
+    if: inputs.sqlx-prepare-check
+    name: sqlx prepare ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}
+    runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    # Job container plus service share one Docker network, so Postgres is reachable as `postgres`
+    # whether the runner is a VM (hosted) or itself a container using the host Docker socket.
+    container:
+      image: ${{ inputs.sqlx-container-image }}
+    services:
+      postgres:
+        image: ${{ inputs.sqlx-postgres-image }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Throwaway service credentials, not a secret: the database exists only for this job.
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        env:
+          RUNS_ON_SELF_HOSTED: ${{ inputs.runs-on-self-hosted }}
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          SQLX_CONTAINER_IMAGE: ${{ inputs.sqlx-container-image }}
+          SQLX_POSTGRES_IMAGE: ${{ inputs.sqlx-postgres-image }}
+        run: |
+          mkdir -p artifacts/meta artifacts/rust
+          {
+            echo "Runs on self-hosted: ${RUNS_ON_SELF_HOSTED}"
+            echo "Requested runner labels: ${RUNS_ON_JSON}"
+            echo "Runner OS: ${RUNNER_OS}"
+            echo "Runner arch: ${RUNNER_ARCH}"
+            echo "Job container image: ${SQLX_CONTAINER_IMAGE}"
+            echo "Postgres service image: ${SQLX_POSTGRES_IMAGE}"
+          } | tee artifacts/meta/runner-contract.txt
+
+          if [[ ! -f "${WORKING_DIRECTORY}/rust-toolchain.toml" && ! -f "${WORKING_DIRECTORY}/rust-toolchain" ]]; then
+            echo "::error::${WORKING_DIRECTORY}/rust-toolchain.toml (or rust-toolchain) is required to select the Rust toolchain."
+            exit 2
+          fi
+
+      - name: Self-hosted preflight @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
+        if: inputs.runs-on-self-hosted
+        run: |
+          {
+            echo "## Self-hosted runner preflight (job container)"
+            echo
+            df -h .
+            echo
+            echo "Workspace: ${GITHUB_WORKSPACE}"
+            command -v git
+            command -v rustup || command -v curl
+          } | tee artifacts/meta/self-hosted-preflight.txt
+
+      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml
+        id: toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2.0.0
+        with:
+          rust-src-dir: ${{ inputs.working-directory }}
+          cache: false
+          rustflags: ""
+          build-warnings: ""
+          matcher: true
+
+      - name: Restore Rust cache @ ${{ inputs.working-directory }}
+        if: inputs.enable-cache
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: ${{ inputs.working-directory }}
+          key: rust-check-sqlx
+          cache-on-failure: false
+
+      - name: Install cargo-binstall @ ${{ inputs.cargo-binstall-version }}
+        uses: taiki-e/install-action@v2.88.1
+        with:
+          tool: cargo-binstall@${{ inputs.cargo-binstall-version }}
+          fallback: none
+
+      - name: Install sqlx-cli @ ${{ inputs.sqlx-cli-version }}
+        env:
+          SQLX_CLI_VERSION: ${{ inputs.sqlx-cli-version }}
+        run: |
+          # Prebuilt binaries only: with the compile strategy disabled, a missing binary fails here
+          # instead of silently building sqlx-cli from source.
+          cargo binstall --no-confirm --disable-strategies compile "sqlx-cli@${SQLX_CLI_VERSION}"
+          cargo sqlx --version | tee artifacts/meta/sqlx-cli-version.txt
+
+      - name: Apply migrations @ ${{ inputs.sqlx-migrations-source || 'none' }}
+        if: inputs.sqlx-migrations-source != ''
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          SQLX_MIGRATIONS_SOURCE: ${{ inputs.sqlx-migrations-source }}
+        run: |
+          set -o pipefail
+          cd "$WORKING_DIRECTORY"
+          sqlx migrate run --source "$SQLX_MIGRATIONS_SOURCE" 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/sqlx-migrate.log"
+
+      - name: Verify sqlx offline metadata @ ${{ inputs.working-directory }}
+        id: sqlx-prepare
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          SQLX_PREPARE_ARGUMENTS: ${{ inputs.sqlx-prepare-arguments }}
+        run: |
+          set -o pipefail
+          cd "$WORKING_DIRECTORY"
+          unset SQLX_OFFLINE
+          read -r -a prepare_args <<< "$SQLX_PREPARE_ARGUMENTS"
+          cargo sqlx prepare --check "${prepare_args[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/sqlx-prepare.log"
+
+      - name: Write sqlx diagnostics @ artifacts/meta/run-metadata.json
+        if: always()
+        env:
+          RUNS_ON_JSON: ${{ inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest')) }}
+          RUSTC_VERSION: ${{ steps.toolchain.outputs.rustc-version }}
+          SQLX_CLI_VERSION: ${{ inputs.sqlx-cli-version }}
+          RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
+          OUTCOME: ${{ steps.sqlx-prepare.outcome || 'skipped' }}
+          SQLX_MIGRATIONS_SOURCE: ${{ inputs.sqlx-migrations-source }}
+        run: |
+          mkdir -p artifacts/meta
+          cat > artifacts/meta/run-metadata.json <<JSON
+          {
+            "schema": "run-metadata/v1",
+            "repository": "${GITHUB_REPOSITORY}",
+            "workflow": "wf-rust-check",
+            "sha": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "runner": {
+              "os": "${RUNNER_OS}",
+              "arch": "${RUNNER_ARCH}",
+              "labels": ${RUNS_ON_JSON}
+            },
+            "tool_versions": {
+              "rustc": "${RUSTC_VERSION}",
+              "sqlx-cli": "${SQLX_CLI_VERSION}"
+            }
+          }
+          JSON
+          cat > artifacts/artifact-manifest.json <<JSON
+          {
+            "schema": "ci-artifact-manifest/v1",
+            "producer": {
+              "repository": "${GITHUB_REPOSITORY}",
+              "workflow": "wf-rust-check",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+              "sha": "${GITHUB_SHA}",
+              "job": "sqlx"
+            },
+            "artifacts": [
+              {
+                "name": "${GITHUB_REPOSITORY#*/}-rust-check-sqlx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+                "kind": "diagnostics",
+                "paths": ["artifacts"],
+                "retention_days": ${RETENTION_DAYS}
+              }
+            ]
+          }
+          JSON
+          {
+            echo "# Rust sqlx prepare check"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Runs on self-hosted | \`${{ inputs.runs-on-self-hosted }}\` |"
+            echo "| Runner labels | \`${RUNS_ON_JSON}\` |"
+            echo "| rustc | \`${RUSTC_VERSION:-unknown}\` |"
+            echo "| sqlx-cli | \`${SQLX_CLI_VERSION}\` |"
+            echo "| Migrations | \`${SQLX_MIGRATIONS_SOURCE:-none}\` |"
+            echo "| Outcome | \`${OUTCOME}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics @ ${{ github.event.repository.name }}-rust-check-sqlx-${{ github.run_id }}-${{ github.run_attempt }}
+        if: ${{ always() && inputs.upload-diagnostics }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ github.event.repository.name }}-rust-check-sqlx-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts
+            ${{ runner.debug != '1' && '!artifacts/**/bin/**' || '' }}
+            ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

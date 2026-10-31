@@ -1,0 +1,7 @@
+# The Rust test workflow runs `--profile ci` by default.
+[profile.ci]
+fail-fast = false
+retries = 1
+
+[profile.ci.junit]
+path = "junit.xml"

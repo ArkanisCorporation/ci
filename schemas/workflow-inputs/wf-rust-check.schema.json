@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-rust-check/v1/schema.json",
+  "title": "wf-rust-check inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs-on": {
+      "type": "string",
+      "default": "ubuntu-latest"
+    },
+    "runs-on-json": {
+      "type": "string",
+      "default": ""
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "working-directory": {
+      "type": "string",
+      "default": ".",
+      "description": "Directory containing the Cargo workspace root and rust-toolchain.toml."
+    },
+    "rustfmt": {
+      "type": "boolean",
+      "default": true,
+      "description": "Runs cargo fmt --all --check when true."
+    },
+    "clippy": {
+      "type": "boolean",
+      "default": true,
+      "description": "Runs cargo clippy with -D warnings when true."
+    },
+    "clippy-arguments": {
+      "type": "string",
+      "default": "--workspace --all-targets --all-features --locked",
+      "description": "Whitespace-separated cargo clippy arguments placed before the enforced \"-- -D warnings\"."
+    },
+    "cargo-deny": {
+      "type": "boolean",
+      "default": true,
+      "description": "Runs cargo deny check with the caller's deny.toml when true."
+    },
+    "cargo-deny-checks": {
+      "type": "string",
+      "default": "",
+      "description": "Optional whitespace-separated cargo-deny check names (advisories, bans, licenses, sources). Empty runs every check."
+    },
+    "cargo-deny-version": {
+      "type": "string",
+      "default": "0.20.2",
+      "description": "cargo-deny version installed from a prebuilt binary."
+    },
+    "sqlx-offline": {
+      "type": "boolean",
+      "default": false,
+      "description": "Exports SQLX_OFFLINE=true to clippy so sqlx query macros use committed .sqlx metadata."
+    },
+    "sqlx-prepare-check": {
+      "type": "boolean",
+      "default": false,
+      "description": "Runs cargo sqlx prepare --check against a throwaway Postgres service in a separate job when true."
+    },
+    "sqlx-prepare-arguments": {
+      "type": "string",
+      "default": "--workspace",
+      "description": "Whitespace-separated arguments for cargo sqlx prepare, before the enforced --check."
+    },
+    "sqlx-migrations-source": {
+      "type": "string",
+      "default": "",
+      "description": "Optional migrations directory, relative to working-directory, applied with sqlx migrate run before the prepare check."
+    },
+    "sqlx-cli-version": {
+      "type": "string",
+      "default": "0.9.0",
+      "description": "sqlx-cli version installed from a prebuilt binary through cargo-binstall."
+    },
+    "cargo-binstall-version": {
+      "type": "string",
+      "default": "1.26.1",
+      "description": "cargo-binstall version used to install sqlx-cli."
+    },
+    "sqlx-postgres-image": {
+      "type": "string",
+      "default": "postgres:17-alpine",
+      "description": "Postgres service image for the sqlx prepare check."
+    },
+    "sqlx-container-image": {
+      "type": "string",
+      "default": "rust:1-trixie",
+      "description": "Job container image for the sqlx prepare check. Needs bash, git, and rustup or curl."
+    },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true,
+      "description": "Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access."
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 14,
+      "minimum": 1,
+      "maximum": 90
+    },
+    "upload-diagnostics": {
+      "type": "boolean",
+      "default": true,
+      "description": "Uploads diagnostics artifacts when true. Set false for local act smoke tests that cannot emulate upload-artifact."
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1
+    }
+  }
+}

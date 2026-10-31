@@ -1,0 +1,51 @@
+name: Rust service consumer fixture
+
+# Expected shape of a Rust service repository (MentionBot-like) adopting the shared workflows.
+# Expected: success on pull requests (check, test, image verify) and on release (image publish).
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    name: rust check @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-rust-check.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: daedalus
+      runs-on-self-hosted: true
+      sqlx-offline: true
+      sqlx-prepare-check: true
+      sqlx-migrations-source: crates/example-db/migrations
+
+  test:
+    name: rust test @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-rust-test.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: daedalus
+      runs-on-self-hosted: true
+      sqlx-offline: true
+      require-docker: true
+
+  publish:
+    name: v1.2.3 @ container
+    needs: [check, test]
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-generic.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      runs-on: daedalus
+      runs-on-self-hosted: true
+      image: ghcr.io/arkaniscorporation/example-rust-service
+      dockerfile: Dockerfile
+      version: 1.2.3
+      version-tag: v1.2.3
+      extra-tags: |
+        latest
+      environment-name: container

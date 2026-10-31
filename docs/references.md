@@ -1,6 +1,6 @@
 # References
 
-Last verified: 2026-09-25.
+Last verified: 2026-10-31.
 
 ## Primary Docs
 
@@ -57,6 +57,15 @@ Last verified: 2026-09-25.
 - 1Password load-secrets-action: https://github.com/1Password/load-secrets-action
 - nektos/act: https://github.com/nektos/act
 - actionlint: https://github.com/rhysd/actionlint
+- actions-rust-lang/setup-rust-toolchain: https://github.com/actions-rust-lang/setup-rust-toolchain
+- Swatinem/rust-cache: https://github.com/Swatinem/rust-cache
+- taiki-e/install-action: https://github.com/taiki-e/install-action
+- cargo-binstall strategies: https://github.com/cargo-bins/cargo-binstall
+- cargo-nextest profiles and JUnit: https://nexte.st/docs/configuration/
+- cargo-deny: https://embarkstudios.github.io/cargo-deny/
+- sqlx offline mode (`cargo sqlx prepare`): https://github.com/launchbadge/sqlx/blob/main/sqlx-cli/README.md
+- sccache: https://github.com/mozilla/sccache
+- GitHub job containers and service containers: https://docs.github.com/en/actions/tutorials/use-containerized-services/use-docker-service-containers
 - raven-actions/actionlint: https://github.com/raven-actions/actionlint
 
 ## Current Platform Changes To Monitor

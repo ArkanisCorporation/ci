@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkanis.dev/schemas/workflow-inputs/wf-verify-publish-container-generic/v1/schema.json",
+  "title": "wf-verify-publish-container-generic inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image",
+    "version"
+  ],
+  "properties": {
+    "runs-on": {
+      "type": "string",
+      "default": "ubuntu-latest"
+    },
+    "runs-on-json": {
+      "type": "string",
+      "default": ""
+    },
+    "runs-on-self-hosted": {
+      "type": "boolean",
+      "default": false
+    },
+    "image": {
+      "type": "string",
+      "description": "Fully-qualified image name without tag."
+    },
+    "context": {
+      "type": "string",
+      "default": ".",
+      "description": "Docker build context."
+    },
+    "dockerfile": {
+      "type": "string",
+      "default": "Dockerfile",
+      "description": "Dockerfile path."
+    },
+    "target": {
+      "type": "string",
+      "default": "",
+      "description": "Optional Dockerfile target stage."
+    },
+    "platforms": {
+      "type": "string",
+      "default": "linux/amd64",
+      "description": "Comma-delimited target platforms."
+    },
+    "version": {
+      "type": "string",
+      "description": "Required bare version without leading v, passed to the Dockerfile through the version-build-arg Docker build argument."
+    },
+    "version-build-arg": {
+      "type": "string",
+      "default": "VERSION",
+      "description": "Docker build argument name that receives version. Empty disables it. A same-named entry in build-args wins."
+    },
+    "version-tag": {
+      "type": "string",
+      "default": "",
+      "description": "Optional release version tag to apply to the image, usually prefixed with v."
+    },
+    "version-channel": {
+      "type": "string",
+      "default": "",
+      "description": "Optional channel tag to apply."
+    },
+    "channel-latest": {
+      "type": "boolean",
+      "default": true,
+      "description": "Adds a mutable <version-channel>-latest tag when version-channel is set."
+    },
+    "extra-tags": {
+      "type": "string",
+      "default": "",
+      "description": "Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through."
+    },
+    "buildkit-endpoint": {
+      "type": "string",
+      "default": "",
+      "description": "Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created."
+    },
+    "build-args": {
+      "type": "string",
+      "default": "",
+      "description": "Optional newline-delimited Docker build arguments. Do not pass secrets here because Docker build args can persist in image metadata or logs."
+    },
+    "enable-cache": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enables the generated GitHub Actions BuildKit cache when cache-from and cache-to are empty."
+    },
+    "cache-from": {
+      "type": "string",
+      "default": "",
+      "description": "Optional Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set."
+    },
+    "cache-to": {
+      "type": "string",
+      "default": "",
+      "description": "Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set."
+    },
+    "labels": {
+      "type": "string",
+      "default": "",
+      "description": "Optional newline-delimited OCI labels."
+    },
+    "timeout-minutes": {
+      "type": "integer",
+      "default": 45,
+      "minimum": 1
+    },
+    "artifact-retention-days": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 90
+    }
+  }
+}
