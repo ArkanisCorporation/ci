@@ -104,7 +104,12 @@ on:
         description: Diagnostic artifact retention in days.
         type: number
         required: false
-        default: 14
+        default: 7
+      upload-diagnostics:
+        description: Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job.
+        type: boolean
+        required: false
+        default: true
     secrets:
       NUGET_AUTH_JSON:
         description: Optional JSON credentials for private NuGet package sources used during restore.
@@ -384,7 +389,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload diagnostics @ ${{ github.event.repository.name }}-generated-code-${{ github.run_id }}-${{ github.run_attempt }}
-        if: always()
+        if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-generated-code-${{ github.run_id }}-${{ github.run_attempt }}

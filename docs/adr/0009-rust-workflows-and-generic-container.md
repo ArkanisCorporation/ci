@@ -18,7 +18,7 @@ The dogfood runner pool, `daedalus`, has no preinstalled Rust, runs each runner 
 - **Clippy always denies warnings.** `-D warnings` is appended after the caller's `clippy-arguments`.
 - **Tools from prebuilt binaries only.** `taiki-e/install-action` with `fallback: none` for cargo-deny and cargo-nextest; sqlx-cli through `cargo binstall --disable-strategies compile`. A missing binary fails the job.
 - **Cache** with `Swatinem/rust-cache`, gated by `enable-cache`, one key per job kind. sccache is documented as an alternative, not wired in.
-- **sqlx prepare check** runs in a separate job, only when `sqlx-prepare-check` is true, inside a job container next to a Postgres service, so the database is reachable by service name on hosted runners and on container runners.
+- **sqlx prepare check** runs in a separate job, only when `sqlx-prepare-check` is true, directly on the runner. It starts Postgres with `docker run` (run-scoped name, Docker-chosen port) and reaches it on `127.0.0.1`, or through the default bridge gateway when the runner is itself a container. Amended by ARK-693: the original decision ran the job in a job container next to a Postgres service, which fails on `daedalus` because the runner's externals (`/__e/node24`) are missing inside job containers. `sqlx-container-image` stays as a deprecated, ignored input until the next major.
 - **New generic container pair** `wf-verify-publish-container-generic.yml` and `wf-publish-container-generic.yml`: the .NET pair without stamping, NuGet credentials, or SDK inputs. The release version reaches the build only as the `version-build-arg` build argument (default `VERSION`). The .NET pair is unchanged. The pre-ADR-0002 name `wf-publish-container.yml` stays reserved.
 - **Publish permissions** for the generic pair are `contents: read` and `packages: write`. Buildx provenance and SBOM attestations need no OIDC or attestations scope. GitHub artifact attestations are out of scope.
 - **Versioning for Rust consumers** is stamped at image build time; nothing is committed back, so the existing ban on `@semantic-release/exec` stays as it is (`allow-exec-plugin` remains the escape hatch).
@@ -49,4 +49,4 @@ None for existing callers. New consumers:
 - taiki-e/install-action: https://github.com/taiki-e/install-action
 - GitHub service containers: https://docs.github.com/en/actions/tutorials/use-containerized-services/use-docker-service-containers
 
-Related: ARK-678, ARK-687.
+Related: ARK-678, ARK-687, ARK-693.

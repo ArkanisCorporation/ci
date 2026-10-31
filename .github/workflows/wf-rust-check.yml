@@ -5,8 +5,10 @@
 #   The toolchain always comes from the caller's rust-toolchain.toml (or rust-toolchain) in working-directory.
 #   Clippy always runs with -D warnings; clippy-arguments only selects what clippy checks.
 #   Cargo subcommands install from prebuilt binaries only (taiki-e/install-action with fallback none, cargo-binstall without the compile strategy).
-#   The sqlx job runs only when sqlx-prepare-check is true. It runs in a job container next to a Postgres service so the
-#   database is reachable by service name on hosted runners and on self-hosted runners that are themselves containers (ADR-0009).
+#   The sqlx job runs only when sqlx-prepare-check is true. It runs on the runner itself and starts a throwaway Postgres
+#   with docker run; on runners that are themselves containers on the host daemon it reaches Postgres through the bridge
+#   gateway (ADR-0009). It uses no job container or service container: those fail on container runners such as daedalus.
+#   Diagnostics uploads are best-effort (continue-on-error) so an artifact storage failure never fails the job.
 #   It does not run tests (wf-rust-test.yml), build images, publish, or deploy.
 
 name: wf-rust-check
@@ -70,7 +72,7 @@ on:
         required: false
         default: false
       sqlx-prepare-check:
-        description: Runs cargo sqlx prepare --check against a throwaway Postgres service in a separate job when true.
+        description: Runs cargo sqlx prepare --check against a throwaway Postgres container in a separate job when true. Needs Docker on the runner.
         type: boolean
         required: false
         default: false
@@ -95,12 +97,12 @@ on:
         required: false
         default: 1.26.1
       sqlx-postgres-image:
-        description: Postgres service image for the sqlx prepare check.
+        description: Postgres image started with docker run for the sqlx prepare check.
         type: string
         required: false
         default: postgres:17-alpine
       sqlx-container-image:
-        description: Job container image for the sqlx prepare check. Needs bash, git, and rustup or curl.
+        description: Deprecated and ignored. The sqlx job no longer runs in a job container; a non-default value only logs a deprecation warning. Removed in the next major.
         type: string
         required: false
         default: rust:1-trixie
@@ -113,7 +115,7 @@ on:
         description: Diagnostic artifact retention in days.
         type: number
         required: false
-        default: 14
+        default: 7
       upload-diagnostics:
         description: Uploads diagnostics artifacts when true. Set false for local act smoke tests that cannot emulate upload-artifact.
         type: boolean
@@ -350,6 +352,7 @@ jobs:
 
       - name: Upload diagnostics @ ${{ github.event.repository.name }}-rust-check-${{ github.run_id }}-${{ github.run_attempt }}
         if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-rust-check-${{ github.run_id }}-${{ github.run_attempt }}
@@ -367,25 +370,9 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
-    # Job container plus service share one Docker network, so Postgres is reachable as `postgres`
-    # whether the runner is a VM (hosted) or itself a container using the host Docker socket.
-    container:
-      image: ${{ inputs.sqlx-container-image }}
-    services:
-      postgres:
-        image: ${{ inputs.sqlx-postgres-image }}
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
-      # Throwaway service credentials, not a secret: the database exists only for this job.
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+    # No job container and no services: on runners that are themselves containers sharing the host
+    # Docker daemon (daedalus), job containers lack the runner's externals and fail at the first
+    # JavaScript action. Postgres is started with docker run in "Start Postgres" instead (ADR-0009).
     defaults:
       run:
         shell: bash
@@ -409,12 +396,28 @@ jobs:
             echo "Requested runner labels: ${RUNS_ON_JSON}"
             echo "Runner OS: ${RUNNER_OS}"
             echo "Runner arch: ${RUNNER_ARCH}"
-            echo "Job container image: ${SQLX_CONTAINER_IMAGE}"
-            echo "Postgres service image: ${SQLX_POSTGRES_IMAGE}"
+            echo "Postgres image: ${SQLX_POSTGRES_IMAGE}"
+            echo "Runs inside a container: $([[ -f /.dockerenv ]] && echo yes || echo no)"
           } | tee artifacts/meta/runner-contract.txt
+
+          # Deprecated input kept so existing callers still load; warn only when someone set it.
+          if [[ "${SQLX_CONTAINER_IMAGE}" != "rust:1-trixie" ]]; then
+            echo "::warning::sqlx-container-image is deprecated and ignored: the sqlx job runs on the runner. Remove it from the caller."
+          fi
 
           if [[ ! -f "${WORKING_DIRECTORY}/rust-toolchain.toml" && ! -f "${WORKING_DIRECTORY}/rust-toolchain" ]]; then
             echo "::error::${WORKING_DIRECTORY}/rust-toolchain.toml (or rust-toolchain) is required to select the Rust toolchain."
+            exit 2
+          fi
+
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "::error::sqlx-prepare-check needs the docker CLI on the runner to start Postgres."
+            exit 2
+          fi
+
+          if ! timeout 30 docker version --format '{{.Server.Version}}' > artifacts/meta/docker-server-version.txt 2>&1; then
+            cat artifacts/meta/docker-server-version.txt
+            echo "::error::sqlx-prepare-check needs a reachable Docker daemon to start Postgres."
             exit 2
           fi
 
@@ -422,13 +425,15 @@ jobs:
         if: inputs.runs-on-self-hosted
         run: |
           {
-            echo "## Self-hosted runner preflight (job container)"
+            echo "## Self-hosted runner preflight"
             echo
             df -h .
             echo
             echo "Workspace: ${GITHUB_WORKSPACE}"
             command -v git
-            command -v rustup || command -v curl
+            command -v curl
+            command -v docker
+            command -v rustup || echo "rustup: not preinstalled (setup-rust-toolchain installs it)"
           } | tee artifacts/meta/self-hosted-preflight.txt
 
       - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml
@@ -464,6 +469,53 @@ jobs:
           cargo binstall --no-confirm --disable-strategies compile "sqlx-cli@${SQLX_CLI_VERSION}"
           cargo sqlx --version | tee artifacts/meta/sqlx-cli-version.txt
 
+      - name: Start Postgres @ ${{ inputs.sqlx-postgres-image }}
+        id: postgres
+        env:
+          SQLX_POSTGRES_IMAGE: ${{ inputs.sqlx-postgres-image }}
+        run: |
+          set -euo pipefail
+          # Runners can share one Docker daemon, so the name is run-scoped plus random and Docker
+          # picks the host port: parallel jobs never collide on either.
+          container="sqlx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}${RANDOM}"
+
+          # A runner that is itself a container (/.dockerenv) reaches ports published by the host
+          # daemon through the default bridge gateway, the same way Testcontainers does. Binding
+          # the port to that address (or 127.0.0.1) keeps the throwaway database off external
+          # interfaces.
+          db_host=127.0.0.1
+          if [[ -f /.dockerenv ]]; then
+            db_host="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')"
+          fi
+
+          # Record the name before anything can fail, so the cleanup step always finds it.
+          echo "container=${container}" >> "$GITHUB_OUTPUT"
+          docker run -d --rm --name "$container" \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=postgres \
+            -p "${db_host}::5432" "$SQLX_POSTGRES_IMAGE" > /dev/null
+
+          # Probe over TCP: during init the image runs a socket-only server that already answers
+          # pg_isready on the Unix socket before the real server listens on the port.
+          ready=false
+          for _ in $(seq 60); do
+            if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres > /dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then
+            docker logs "$container" 2>&1 | tail -n 50 || true
+            echo "::error::Postgres did not accept TCP connections within 60 seconds."
+            exit 1
+          fi
+
+          db_port="$(docker port "$container" 5432/tcp | head -n 1)"
+          db_port="${db_port##*:}"
+          echo "Postgres ${container} listening on ${db_host}:${db_port}" | tee artifacts/meta/postgres.txt
+          # Throwaway credentials for a database that exists only for this job, not a secret.
+          echo "DATABASE_URL=postgres://postgres:postgres@${db_host}:${db_port}/postgres" >> "$GITHUB_ENV"
+
       - name: Apply migrations @ ${{ inputs.sqlx-migrations-source || 'none' }}
         if: inputs.sqlx-migrations-source != ''
         env:
@@ -485,6 +537,12 @@ jobs:
           unset SQLX_OFFLINE
           read -r -a prepare_args <<< "$SQLX_PREPARE_ARGUMENTS"
           cargo sqlx prepare --check "${prepare_args[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/rust/sqlx-prepare.log"
+
+      - name: Stop Postgres @ ${{ steps.postgres.outputs.container || 'not started' }}
+        if: ${{ always() && steps.postgres.outputs.container != '' }}
+        env:
+          CONTAINER: ${{ steps.postgres.outputs.container }}
+        run: docker rm -f "$CONTAINER" > /dev/null 2>&1 || true
 
       - name: Write sqlx diagnostics @ artifacts/meta/run-metadata.json
         if: always()
@@ -554,6 +612,7 @@ jobs:
 
       - name: Upload diagnostics @ ${{ github.event.repository.name }}-rust-check-sqlx-${{ github.run_id }}-${{ github.run_attempt }}
         if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-rust-check-sqlx-${{ github.run_id }}-${{ github.run_attempt }}

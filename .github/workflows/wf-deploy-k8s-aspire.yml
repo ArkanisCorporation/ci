@@ -100,6 +100,11 @@ on:
         type: number
         required: false
         default: 30
+      upload-diagnostics:
+        description: Uploads the deploy report artifact when true. The upload is best-effort and never fails the job.
+        type: boolean
+        required: false
+        default: true
     secrets:
       KUBE_CONFIG:
         description: Optional kubeconfig content written to RUNNER_TEMP.
@@ -414,7 +419,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deployment artifacts @ ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}
-        if: always()
+        if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}

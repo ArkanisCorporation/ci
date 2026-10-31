@@ -69,7 +69,7 @@ Set `enable-cache: false` for cold-build validation or runners without cache ser
 
 ### sqlx
 
-Committed `.sqlx/` metadata plus `sqlx-offline: true` lets clippy and tests compile without a database. The opt-in `sqlx-prepare-check` job is the only one that needs Postgres; it uses its own cache key because it compiles with `SQLX_OFFLINE` unset.
+Committed `.sqlx/` metadata plus `sqlx-offline: true` lets clippy and tests compile without a database. The opt-in `sqlx-prepare-check` job is the only one that needs Postgres (a throwaway `docker run` container); it uses its own cache key because it compiles with `SQLX_OFFLINE` unset.
 
 ### Version stamping
 

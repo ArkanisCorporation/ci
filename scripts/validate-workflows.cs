@@ -35,6 +35,7 @@ ValidateWorkflowInputSchemas();
 ValidateWorkflowInputsMatchSchemas();
 ValidateWorkflows();
 ValidateArtifactUploadDebugExclusions();
+ValidateArtifactUploadBestEffortContract();
 ValidateRunnerSelectionInputContract();
 ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
@@ -125,6 +126,90 @@ void ValidateArtifactUploadDebugExclusions()
                 || !workflowText.Contains("runner.debug != '1' && '!artifacts/**/obj/**'", StringComparison.Ordinal)))
         {
             AddFailure($"{workflowPath}: whole-artifacts uploads must keep debug-only bin/obj exclusions.");
+        }
+    }
+}
+
+// Artifact storage limits must never decide whether a build passes (ARK-693, docs/artifacts.md).
+// Every upload is best-effort (continue-on-error: true) and gated by upload-diagnostics, except the
+// uploads another job downloads, which are listed here and must keep failing the job.
+void ValidateArtifactUploadBestEffortContract()
+{
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    if (!Directory.Exists(workflowRoot))
+    {
+        return;
+    }
+
+    // workflow file -> step name prefix of an upload that a later job downloads.
+    var requiredUploads = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["wf-publish-nuget.yml"] = "Upload package artifacts @ ${{ steps.package-artifact.outputs.name }}",
+    };
+
+    foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
+    {
+        var workflowName = Path.GetFileName(workflowPath);
+        var lines = File.ReadAllLines(workflowPath);
+        var hasBestEffortUpload = false;
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!lines[index].TrimStart().StartsWith("uses: actions/upload-artifact@", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // Collect the step's own keys: walk back to its "- name:" line and forward to the next step.
+            var start = index;
+            while (start > 0 && !lines[start].TrimStart().StartsWith("- ", StringComparison.Ordinal))
+            {
+                start--;
+            }
+
+            var end = index + 1;
+            while (end < lines.Length && !lines[end].TrimStart().StartsWith("- ", StringComparison.Ordinal) && !Regex.IsMatch(lines[end], @"^  \S"))
+            {
+                end++;
+            }
+
+            var step = lines[start..end];
+            var stepName = step[0].Trim().Replace("- name: ", "", StringComparison.Ordinal);
+            var continueOnError = step.Any(line => Regex.IsMatch(line, @"^\s+continue-on-error:\s+true\s*$"));
+            var gated = step.Any(line => line.TrimStart().StartsWith("if:", StringComparison.Ordinal)
+                && line.Contains("inputs.upload-diagnostics", StringComparison.Ordinal));
+
+            if (requiredUploads.TryGetValue(workflowName, out var requiredStep) && stepName.StartsWith(requiredStep, StringComparison.Ordinal))
+            {
+                if (continueOnError || gated)
+                {
+                    AddFailure($"{workflowPath}:{index + 1}: required upload '{stepName}' is downloaded by another job and must not set continue-on-error or depend on upload-diagnostics.");
+                }
+
+                continue;
+            }
+
+            hasBestEffortUpload = true;
+            if (!continueOnError)
+            {
+                AddFailure($"{workflowPath}:{index + 1}: upload '{stepName}' must set 'continue-on-error: true' so an artifact storage failure never fails the job; list it as required only when another job downloads it.");
+            }
+
+            if (!gated)
+            {
+                AddFailure($"{workflowPath}:{index + 1}: upload '{stepName}' must be gated with 'if: ${{{{ always() && inputs.upload-diagnostics }}}}'.");
+            }
+        }
+
+        if (!hasBestEffortUpload)
+        {
+            continue;
+        }
+
+        var uploadDiagnostics = ReadWorkflowInputs(workflowPath).GetValueOrDefault("upload-diagnostics");
+        if (uploadDiagnostics is null || !string.Equals(NormalizeWorkflowDefault(uploadDiagnostics), "boolean:true", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: workflows with best-effort uploads must expose boolean upload-diagnostics defaulting to true.");
         }
     }
 }
@@ -602,7 +687,22 @@ void ValidateRustWorkflowContract()
 
         if (!Regex.IsMatch(text, @"(?m)^    if: inputs\.sqlx-prepare-check\s*$"))
         {
-            AddFailure($"{checkPath}: the sqlx job (and its Postgres service) must only run when sqlx-prepare-check is true.");
+            AddFailure($"{checkPath}: the sqlx job (and its Postgres container) must only run when sqlx-prepare-check is true.");
+        }
+
+        // Job and service containers fail on runners that are themselves containers on the host
+        // Docker daemon (daedalus, ARK-693): the sqlx job starts Postgres with docker run instead.
+        if (Regex.IsMatch(text, @"(?m)^    (container|services):"))
+        {
+            AddFailure($"{checkPath}: Rust check jobs must not use a job container or services; start Postgres with docker run on the runner.");
+        }
+
+        foreach (var requiredToken in new[] { "docker run -d --rm --name \"$container\"", "/.dockerenv", "pg_isready -h 127.0.0.1", "docker rm -f \"$CONTAINER\"" })
+        {
+            if (!text.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{checkPath}: the sqlx job must contain '{requiredToken}' (docker run Postgres, bridge gateway inside containers, TCP readiness probe, always-run cleanup).");
+            }
         }
     }
 }

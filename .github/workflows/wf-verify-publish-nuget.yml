@@ -106,7 +106,12 @@ on:
         description: Package artifact retention in days.
         type: number
         required: false
-        default: 30
+        default: 7
+      upload-diagnostics:
+        description: Uploads the verification package artifact when true. Nothing downloads it, so the upload is best-effort and never fails the job.
+        type: boolean
+        required: false
+        default: true
     secrets:
       NUGET_AUTH_JSON:
         description: Optional JSON credentials for private NuGet package sources used during restore.
@@ -186,7 +191,8 @@ jobs:
           op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Upload package artifacts @ ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
-        if: always()
+        if: ${{ always() && inputs.upload-diagnostics }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.event.repository.name }}-nuget-verify-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}

@@ -18,6 +18,8 @@ jobs:
       working-directory: tests/fixtures/mock-projects/rust-workspace
       enable-cache: false
       upload-diagnostics: false
+      sqlx-prepare-check: true
+      sqlx-migrations-source: migrations
 
   test:
     # Expected: success.
@@ -48,3 +50,4 @@ jobs:
       version: 1.2.3-ci.1
       version-tag: v1.2.3-ci.1
       enable-cache: false
+      upload-diagnostics: false

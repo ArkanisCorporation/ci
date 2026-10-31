@@ -120,6 +120,7 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the deploy report artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -151,7 +152,8 @@ Schema: `schemas/workflow-inputs/wf-dotnet-format.schema.json`.
 | `tool-version` | string | no | `""` | n/a |
 | `fail-on-diff` | boolean | no | `true` | n/a |
 | `remediation-message` | string | no | `"Run \`dotnet husky run --name dotnet-cleanupcode\` locally and commit the resulting changes."` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
@@ -186,6 +188,7 @@ Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
 | `coverage-report-custom-settings` | string | no | `""` | n/a |
 | `coverage-report-tool-version` | string | no | `"5.5.10"` | n/a |
 | `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
@@ -224,7 +227,7 @@ Schema: `schemas/workflow-inputs/wf-node-build.schema.json`.
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
 | `build-script` | string | no | `"build"` | n/a |
 | `build-command` | string | no | `""` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -250,7 +253,7 @@ Schema: `schemas/workflow-inputs/wf-node-lint.schema.json`.
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
 | `lint-script` | string | no | `"lint"` | n/a |
 | `lint-command` | string | no | `""` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -276,7 +279,7 @@ Schema: `schemas/workflow-inputs/wf-node-test.schema.json`.
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
 | `test-script` | string | no | `"test"` | n/a |
 | `test-command` | string | no | `""` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -334,6 +337,7 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `labels` | string | no | `""` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -370,6 +374,7 @@ Schema: `schemas/workflow-inputs/wf-publish-container-generic.schema.json`.
 | `labels` | string | no | `""` | Optional newline-delimited OCI labels. |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -465,6 +470,7 @@ Schema: `schemas/workflow-inputs/wf-release-semantic.schema.json`.
 | `allow-exec-plugin` | boolean | no | `false` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -485,15 +491,15 @@ Schema: `schemas/workflow-inputs/wf-rust-check.schema.json`.
 | `cargo-deny-checks` | string | no | `""` | Optional whitespace-separated cargo-deny check names (advisories, bans, licenses, sources). Empty runs every check. |
 | `cargo-deny-version` | string | no | `"0.20.2"` | cargo-deny version installed from a prebuilt binary. |
 | `sqlx-offline` | boolean | no | `false` | Exports SQLX_OFFLINE=true to clippy so sqlx query macros use committed .sqlx metadata. |
-| `sqlx-prepare-check` | boolean | no | `false` | Runs cargo sqlx prepare --check against a throwaway Postgres service in a separate job when true. |
+| `sqlx-prepare-check` | boolean | no | `false` | Runs cargo sqlx prepare --check against a throwaway Postgres container in a separate job when true. Needs Docker on the runner. |
 | `sqlx-prepare-arguments` | string | no | `"--workspace"` | Whitespace-separated arguments for cargo sqlx prepare, before the enforced --check. |
 | `sqlx-migrations-source` | string | no | `""` | Optional migrations directory, relative to working-directory, applied with sqlx migrate run before the prepare check. |
 | `sqlx-cli-version` | string | no | `"0.9.0"` | sqlx-cli version installed from a prebuilt binary through cargo-binstall. |
 | `cargo-binstall-version` | string | no | `"1.26.1"` | cargo-binstall version used to install sqlx-cli. |
-| `sqlx-postgres-image` | string | no | `"postgres:17-alpine"` | Postgres service image for the sqlx prepare check. |
-| `sqlx-container-image` | string | no | `"rust:1-trixie"` | Job container image for the sqlx prepare check. Needs bash, git, and rustup or curl. |
+| `sqlx-postgres-image` | string | no | `"postgres:17-alpine"` | Postgres image started with docker run for the sqlx prepare check. |
+| `sqlx-container-image` | string | no | `"rust:1-trixie"` | Deprecated and ignored. The sqlx job no longer runs in a job container; a non-default value only logs a deprecation warning. Removed in the next major. |
 | `enable-cache` | boolean | no | `true` | Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access. |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | Uploads diagnostics artifacts when true. Set false for local act smoke tests that cannot emulate upload-artifact. |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 
@@ -515,7 +521,7 @@ Schema: `schemas/workflow-inputs/wf-rust-test.schema.json`.
 | `sqlx-offline` | boolean | no | `false` | Exports SQLX_OFFLINE=true so sqlx query macros compile against committed .sqlx metadata. |
 | `require-docker` | boolean | no | `false` | Fails before compiling when no Docker daemon is reachable. Set true for testcontainers integration tests. |
 | `enable-cache` | boolean | no | `true` | Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access. |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact. |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 
@@ -545,7 +551,8 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
 | `fail-on-diff` | boolean | no | `true` | n/a |
 | `remediation-message` | string | no | `"Regenerate generated source locally and commit the resulting changes."` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -571,7 +578,8 @@ Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
 | `kubectl-version` | string | no | `"v1.36.2"` | n/a |
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the dry-run deploy report artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -609,7 +617,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `cache-to` | string | no | `""` | Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
 | `labels` | string | no | `""` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -640,7 +649,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-generic.schema.json
 | `cache-to` | string | no | `""` | Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
 | `labels` | string | no | `""` | Optional newline-delimited OCI labels. |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -669,7 +679,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-nuget.schema.json`.
 | `dotnet-setversion-project` | string | no | `""` | n/a |
 | `dotnet-setversion-tool-version` | string | no | `"4.0.0"` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the verification package artifact when true. Nothing downloads it, so the upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -687,7 +698,8 @@ Schema: `schemas/workflow-inputs/wf-verify-release-semantic.schema.json`.
 | `extra-plugins` | string | no | `"@semantic-release/changelog@6.0.3"` | n/a |
 | `allow-exec-plugin` | boolean | no | `false` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 <!-- generated:workflow-inputs:end -->
@@ -2092,7 +2104,8 @@ It runs `cargo fmt --all --check`, then `cargo clippy <clippy-arguments> -- -D w
 `-D warnings` is always appended; `clippy-arguments` (default `--workspace --all-targets --all-features --locked`) only selects what clippy checks.
 cargo-deny installs from a prebuilt binary (`taiki-e/install-action`, `fallback: none`).
 `sqlx-offline: true` exports `SQLX_OFFLINE=true` to clippy so sqlx query macros use committed `.sqlx/` metadata.
-`sqlx-prepare-check: true` adds a second job that runs in a job container (`sqlx-container-image`) next to a Postgres service (`sqlx-postgres-image`), applies `sqlx-migrations-source` when set, and runs `cargo sqlx prepare --check <sqlx-prepare-arguments>`. sqlx-cli installs through `cargo binstall` with the compile strategy disabled. The container shares a network with the service, so this works on hosted runners and on runners that are themselves containers.
+`sqlx-prepare-check: true` adds a second job that runs on the runner, starts a throwaway Postgres (`sqlx-postgres-image`) with `docker run` under a run-scoped name and a Docker-chosen host port, waits for it over TCP (60 seconds at most), applies `sqlx-migrations-source` when set, runs `cargo sqlx prepare --check <sqlx-prepare-arguments>`, and removes the container in an `always()` step. When the runner is itself a container (`/.dockerenv`), Postgres is reached through the default bridge gateway, otherwise on `127.0.0.1`, so this works on hosted runners and on Docker-out-of-Docker runners such as `daedalus`. No job or service containers are used: they fail on container runners. sqlx-cli installs through `cargo binstall` with the compile strategy disabled. `sqlx-container-image` is deprecated and ignored; passing a non-default value only logs a warning.
+Diagnostics uploads are best-effort ([artifacts.md](artifacts.md#best-effort-and-required-uploads)).
 Caching uses `Swatinem/rust-cache` when `enable-cache` is true; see [caching.md](caching.md#rust).
 
 Flow:
@@ -2116,7 +2129,8 @@ flowchart TD
   summary --> diagnostics[/Diagnostics artifact/]
   manifest --> outputs(("artifact-manifest, run-metadata"))
   validate --> sqlxGate{sqlx-prepare-check?}
-  sqlxGate -->|yes| sqlx[[sqlx job: Postgres service, migrate, prepare --check]]
+  sqlxGate -->|yes| pg[("docker run Postgres, bridge gateway in containers")]
+  pg --> sqlx[[sqlx job: migrate, prepare --check, remove container]]
   sqlx --> diagnostics
   classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
   classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
@@ -2129,14 +2143,14 @@ flowchart TD
   class preflight,sqlxGate decision
   class metadata,manifest,summary,diagnostics artifact
   class outputs output
-  class cache external
+  class cache,pg external
 ```
 
 Preconditions:
 
 - `working-directory` contains `Cargo.toml` and `rust-toolchain.toml` (or `rust-toolchain`); the toolchain file should list `rustfmt` and `clippy` components (the workflow adds them either way).
 - `deny.toml` exists when `cargo-deny` is true.
-- With `sqlx-prepare-check`, the runner can start job and service containers, and `.sqlx/` is committed.
+- With `sqlx-prepare-check`, the runner has the `docker` CLI and a reachable Docker daemon, and `.sqlx/` is committed.
 
 Side effects:
 
@@ -2153,6 +2167,9 @@ Failure modes:
 | clippy fails on `--locked` | `Cargo.lock` out of date. | Run `cargo update -w` locally and commit the lockfile. |
 | sqlx job: `prepare --check` reports changed queries | `.sqlx/` not regenerated after a query change. | Run `cargo sqlx prepare --workspace` and commit `.sqlx/`. |
 | sqlx job: `cargo binstall` fails | No prebuilt sqlx-cli for that version. | Bump `sqlx-cli-version` to a version quickinstall publishes, or disable the check. |
+| sqlx job: `needs a reachable Docker daemon` | Runner has no Docker. | Run on a runner with Docker, or disable the check. |
+| sqlx job: `Postgres did not accept TCP connections within 60 seconds` | Image pull or start too slow, or the port is not reachable. | Check the printed container logs; on container runners confirm the bridge gateway is reachable. |
+| sqlx job: `OCI runtime exec failed: ... /__e/node24/bin/node` | Caller pinned a release from before ARK-693 that used a job container. | Move to the current `@v1`. |
 
 ## Rust Test Workflow
 

@@ -225,6 +225,8 @@ jobs:
         id: package-artifact
         run: echo "name=${GITHUB_REPOSITORY#*/}-nuget-${{ inputs.version }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
+      # Required, unlike every diagnostics upload: the publish jobs download this artifact, so a
+      # failed upload must fail the job (no continue-on-error, no upload-diagnostics gate).
       - name: Upload package artifacts @ ${{ steps.package-artifact.outputs.name }}
         if: always()
         uses: actions/upload-artifact@v7
