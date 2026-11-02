@@ -471,7 +471,10 @@ jobs:
           cd "$WORKING_DIRECTORY"
           # Prebuilt binaries only: with the compile strategy disabled, a missing binary fails here
           # instead of silently building sqlx-cli from source.
-          cargo binstall --no-confirm --disable-strategies compile "sqlx-cli@${SQLX_CLI_VERSION}"
+          # --force: on persistent runners, rust-cache's post step deletes ~/.cargo/bin binaries from
+          # earlier runs but keeps cargo's install records, so without it binstall reports "already
+          # installed" and leaves no binary behind (ARK-701).
+          cargo binstall --no-confirm --force --disable-strategies compile "sqlx-cli@${SQLX_CLI_VERSION}"
           cargo sqlx --version | tee "$GITHUB_WORKSPACE/artifacts/meta/sqlx-cli-version.txt"
 
       - name: Start Postgres @ ${{ inputs.sqlx-postgres-image }}

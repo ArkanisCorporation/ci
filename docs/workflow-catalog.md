@@ -2167,6 +2167,7 @@ Failure modes:
 | clippy fails on `--locked` | `Cargo.lock` out of date. | Run `cargo update -w` locally and commit the lockfile. |
 | sqlx job: `prepare --check` reports changed queries | `.sqlx/` not regenerated after a query change. | Run `cargo sqlx prepare --workspace` and commit `.sqlx/`. |
 | sqlx job: `cargo binstall` fails | No prebuilt sqlx-cli for that version. | Bump `sqlx-cli-version` to a version quickinstall publishes, or disable the check. |
+| sqlx job: `sqlx-cli ... is already installed` then `no such command: sqlx` | Caller pinned a release from before ARK-701: rust-cache deleted the binary on a persistent runner but cargo's install record stayed. | Move to the current `@v1`, which installs with `--force`. |
 | sqlx job: `needs a reachable Docker daemon` | Runner has no Docker. | Run on a runner with Docker, or disable the check. |
 | sqlx job: `Postgres did not accept TCP connections within 60 seconds` | Image pull or start too slow, or the port is not reachable. | Check the printed container logs; on container runners confirm the bridge gateway is reachable. |
 | sqlx job: `OCI runtime exec failed: ... /__e/node24/bin/node` | Caller pinned a release from before ARK-693 that used a job container. | Move to the current `@v1`. |
