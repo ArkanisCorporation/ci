@@ -89,7 +89,7 @@ runs:
   steps:
     - name: Setup Node.js
       id: setup-node
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -239,7 +239,7 @@ runs:
     - name: Cache ${{ inputs.package-manager }} store
       if: inputs.enable-cache == 'true'
       id: node-cache
-      uses: runs-on/cache@v5.0.7
+      uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
       with:
         path: ${{ steps.node-context.outputs.cache-path }}
         key: ${{ steps.node-context.outputs.cache-key }}
