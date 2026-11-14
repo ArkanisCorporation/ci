@@ -175,12 +175,12 @@ jobs:
         shell: bash
     steps:
       - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Checkout platform pack action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
           repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
@@ -229,7 +229,7 @@ jobs:
       # failed upload must fail the job (no continue-on-error, no upload-diagnostics gate).
       - name: Upload package artifacts @ ${{ steps.package-artifact.outputs.name }}
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.package-artifact.outputs.name }}
           path: |
@@ -267,12 +267,12 @@ jobs:
 
       - name: NuGet Trusted Publishing login @ ${{ inputs.nuget-user || (secrets.NUGET_USER != '' && 'NUGET_USER secret') || vars.NUGET_USER }}
         id: nuget-login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: ${{ inputs.nuget-user || secrets.NUGET_USER || vars.NUGET_USER }}
 
       - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.pack.outputs.package-artifact-name }}
           path: |
@@ -281,7 +281,7 @@ jobs:
             ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
 
       - name: Checkout platform publish action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
           repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
@@ -326,7 +326,7 @@ jobs:
           fi
 
       - name: Download package artifacts @ ${{ needs.pack.outputs.package-artifact-name }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.pack.outputs.package-artifact-name }}
           path: |
@@ -335,7 +335,7 @@ jobs:
             ${{ runner.debug != '1' && '!artifacts/**/obj/**' || '' }}
 
       - name: Checkout platform publish action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
           repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
