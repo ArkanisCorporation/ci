@@ -80,6 +80,11 @@
       "default": 30,
       "minimum": 1,
       "maximum": 90
+    },
+    "source-ref": {
+      "type": "string",
+      "default": "",
+      "description": "Optional caller checkout ref. Empty preserves the triggering commit; callers authorize selected deployment source."
     }
   }
 }

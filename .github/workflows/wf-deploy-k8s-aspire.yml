@@ -50,6 +50,11 @@ on:
         type: string
         required: false
         default: artifacts/k8s
+      source-ref:
+        description: Optional caller repository checkout ref; empty preserves the triggering commit. Callers must authorize the selected source before deployment.
+        type: string
+        required: false
+        default: ""
       image-tag:
         description: Optional Kubernetes:Images:Tag override.
         type: string
@@ -147,9 +152,10 @@ jobs:
           password: ${{ github.token }}
           logout: true
 
-      - name: Checkout caller @ ${{ github.repository }}:${{ github.head_ref || github.ref_name }}
+      - name: Checkout caller @ ${{ github.repository }}:${{ inputs.source-ref || github.head_ref || github.ref_name }}
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.source-ref }}
           persist-credentials: false
 
       - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }}

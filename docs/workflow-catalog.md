@@ -108,6 +108,7 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `source-ref` | string | no | `""` | Optional caller checkout ref. Empty preserves the triggering commit; callers authorize selected deployment source. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -450,6 +451,7 @@ Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `source-ref` | string | no | `""` | Optional caller checkout ref. Empty preserves the triggering commit; callers authorize selected deployment source. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -1765,13 +1767,16 @@ jobs:
 ## Aspire Kubernetes Deploy Verification Workflow
 
 `wf-verify-deploy-k8s-aspire.yml` validates Aspire deployment inputs and tool availability without applying cluster changes.
+The optional `source-ref` selects the caller repository checkout independently of the workflow invocation commit.
+Omission preserves existing checkout behavior; callers authorize the selected ref before passing deployment credentials.
+Use a previously validated full commit SHA for production so configuration and migrations match the selected images.
 It does not bind a GitHub environment or read `KUBE_CONFIG`.
 
 Flow:
 
 ```mermaid
 flowchart TD
-  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  caller[("Caller repository")] --> checkout[[Checkout caller at selected source-ref or triggering commit]]
   checkout --> dotnet[[Setup .NET]]
   dotnet --> cache{enable cache?}
   cache -->|yes| nugetCache[("NuGet cache")]
@@ -1817,6 +1822,9 @@ Side effects:
 ## Aspire Kubernetes Deploy Workflow
 
 `wf-deploy-k8s-aspire.yml` deploys with `dotnet tool run aspire -- deploy`.
+The optional `source-ref` selects the caller repository checkout independently of the workflow invocation commit.
+Omission preserves existing checkout behavior; callers authorize the selected ref before passing deployment credentials.
+Use a previously validated full commit SHA for production so configuration and migrations match the selected images.
 It accepts an optional `KUBE_CONFIG` secret.
 If `KUBE_CONFIG` is omitted, the runner must already have a valid kube context.
 It logs into GHCR before checkout and tool setup so Aspire deployment can push or pull registry content with the job token.
@@ -1827,7 +1835,7 @@ Flow:
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> login[[Login to GHCR]]
-  login --> checkout[[Checkout caller]]
+  login --> checkout[[Checkout caller at selected source-ref or triggering commit]]
   checkout --> dotnet[[Setup .NET]]
   dotnet --> cache{enable cache?}
   cache -->|yes| nugetCache[("NuGet cache")]

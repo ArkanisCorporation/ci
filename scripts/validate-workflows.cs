@@ -1974,6 +1974,15 @@ void ValidateAspireDeployContract()
         AddFailure($"{workflowPath}: Aspire deploy workflow must request package write access and log in to GHCR before deployment.");
     }
 
+    foreach (var sourceWorkflow in new[] { "wf-deploy-k8s-aspire.yml", "wf-verify-deploy-k8s-aspire.yml" })
+    {
+        var sourceText = NormalizeLineEndings(File.ReadAllText(Path.Combine(repoRoot, ".github", "workflows", sourceWorkflow)));
+        if (!sourceText.Contains("          ref: ${{ inputs.source-ref }}\n          persist-credentials: false", StringComparison.Ordinal))
+        {
+            AddFailure($"{sourceWorkflow}: selected source-ref must reach the caller checkout without persistent credentials.");
+        }
+    }
+
     var loginStep = workflowText.IndexOf("      - name: Login to GitHub Container Registry @ ghcr.io", StringComparison.Ordinal);
     var checkoutStep = workflowText.IndexOf("      - name: Checkout caller @", StringComparison.Ordinal);
     if (loginStep >= 0 && checkoutStep >= 0 && loginStep > checkoutStep)

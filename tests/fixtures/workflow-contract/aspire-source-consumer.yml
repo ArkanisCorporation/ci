@@ -1,0 +1,30 @@
+# Expected: static validation passes. Illustrative only; never run a deployment in selftests.
+name: Aspire selected-source consumer fixture
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  verify:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-verify-deploy-k8s-aspire.yml@v1
+    permissions:
+      contents: read
+      packages: read
+    with:
+      source-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      apphost-project: src/AppHost/AppHost.csproj
+      aspire-environment: Kubernetes-Production
+      kubernetes-namespace: example-production
+      image-tag: v1.2.3
+  deploy:
+    needs: verify
+    uses: ArkanisCorporation/ci/.github/workflows/wf-deploy-k8s-aspire.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      apphost-project: src/AppHost/AppHost.csproj
+      aspire-environment: Kubernetes-Production
+      kubernetes-namespace: example-production
+      image-tag: v1.2.3
+      environment-name: production

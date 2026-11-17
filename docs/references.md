@@ -27,6 +27,7 @@ Last verified: 2026-09-25.
 - GitHub dependency caching: https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
 - GitHub-hosted runners: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 - GitHub self-hosted runners: https://docs.github.com/en/actions/reference/runners/self-hosted-runners
+- actions/checkout selected ref (verified 2026-11-17): https://github.com/actions/checkout#usage
 - actions/setup-node: https://github.com/actions/setup-node
 - Docker build-push action: https://github.com/docker/build-push-action
 - Docker Buildx secrets in GitHub Actions: https://docs.docker.com/build/ci/github-actions/secrets/
