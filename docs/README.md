@@ -15,4 +15,6 @@ Start here:
 - `edge-cases.md` - reusable workflow traps.
 - `references.md` - source links.
 - `adr/0006-private-nuget-restore-credentials.md` - private NuGet credential contract.
+- `adr/0008-openviking-docs-publish.md` - OpenViking docs publish: reachability, runner-provided key, layout.
+- `adr/0009-rust-workflows-and-generic-container.md` - Rust check and test workflows, generic container publishing, build-time version stamping.
 - `migrations/` - repository cohorts and migration agent instructions.

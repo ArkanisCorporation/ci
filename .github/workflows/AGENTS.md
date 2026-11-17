@@ -45,7 +45,7 @@ Recommended order:
 6. Build, test, package, publish, or deploy.
 7. Write metadata and artifact manifest.
 8. Write step summary.
-9. Upload diagnostics with `if: always()`.
+9. Upload diagnostics with `if: ${{ always() && inputs.upload-diagnostics }}` and `continue-on-error: true`; only uploads a later job downloads stay required (`docs/artifacts.md`).
 
 ## Current Public Workflows
 
@@ -63,13 +63,19 @@ Recommended order:
 - `wf-publish-nuget.yml` packs and publishes NuGet packages through Trusted Publishing or API-key fallback.
 - `wf-verify-publish-container-dotnet.yml` stamps .NET versions and builds OCI images without pushing.
 - `wf-publish-container-dotnet.yml` stamps .NET versions before publishing OCI images through Docker Buildx.
+- `wf-verify-publish-container-generic.yml` builds OCI images from any Dockerfile without pushing or stamping.
+- `wf-publish-container-generic.yml` publishes OCI images from any Dockerfile; the version reaches the build only as a build arg.
+- `wf-rust-check.yml` verifies rustfmt, clippy `-D warnings`, cargo-deny, and an opt-in sqlx prepare check.
+- `wf-rust-test.yml` runs cargo-nextest with optional Docker preflight for testcontainers.
 - `wf-verify-deploy-k8s-aspire.yml` verifies Aspire Kubernetes deployment inputs without applying cluster changes.
 - `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
 - `wf-platform-selftest.yml` validates this platform repository.
+- `wf-publish-docs-openviking.yml` mirrors caller docs into OpenViking from the default branch; it reads its key from `arkanis-runners` env and must mask it itself.
 
 ## Repository Workflows
 
 - `release.yml` runs platform selftest and fixture dogfood jobs before semantic-release verification on pull requests and before environment-gated semantic-release publication on main pushes and manual dispatch.
+- `openviking-docs.yml` mirrors this repository's docs into OpenViking through the released `@v1` workflow, so repo-standards' adoption check sees it like any consumer.
 
 ## Security Rules
 

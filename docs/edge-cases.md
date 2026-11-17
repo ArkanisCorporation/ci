@@ -21,3 +21,5 @@ Audience: agents + maintainers.
 | Obsolete queued main validation | Per-lane concurrency replaces only the prior pending job; running validation and release work continue |
 | K8s deploy race | Environment and namespace concurrency group |
 | Queued concurrency backlog | Add `queue: max` after pinned actionlint supports it |
+| Artifact storage quota hit | Uploads are best-effort (`continue-on-error: true`); set `upload-diagnostics: false` to stop uploading |
+| Job or service containers on Docker-out-of-Docker runners | Avoid; runner externals are missing in job containers. Use `docker run` and reach published ports through the bridge gateway |

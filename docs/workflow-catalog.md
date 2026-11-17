@@ -20,9 +20,14 @@ Audience: consumers and platform maintainers.
 | `wf-publish-nuget.yml` | Pack and publish one NuGet project. | publish |
 | `wf-verify-publish-container-dotnet.yml` | Stamp and build one .NET OCI image without pushing. | untrusted or trusted-build |
 | `wf-publish-container-dotnet.yml` | Stamp and publish one .NET OCI image. | publish |
+| `wf-verify-publish-container-generic.yml` | Build one OCI image from any Dockerfile without pushing. | untrusted or trusted-build |
+| `wf-publish-container-generic.yml` | Publish one OCI image from any Dockerfile, no language stamping. | publish |
+| `wf-rust-check.yml` | Verify rustfmt, clippy `-D warnings`, cargo-deny, and optionally sqlx offline metadata. | untrusted or trusted-build |
+| `wf-rust-test.yml` | Run Rust tests with cargo-nextest. | untrusted or trusted-build |
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying changes. | untrusted or trusted-build |
 | `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build |
+| `wf-publish-docs-openviking.yml` | Mirror caller docs into OpenViking from the default branch. | publish |
 
 ## Public Workflow Permissions
 
@@ -42,17 +47,24 @@ Audience: consumers and platform maintainers.
 | `wf-publish-nuget.yml` | `contents: read` for pack and API-key publish<br>`packages: read` for GitHub Packages restore<br>`id-token: write` only for Trusted Publishing job | `.nupkg`, `.snupkg`, manifest |
 | `wf-verify-publish-container-dotnet.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | Buildx metadata, manifest |
 | `wf-publish-container-dotnet.yml` | `contents: read`<br>`packages: write` when pushing to GHCR<br>`id-token: write` for provenance<br>`attestations: write` for attestations | digest, Buildx metadata, manifest |
+| `wf-verify-publish-container-generic.yml` | `contents: read` | Buildx metadata, manifest |
+| `wf-publish-container-generic.yml` | `contents: read`<br>`packages: write` when pushing to GHCR | digest, Buildx metadata, manifest |
+| `wf-rust-check.yml` | `contents: read` | rustfmt, clippy, cargo-deny, and sqlx logs, metadata, manifest |
+| `wf-rust-test.yml` | `contents: read` | nextest log, JUnit report when configured, metadata, manifest |
 | `wf-verify-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | verification manifest |
 | `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
+| `wf-publish-docs-openviking.yml` | `contents: read` | `published`, `file-count`, `target-uri`, file list, OpenViking responses, metadata, manifest |
 
 ## Repository Workflows
 
 | Workflow | Purpose | Permissions |
 |---|---|---|
 | `release.yml` | Run platform selftests and fixture dogfood jobs for pull requests, main pushes, and manual dispatches before verification or publication. | PR verification uses `contents: write` for semantic-release dry-run tag push checks.<br>Release publication uses `contents: write`, `issues: write`, and `pull-requests: write`. |
+| `openviking-docs.yml` | Mirror this repository's docs into OpenViking through the released `@v1` workflow, like any adopted consumer. | `contents: read` |
 
 `release.yml` passes `vars.RUNNER_DEFAULT || 'daedalus'` and `runs-on-self-hosted: true` to every repository-local reusable workflow call.
+Its `docs-openviking` job calls `wf-publish-docs-openviking.yml` with `dry-run: true`, so pull requests prove doc collection without OpenViking access.
 
 ## Common Inputs
 
@@ -108,6 +120,7 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the deploy report artifact when true. The upload is best-effort and never fails the job. |
 | `source-ref` | string | no | `""` | Optional caller checkout ref. Empty preserves the triggering commit; callers authorize selected deployment source. |
 
 Outputs: schema does not define workflow outputs.
@@ -140,7 +153,8 @@ Schema: `schemas/workflow-inputs/wf-dotnet-format.schema.json`.
 | `tool-version` | string | no | `""` | n/a |
 | `fail-on-diff` | boolean | no | `true` | n/a |
 | `remediation-message` | string | no | `"Run \`dotnet husky run --name dotnet-cleanupcode\` locally and commit the resulting changes."` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
@@ -175,6 +189,7 @@ Schema: `schemas/workflow-inputs/wf-dotnet-test.schema.json`.
 | `coverage-report-custom-settings` | string | no | `""` | n/a |
 | `coverage-report-tool-version` | string | no | `"5.5.10"` | n/a |
 | `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
@@ -213,7 +228,7 @@ Schema: `schemas/workflow-inputs/wf-node-build.schema.json`.
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
 | `build-script` | string | no | `"build"` | n/a |
 | `build-command` | string | no | `""` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -239,7 +254,7 @@ Schema: `schemas/workflow-inputs/wf-node-lint.schema.json`.
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
 | `lint-script` | string | no | `"lint"` | n/a |
 | `lint-command` | string | no | `""` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -265,7 +280,7 @@ Schema: `schemas/workflow-inputs/wf-node-test.schema.json`.
 | `allow-lifecycle-scripts` | boolean | no | `false` | n/a |
 | `test-script` | string | no | `"test"` | n/a |
 | `test-command` | string | no | `""` | n/a |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
 
@@ -323,6 +338,65 @@ Schema: `schemas/workflow-inputs/wf-publish-container-dotnet.schema.json`.
 | `labels` | string | no | `""` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-publish-container-generic.yml
+
+Schema: `schemas/workflow-inputs/wf-publish-container-generic.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `environment-name` | string | no | `"container"` | GitHub environment guarding image publication. |
+| `image` | string | yes | none | Fully-qualified image name without tag. |
+| `context` | string | no | `"."` | Docker build context. |
+| `dockerfile` | string | no | `"Dockerfile"` | Dockerfile path. |
+| `target` | string | no | `""` | Optional Dockerfile target stage. |
+| `platforms` | string | no | `"linux/amd64"` | Comma-delimited target platforms. |
+| `version` | string | yes | none | Required bare version without leading v, passed to the Dockerfile through the version-build-arg Docker build argument. |
+| `version-build-arg` | string | no | `"VERSION"` | Docker build argument name that receives version. Empty disables it. A same-named entry in build-args wins. |
+| `version-tag` | string | no | `""` | Optional release version tag to apply to the image, usually prefixed with v. |
+| `version-channel` | string | no | `""` | Optional channel tag to apply. |
+| `channel-latest` | boolean | no | `true` | Adds a mutable <version-channel>-latest tag when version-channel is set. |
+| `extra-tags` | string | no | `""` | Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through. |
+| `registry` | string | no | `"ghcr.io"` | Registry host used for docker/login-action. |
+| `registry-username` | string | no | `""` | Registry username; defaults to github.actor when empty. |
+| `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
+| `build-args` | string | no | `""` | Optional newline-delimited Docker build arguments. Do not pass secrets here because Docker build args can persist in image metadata or logs. |
+| `enable-cache` | boolean | no | `true` | Enables the generated GitHub Actions BuildKit cache when cache-from and cache-to are empty. |
+| `cache-from` | string | no | `""` | Optional Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
+| `cache-to` | string | no | `""` | Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
+| `sbom` | string | no | `"true"` | Docker Buildx sbom input. |
+| `provenance` | string | no | `"mode=max"` | Docker Buildx provenance input. |
+| `labels` | string | no | `""` | Optional newline-delimited OCI labels. |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-publish-docs-openviking.yml
+
+Schema: `schemas/workflow-inputs/wf-publish-docs-openviking.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"arkanis-runners"` | Single runner label used when runs-on-json is empty. Only arkanis-runners can reach OpenViking. |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `true` | n/a |
+| `include-paths` | string | no | `"README.md\nAGENTS.md\nCLAUDE.md\ndocs/**/*.md\n.claude/rules/**/*.md\n.claude/context/**/*.md\nopenspec/specs/**/*.md\n"` | Newline-separated globs (GitHub paths filter semantics) selecting tracked docs. Must equal repo-standards OPENVIKING_DOC_GLOBS by default. |
+| `target-root` | string | no | `"viking://resources/arkanis/projects"` | OpenViking URI under which the mirror is stored as <target-root>/<lowercased repository name>. |
+| `processing-mode` | string | no | `"semantic_and_vectors"` | Allowed: "vectors_only", "semantic_and_vectors" |
+| `max-archive-bytes` | integer | no | `20971520` | Fail before uploading when the docs archive is larger than this.<br>Minimum: 1 |
+| `import-timeout-seconds` | integer | no | `120` | Seconds to wait for OpenViking to accept the import.<br>Minimum: 1 |
+| `dry-run` | boolean | no | `false` | Collect and archive docs without contacting OpenViking. Allowed on any ref and event. |
+| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | n/a |
+| `timeout-minutes` | integer | no | `15` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
 
@@ -397,6 +471,60 @@ Schema: `schemas/workflow-inputs/wf-release-semantic.schema.json`.
 | `allow-exec-plugin` | boolean | no | `false` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 | `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-rust-check.yml
+
+Schema: `schemas/workflow-inputs/wf-rust-check.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `working-directory` | string | no | `"."` | Directory containing the Cargo workspace root and rust-toolchain.toml. |
+| `rustfmt` | boolean | no | `true` | Runs cargo fmt --all --check when true. |
+| `clippy` | boolean | no | `true` | Runs cargo clippy with -D warnings when true. |
+| `clippy-arguments` | string | no | `"--workspace --all-targets --all-features --locked"` | Whitespace-separated cargo clippy arguments placed before the enforced "-- -D warnings". |
+| `cargo-deny` | boolean | no | `true` | Runs cargo deny check with the caller's deny.toml when true. |
+| `cargo-deny-checks` | string | no | `""` | Optional whitespace-separated cargo-deny check names (advisories, bans, licenses, sources). Empty runs every check. |
+| `cargo-deny-version` | string | no | `"0.20.2"` | cargo-deny version installed from a prebuilt binary. |
+| `sqlx-offline` | boolean | no | `false` | Exports SQLX_OFFLINE=true to clippy so sqlx query macros use committed .sqlx metadata. |
+| `sqlx-prepare-check` | boolean | no | `false` | Runs cargo sqlx prepare --check against a throwaway Postgres container in a separate job when true. Needs Docker on the runner. |
+| `sqlx-prepare-arguments` | string | no | `"--workspace"` | Whitespace-separated arguments for cargo sqlx prepare, before the enforced --check. |
+| `sqlx-migrations-source` | string | no | `""` | Optional migrations directory, relative to working-directory, applied with sqlx migrate run before the prepare check. |
+| `sqlx-cli-version` | string | no | `"0.9.0"` | sqlx-cli version installed from a prebuilt binary through cargo-binstall. |
+| `cargo-binstall-version` | string | no | `"1.26.1"` | cargo-binstall version used to install sqlx-cli. |
+| `sqlx-postgres-image` | string | no | `"postgres:17-alpine"` | Postgres image started with docker run for the sqlx prepare check. |
+| `sqlx-container-image` | string | no | `"rust:1-trixie"` | Deprecated and ignored. The sqlx job no longer runs in a job container; a non-default value only logs a deprecation warning. Removed in the next major. |
+| `enable-cache` | boolean | no | `true` | Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access. |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads diagnostics artifacts when true. Set false for local act smoke tests that cannot emulate upload-artifact. |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-rust-test.yml
+
+Schema: `schemas/workflow-inputs/wf-rust-test.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `working-directory` | string | no | `"."` | Directory containing the Cargo workspace root and rust-toolchain.toml. |
+| `nextest-profile` | string | no | `"ci"` | cargo-nextest profile passed to --profile. The profile must exist in .config/nextest.toml unless it is default. |
+| `nextest-arguments` | string | no | `"--workspace --all-features --locked"` | Whitespace-separated cargo nextest run arguments added after --profile. |
+| `nextest-version` | string | no | `"0.9.150"` | cargo-nextest version installed from a prebuilt binary. |
+| `sqlx-offline` | boolean | no | `false` | Exports SQLX_OFFLINE=true so sqlx query macros compile against committed .sqlx metadata. |
+| `require-docker` | boolean | no | `false` | Fails before compiling when no Docker daemon is reachable. Set true for testcontainers integration tests. |
+| `enable-cache` | boolean | no | `true` | Restores and saves the Cargo registry and target cache with Swatinem/rust-cache when true. Set false for cold-build validation or runners without cache service access. |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads diagnostics artifact when true. Set false for local act smoke tests that cannot emulate upload-artifact. |
+| `timeout-minutes` | integer | no | `30` | Minimum: 1 |
 
 Outputs: schema does not define workflow outputs.
 
@@ -424,7 +552,8 @@ Schema: `schemas/workflow-inputs/wf-setup-dotnet-generated-code.schema.json`.
 | `fail-on-diff` | boolean | no | `true` | n/a |
 | `remediation-message` | string | no | `"Regenerate generated source locally and commit the resulting changes."` | n/a |
 | `timeout-minutes` | integer | no | `20` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -450,7 +579,8 @@ Schema: `schemas/workflow-inputs/wf-verify-deploy-k8s-aspire.schema.json`.
 | `kubectl-version` | string | no | `"v1.36.2"` | n/a |
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the dry-run deploy report artifact when true. The upload is best-effort and never fails the job. |
 | `source-ref` | string | no | `""` | Optional caller checkout ref. Empty preserves the triggering commit; callers authorize selected deployment source. |
 
 Outputs: schema does not define workflow outputs.
@@ -489,7 +619,40 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-container-dotnet.schema.json`
 | `cache-to` | string | no | `""` | Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
 | `labels` | string | no | `""` | n/a |
 | `timeout-minutes` | integer | no | `45` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
+
+Outputs: schema does not define workflow outputs.
+
+### wf-verify-publish-container-generic.yml
+
+Schema: `schemas/workflow-inputs/wf-verify-publish-container-generic.schema.json`.
+
+| Input | Type | Required | Default | Details |
+|---|---|---|---|---|
+| `runs-on` | string | no | `"ubuntu-latest"` | n/a |
+| `runs-on-json` | string | no | `""` | n/a |
+| `runs-on-self-hosted` | boolean | no | `false` | n/a |
+| `image` | string | yes | none | Fully-qualified image name without tag. |
+| `context` | string | no | `"."` | Docker build context. |
+| `dockerfile` | string | no | `"Dockerfile"` | Dockerfile path. |
+| `target` | string | no | `""` | Optional Dockerfile target stage. |
+| `platforms` | string | no | `"linux/amd64"` | Comma-delimited target platforms. |
+| `version` | string | yes | none | Required bare version without leading v, passed to the Dockerfile through the version-build-arg Docker build argument. |
+| `version-build-arg` | string | no | `"VERSION"` | Docker build argument name that receives version. Empty disables it. A same-named entry in build-args wins. |
+| `version-tag` | string | no | `""` | Optional release version tag to apply to the image, usually prefixed with v. |
+| `version-channel` | string | no | `""` | Optional channel tag to apply. |
+| `channel-latest` | boolean | no | `true` | Adds a mutable <version-channel>-latest tag when version-channel is set. |
+| `extra-tags` | string | no | `""` | Optional newline-delimited extra image tags. Bare tags expand as image:tag; full image references pass through. |
+| `buildkit-endpoint` | string | no | `""` | Optional remote BuildKit endpoint for self-hosted runners. When empty on a self-hosted runner, the runner's BUILDKIT_HOST environment variable is used if set; otherwise a local builder is created. |
+| `build-args` | string | no | `""` | Optional newline-delimited Docker build arguments. Do not pass secrets here because Docker build args can persist in image metadata or logs. |
+| `enable-cache` | boolean | no | `true` | Enables the generated GitHub Actions BuildKit cache when cache-from and cache-to are empty. |
+| `cache-from` | string | no | `""` | Optional Docker Buildx cache-from value. Overrides the generated GitHub Actions cache when set. |
+| `cache-to` | string | no | `""` | Optional Docker Buildx cache-to value. Overrides the generated GitHub Actions cache when set. |
+| `labels` | string | no | `""` | Optional newline-delimited OCI labels. |
+| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the image metadata artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -518,7 +681,8 @@ Schema: `schemas/workflow-inputs/wf-verify-publish-nuget.schema.json`.
 | `dotnet-setversion-project` | string | no | `""` | n/a |
 | `dotnet-setversion-tool-version` | string | no | `"4.0.0"` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the verification package artifact when true. Nothing downloads it, so the upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 
@@ -536,7 +700,8 @@ Schema: `schemas/workflow-inputs/wf-verify-release-semantic.schema.json`.
 | `extra-plugins` | string | no | `"@semantic-release/changelog@6.0.3"` | n/a |
 | `allow-exec-plugin` | boolean | no | `false` | n/a |
 | `timeout-minutes` | integer | no | `30` | Minimum: 1 |
-| `artifact-retention-days` | integer | no | `14` | Minimum: 1<br>Maximum: 90 |
+| `artifact-retention-days` | integer | no | `7` | Minimum: 1<br>Maximum: 90 |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the diagnostics artifact when true. The upload is best-effort and never fails the job. |
 
 Outputs: schema does not define workflow outputs.
 <!-- generated:workflow-inputs:end -->
@@ -1764,6 +1929,347 @@ jobs:
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+## Generic Container Publish Verification Workflow
+
+`wf-verify-publish-container-generic.yml` builds any caller Dockerfile with Docker Buildx without pushing.
+Audience: consumers.
+It is the .NET verification workflow without .NET stamping or NuGet credentials: it modifies no caller files and installs no SDK.
+The release version reaches the build only as the `version-build-arg` Docker build argument (default `VERSION`); an empty `version-build-arg` disables it and a same-named entry in `build-args` wins.
+`target` selects a Dockerfile stage.
+It uses read-only repository permissions and disables SBOM and provenance emission.
+Cache and BuildKit selection behave exactly like the .NET workflows.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> inputs[[Validate version and version-build-arg]]
+  inputs --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| builder{remote BuildKit?}
+  sh --> builder
+  builder -->|yes| remote[[Set up remote Buildx]]
+  builder -->|no| local[[Set up Docker Buildx]]
+  remote --> tags[[Resolve image tags]]
+  local --> tags
+  tags --> args[[Resolve build args incl. VERSION]]
+  args --> cache[[Resolve BuildKit cache]]
+  cache --> build[[docker/build-push-action build only]]
+  build --> metadata[/Buildx metadata/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> upload[/Container metadata artifact/]
+  manifest --> outputs(("metadata, artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,inputs,sh,remote,local,tags,args,cache,build action
+  class preflight,builder decision
+  class metadata,manifest,summary,upload artifact
+  class outputs output
+```
+
+Preconditions:
+
+- The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
+- `version` is a required bare version without a leading `v`.
+- The Dockerfile declares `ARG <version-build-arg>` where it needs the version.
+
+Side effects:
+
+- Builds container layers without pushing them.
+- Reads and writes BuildKit cache when `enable-cache` is true (import only on a remote BuildKit).
+- Passes Docker build args to BuildKit; never put secrets in `build-args`.
+
+## Generic Container Publish Workflow
+
+`wf-publish-container-generic.yml` publishes an OCI image from any caller Dockerfile through Docker Buildx.
+Audience: consumers and release managers.
+Use it for Rust, Go, or any non-.NET image; use the .NET container publish workflow when `.csproj` versions must be stamped.
+Tags: `sha-<12-char sha>` always, plus `version-tag`, `version-channel`, `<channel>-latest` (with `channel-latest`), and `extra-tags` when set.
+The release version reaches the build only as the `version-build-arg` Docker build argument (default `VERSION`). Rust consumers expose it to rustc in the Dockerfile, for example:
+
+```dockerfile
+ARG VERSION=0.0.0-dev
+ENV APP_VERSION=${VERSION}
+RUN cargo build --release --locked
+```
+
+and read it with `option_env!("APP_VERSION")`. Nothing is committed back to the repository.
+Buildx provenance (`provenance`, default `mode=max`) and SBOM (`sbom`, default `true`) attestations are attached to the pushed image index.
+The publish job binds `environment-name` and serializes per environment, registry, and image with `cancel-in-progress: false`.
+
+Requirements:
+
+| Requirement | Permission | Mode |
+|---|---|---|
+| Caller repository checkout. | `contents: read` | always |
+| Registry write token for pushed images. | `packages: write` for GHCR, or registry-specific write scope | always |
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> inputs[[Validate version and version-build-arg]]
+  inputs --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| builder{remote BuildKit?}
+  sh --> builder
+  builder -->|yes| remote[[Set up remote Buildx]]
+  builder -->|no| local[[Set up Docker Buildx]]
+  remote --> tags[[Resolve image tags]]
+  local --> tags
+  tags --> args[[Resolve build args incl. VERSION]]
+  args --> cache[[Resolve BuildKit cache]]
+  cache --> envGate[["Environment-gated publish job"]]
+  envGate --> registry[("Container registry")]
+  registry --> build[[docker/build-push-action push with provenance and SBOM]]
+  build --> metadata[/Buildx metadata/]
+  build --> digest(("digest"))
+  metadata --> manifest[/artifact-manifest.json/]
+  digest --> manifest
+  manifest --> summary>Step summary]
+  summary --> upload[/Container metadata artifact/]
+  manifest --> outputs(("digest, metadata, artifact-manifest"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,inputs,sh,remote,local,tags,args,cache,envGate,build action
+  class preflight,builder decision
+  class metadata,manifest,summary,upload artifact
+  class digest,outputs output
+  class registry external
+```
+
+Preconditions:
+
+- The runner can run Docker Buildx or reach the configured remote BuildKit endpoint.
+- Registry credentials are available (`REGISTRY_TOKEN`, default `github.token`).
+- `version` is a required bare version without a leading `v`.
+
+Side effects:
+
+- Pushes registry tags, including mutable channel, channel-latest, and extra tags when configured.
+- Reads and writes BuildKit cache when `enable-cache` is true.
+- Emits a digest output for downstream deploys.
+
+Failure modes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `version must be a bare semantic version without leading v` | Tag-form release output passed to `version`. | Pass `new-version` to `version` and `new-tag` to `version-tag`. |
+| Binary reports `0.0.0-dev` | Dockerfile lacks `ARG VERSION` in the build stage, or declares it before `FROM`. | Re-declare the `ARG` inside the stage that compiles. |
+| `denied: permission_denied` on push | Caller job did not grant `packages: write`, or the package is not linked to the repository. | Grant `packages: write`; link the GHCR package to the repository. |
+
+Example:
+
+```yaml
+jobs:
+  publish_image:
+    name: ${{ needs.release.outputs.new-tag }} @ ghcr.io
+    if: ${{ needs.release.outputs.new-version != '' }}
+    needs: release
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-container-generic.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      image: ghcr.io/arkaniscorporation/example-rust-service
+      dockerfile: Dockerfile
+      version: ${{ needs.release.outputs.new-version }}
+      version-tag: ${{ needs.release.outputs.new-tag }}
+      extra-tags: |
+        latest
+      environment-name: container
+```
+
+## Rust Check Workflow
+
+`wf-rust-check.yml` verifies a Cargo workspace without running tests.
+Audience: consumers.
+It installs the toolchain from the caller's `rust-toolchain.toml` (or `rust-toolchain`) in `working-directory` and fails when neither exists.
+It runs `cargo fmt --all --check`, then `cargo clippy <clippy-arguments> -- -D warnings`, then `cargo deny check`; each step can be switched off, and all enabled steps run so one failure does not hide another.
+`-D warnings` is always appended; `clippy-arguments` (default `--workspace --all-targets --all-features --locked`) only selects what clippy checks.
+cargo-deny installs from a prebuilt binary (`taiki-e/install-action`, `fallback: none`).
+`sqlx-offline: true` exports `SQLX_OFFLINE=true` to clippy so sqlx query macros use committed `.sqlx/` metadata.
+`sqlx-prepare-check: true` adds a second job that runs on the runner, starts a throwaway Postgres (`sqlx-postgres-image`) with `docker run` under a run-scoped name and a Docker-chosen host port, waits for it over TCP (60 seconds at most), applies `sqlx-migrations-source` when set, runs `cargo sqlx prepare --check <sqlx-prepare-arguments>`, and removes the container in an `always()` step. When the runner is itself a container (`/.dockerenv`), Postgres is reached through the default bridge gateway, otherwise on `127.0.0.1`, so this works on hosted runners and on Docker-out-of-Docker runners such as `daedalus`. No job or service containers are used: they fail on container runners. sqlx-cli installs through `cargo binstall` with the compile strategy disabled. `sqlx-container-image` is deprecated and ignored; passing a non-default value only logs a warning.
+Diagnostics uploads are best-effort ([artifacts.md](artifacts.md#best-effort-and-required-uploads)).
+Caching uses `Swatinem/rust-cache` when `enable-cache` is true; see [caching.md](caching.md#rust).
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract and toolchain file]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| toolchain[[setup-rust-toolchain from rust-toolchain.toml]]
+  sh --> toolchain
+  toolchain --> cache[("rust-cache")]
+  cache --> tools[[install-action cargo-deny]]
+  tools --> fmt[[cargo fmt --check]]
+  fmt --> clippy[[cargo clippy -D warnings]]
+  clippy --> deny[[cargo deny check]]
+  deny --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  validate --> sqlxGate{sqlx-prepare-check?}
+  sqlxGate -->|yes| pg[("docker run Postgres, bridge gateway in containers")]
+  pg --> sqlx[[sqlx job: migrate, prepare --check, remove container]]
+  sqlx --> diagnostics
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,sh,toolchain,tools,fmt,clippy,deny,sqlx action
+  class preflight,sqlxGate decision
+  class metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class cache,pg external
+```
+
+Preconditions:
+
+- `working-directory` contains `Cargo.toml` and `rust-toolchain.toml` (or `rust-toolchain`); the toolchain file should list `rustfmt` and `clippy` components (the workflow adds them either way).
+- `deny.toml` exists when `cargo-deny` is true.
+- With `sqlx-prepare-check`, the runner has the `docker` CLI and a reachable Docker daemon, and `.sqlx/` is committed.
+
+Side effects:
+
+- Restores and saves the Rust build cache when `enable-cache` is true.
+- Installs rustup on runners that lack it.
+- Starts a throwaway Postgres container only when `sqlx-prepare-check` is true.
+
+Failure modes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `rust-toolchain.toml (or rust-toolchain) is required` | No toolchain file in `working-directory`. | Commit a pinned `rust-toolchain.toml`. |
+| install-action fails with an unsupported version | `cargo-deny-version` has no prebuilt binary for the runner. | Pick a released version; never fall back to source builds. |
+| clippy fails on `--locked` | `Cargo.lock` out of date. | Run `cargo update -w` locally and commit the lockfile. |
+| sqlx job: `prepare --check` reports changed queries | `.sqlx/` not regenerated after a query change. | Run `cargo sqlx prepare --workspace` and commit `.sqlx/`. |
+| sqlx job: `cargo binstall` fails | No prebuilt sqlx-cli for that version. | Bump `sqlx-cli-version` to a version quickinstall publishes, or disable the check. |
+| sqlx job: `sqlx-cli ... is already installed` then `no such command: sqlx` | Caller pinned a release from before ARK-701: rust-cache deleted the binary on a persistent runner but cargo's install record stayed. | Move to the current `@v1`, which installs with `--force`. |
+| sqlx job: `needs a reachable Docker daemon` | Runner has no Docker. | Run on a runner with Docker, or disable the check. |
+| sqlx job: `Postgres did not accept TCP connections within 60 seconds` | Image pull or start too slow, or the port is not reachable. | Check the printed container logs; on container runners confirm the bridge gateway is reachable. |
+| sqlx job: `OCI runtime exec failed: ... /__e/node24/bin/node` | Caller pinned a release from before ARK-693 that used a job container. | Move to the current `@v1`. |
+
+## Rust Test Workflow
+
+`wf-rust-test.yml` runs `cargo nextest run --profile <nextest-profile> <nextest-arguments>`.
+Audience: consumers.
+The default profile is `ci`; define it in `.config/nextest.toml` (for example `fail-fast = false`, `retries = 1`, and `[profile.ci.junit]` to emit a JUnit report).
+The default arguments are `--workspace --all-features --locked`.
+cargo-nextest installs from a prebuilt binary (`taiki-e/install-action`, `fallback: none`).
+`require-docker: true` runs `docker info` before compiling so testcontainers suites fail in seconds when no daemon is reachable.
+`sqlx-offline: true` exports `SQLX_OFFLINE=true`.
+When the profile writes JUnit, the report is copied to `artifacts/test-results/`.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract and toolchain file]]
+  validate --> preflight{self-hosted?}
+  preflight -->|yes| sh[[Self-hosted preflight]]
+  preflight -->|no| dockerGate{require-docker?}
+  sh --> dockerGate
+  dockerGate -->|yes| docker[[docker info]]
+  dockerGate -->|no| toolchain[[setup-rust-toolchain from rust-toolchain.toml]]
+  docker --> toolchain
+  toolchain --> cache[("rust-cache")]
+  cache --> tools[[install-action cargo-nextest]]
+  tools --> test[[cargo nextest run]]
+  test --> junit[/JUnit report/]
+  junit --> metadata[/run-metadata.json/]
+  metadata --> manifest[/artifact-manifest.json/]
+  manifest --> summary>Step summary]
+  summary --> diagnostics[/Diagnostics artifact/]
+  manifest --> outputs(("artifact-manifest, run-metadata"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,sh,docker,toolchain,tools,test action
+  class preflight,dockerGate decision
+  class junit,metadata,manifest,summary,diagnostics artifact
+  class outputs output
+  class cache external
+```
+
+Preconditions:
+
+- `working-directory` contains `Cargo.toml` and `rust-toolchain.toml` (or `rust-toolchain`).
+- The nextest profile exists in `.config/nextest.toml` unless it is `default`.
+- Integration tests that start containers need a Docker daemon; set `require-docker: true`.
+
+Side effects:
+
+- Restores and saves the Rust build cache when `enable-cache` is true.
+- Test code may start containers on the runner's Docker daemon.
+
+Failure modes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `require-docker is true but no Docker daemon is reachable` | Runner has no Docker or socket access. | Use a runner with the `docker` capability, or a hosted Ubuntu runner. |
+| `profile "ci" not found` | `.config/nextest.toml` lacks `[profile.ci]`. | Add the profile or pass `nextest-profile: default`. |
+| sqlx macro errors about `DATABASE_URL` | `sqlx-offline` false and no database. | Set `sqlx-offline: true` and commit `.sqlx/`. |
+
+## Rust Caller Pattern
+
+A MentionBot-shaped repository (Cargo workspace, committed `.sqlx/`, testcontainers) verifies pull requests with both Rust workflows:
+
+```yaml
+jobs:
+  rust-check:
+    name: rust check @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-rust-check.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      sqlx-offline: true
+      sqlx-prepare-check: true
+      sqlx-migrations-source: crates/mentionbot-db/migrations
+
+  rust-test:
+    name: rust test @ ${{ github.head_ref || github.ref_name }}
+    uses: ArkanisCorporation/ci/.github/workflows/wf-rust-test.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ vars.RUNNER_DEFAULT || 'daedalus' }}
+      runs-on-self-hosted: true
+      sqlx-offline: true
+      require-docker: true
+```
+
 ## Aspire Kubernetes Deploy Verification Workflow
 
 `wf-verify-deploy-k8s-aspire.yml` validates Aspire deployment inputs and tool availability without applying cluster changes.
@@ -1889,6 +2395,91 @@ Side effects:
 - Applies deployment changes.
 - Writes deploy output under `output-path/environment-name`.
 
+## OpenViking Docs Publish Workflow
+
+`wf-publish-docs-openviking.yml` mirrors a caller's docs into OpenViking, so agents in other repositories can find them by search ([ADR-0008](adr/0008-openviking-docs-publish.md)).
+Git stays the source of truth.
+Each run imports the tracked files matching `include-paths` as one archive to `<target-root>/<lowercased repository name>`, replacing the previous mirror.
+Consumer repositories normally adopt it through the adoption PR that `ArkanisCorporation/repo-standards` opens with its [caller template](https://github.com/ArkanisCorporation/repo-standards/blob/main/templates/openviking-docs.yml).
+Repositories opt out with the `openviking-docs-optout` topic.
+
+Flow:
+
+```mermaid
+flowchart TD
+  caller[("Caller repository")] --> checkout[[Checkout caller]]
+  checkout --> validate[[Validate runner contract]]
+  validate --> dry{dry-run?}
+  dry -->|no| gate{default branch, not a PR event?}
+  gate -->|no| refuse>Fail: publishing gate]
+  gate -->|yes| creds[[Check and mask runner credentials]]
+  creds --> collect[[git ls-files include-paths, git archive]]
+  dry -->|yes| collect
+  collect --> empty{any docs?}
+  empty -->|no| skip>Skip: mirror unchanged]
+  empty -->|yes| size{under max-archive-bytes?}
+  size -->|no| toobig>Fail: largest files listed]
+  size -->|yes, dry-run| summary>Step summary and diagnostics]
+  size -->|yes| ov[(OpenViking temp_upload and import)]
+  ov --> summary
+  summary --> outputs(("published, file-count, target-uri"))
+  classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
+  classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
+  classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
+  classDef artifact fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+  classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
+  classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
+  class caller repo
+  class checkout,validate,creds,collect action
+  class dry,gate,empty,size decision
+  class refuse,skip,toobig,summary artifact
+  class outputs output
+  class ov external
+```
+
+Preconditions:
+
+- Publishing runs on `arkanis-runners` (the default), the only pool whose pods reach OpenViking in-cluster and receive `OPENVIKING_URL` and `OPENVIKING_API_KEY` from the runner (ARK-651, ARK-652).
+  There is no secret input; on any other runner the job fails closed unless `dry-run` is true.
+- The runner provides `git`, `curl`, and `jq`. The self-hosted preflight fails closed when one is missing.
+- Publishing requires a push or dispatch on the caller's default branch. Pull request events and other refs fail unless `dry-run` is true.
+
+Side effects:
+
+- One `POST /api/v1/resources/temp_upload` and one `POST /api/v1/resources` with `to`, `processing_mode`, tags `repo=<name>` and `commit=<sha>`, and `wait`.
+- No writes to the caller repository. Dry runs make no OpenViking request.
+- Runs for one repository and target are serialized and never cancelled mid-import.
+- The key is masked before use and passed to `curl` through a config on stdin, never on a command line.
+
+The default `include-paths` must equal `OPENVIKING_DOC_GLOBS` in `ArkanisCorporation/repo-standards` and the `paths:` filter of its caller template; the validator pins this side.
+
+Example:
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - AGENTS.md
+      - CLAUDE.md
+      - docs/**/*.md
+      - .claude/rules/**/*.md
+      - .claude/context/**/*.md
+      - openspec/specs/**/*.md
+      - .github/workflows/openviking-docs.yml
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-docs-openviking.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: arkanis-runners
+      runs-on-self-hosted: true
+```
+
 ## Platform Selftest Workflow
 
 `wf-platform-selftest.yml` validates this CI platform repository.
@@ -1925,9 +2516,15 @@ Preconditions:
 - The repository contains `.github/workflows`, `.github/actions`, `schemas/workflow-inputs`, policy files, fixtures, and docs.
 - The selected runner can install or run .NET 10.
 - The selected runner can run `actions/setup-python@v7` and install pyflakes with pip.
-- The selected runner can run `actions/setup-node@v6` or has Node.js 24 in the Actions tool cache.
+- The selected runner can run `actions/setup-node@v7` or has the pinned Node.js major in the Actions tool cache.
 - The selected runner can run `raven-actions/actionlint@v2` with actionlint `1.7.12`.
 - Local validator runs still use a system `actionlint` when available.
+
+Toolchain version contract:
+
+- `python-version` (`"X.Y"`) and `node-version` (`"N.x"`) are quoted literals in the `with:` blocks of this workflow and the GitHub Actions lint workflow. Renovate bumps them in place.
+- The validator reads both values from the workflows rather than hardcoding them. It requires the expected shape and the same value in both files.
+- Setup step names carry no version (`Set up Python`, `Set up Node.js + npm`), because Renovate does not rewrite step names. Installed versions appear in the step summary.
 
 Side effects:
 

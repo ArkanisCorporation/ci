@@ -35,6 +35,7 @@ ValidateWorkflowInputSchemas();
 ValidateWorkflowInputsMatchSchemas();
 ValidateWorkflows();
 ValidateArtifactUploadDebugExclusions();
+ValidateArtifactUploadBestEffortContract();
 ValidateRunnerSelectionInputContract();
 ValidateWorkflowCatalogDiagrams();
 ValidateJobDisplayNameContract();
@@ -42,6 +43,8 @@ ValidateStepDisplayNameContract();
 ValidateCompositeActions();
 ValidateDotNetActionFileScriptBuildIsolation();
 ValidateContainerPublishContract();
+ValidateGenericContainerPublishContract();
+ValidateRustWorkflowContract();
 ValidateNuGetPublishContract();
 ValidateNuGetCompositeActionsContract();
 ValidatePrivateNuGetCredentialContract();
@@ -51,7 +54,9 @@ ValidateCoverageReportContract();
 await ValidateDotNetTestPlatformInvocationContractAsync();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
+ValidateOpenVikingDocsContract();
 ValidatePlatformSelftestContract();
+ValidateLintToolchainVersionContract();
 ValidateReleaseBackpropagationContract();
 ValidateStateChangingWorkflowConcurrencyContract();
 ValidateRepositoryMainValidationConcurrencyContract();
@@ -121,6 +126,90 @@ void ValidateArtifactUploadDebugExclusions()
                 || !workflowText.Contains("runner.debug != '1' && '!artifacts/**/obj/**'", StringComparison.Ordinal)))
         {
             AddFailure($"{workflowPath}: whole-artifacts uploads must keep debug-only bin/obj exclusions.");
+        }
+    }
+}
+
+// Artifact storage limits must never decide whether a build passes (ARK-693, docs/artifacts.md).
+// Every upload is best-effort (continue-on-error: true) and gated by upload-diagnostics, except the
+// uploads another job downloads, which are listed here and must keep failing the job.
+void ValidateArtifactUploadBestEffortContract()
+{
+    var workflowRoot = Path.Combine(repoRoot, ".github", "workflows");
+    if (!Directory.Exists(workflowRoot))
+    {
+        return;
+    }
+
+    // workflow file -> step name prefix of an upload that a later job downloads.
+    var requiredUploads = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["wf-publish-nuget.yml"] = "Upload package artifacts @ ${{ steps.package-artifact.outputs.name }}",
+    };
+
+    foreach (var workflowPath in Directory.EnumerateFiles(workflowRoot, "wf-*.yml").Order(StringComparer.Ordinal))
+    {
+        var workflowName = Path.GetFileName(workflowPath);
+        var lines = File.ReadAllLines(workflowPath);
+        var hasBestEffortUpload = false;
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!lines[index].TrimStart().StartsWith("uses: actions/upload-artifact@", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // Collect the step's own keys: walk back to its "- name:" line and forward to the next step.
+            var start = index;
+            while (start > 0 && !lines[start].TrimStart().StartsWith("- ", StringComparison.Ordinal))
+            {
+                start--;
+            }
+
+            var end = index + 1;
+            while (end < lines.Length && !lines[end].TrimStart().StartsWith("- ", StringComparison.Ordinal) && !Regex.IsMatch(lines[end], @"^  \S"))
+            {
+                end++;
+            }
+
+            var step = lines[start..end];
+            var stepName = step[0].Trim().Replace("- name: ", "", StringComparison.Ordinal);
+            var continueOnError = step.Any(line => Regex.IsMatch(line, @"^\s+continue-on-error:\s+true\s*$"));
+            var gated = step.Any(line => line.TrimStart().StartsWith("if:", StringComparison.Ordinal)
+                && line.Contains("inputs.upload-diagnostics", StringComparison.Ordinal));
+
+            if (requiredUploads.TryGetValue(workflowName, out var requiredStep) && stepName.StartsWith(requiredStep, StringComparison.Ordinal))
+            {
+                if (continueOnError || gated)
+                {
+                    AddFailure($"{workflowPath}:{index + 1}: required upload '{stepName}' is downloaded by another job and must not set continue-on-error or depend on upload-diagnostics.");
+                }
+
+                continue;
+            }
+
+            hasBestEffortUpload = true;
+            if (!continueOnError)
+            {
+                AddFailure($"{workflowPath}:{index + 1}: upload '{stepName}' must set 'continue-on-error: true' so an artifact storage failure never fails the job; list it as required only when another job downloads it.");
+            }
+
+            if (!gated)
+            {
+                AddFailure($"{workflowPath}:{index + 1}: upload '{stepName}' must be gated with 'if: ${{{{ always() && inputs.upload-diagnostics }}}}'.");
+            }
+        }
+
+        if (!hasBestEffortUpload)
+        {
+            continue;
+        }
+
+        var uploadDiagnostics = ReadWorkflowInputs(workflowPath).GetValueOrDefault("upload-diagnostics");
+        if (uploadDiagnostics is null || !string.Equals(NormalizeWorkflowDefault(uploadDiagnostics), "boolean:true", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: workflows with best-effort uploads must expose boolean upload-diagnostics defaulting to true.");
         }
     }
 }
@@ -445,6 +534,174 @@ void ValidateContainerPublishContract()
             if (!ActionDefinesInput(actionPath, requiredInput))
             {
                 AddFailure($"{actionPath}: dotnet-setversion action must expose {requiredInput} input.");
+            }
+        }
+    }
+}
+
+// Generic container pair (ADR-0009): the .NET pair's Buildx, tag, and cache behaviour without any
+// language stamping, so any Dockerfile repository can publish. The release version reaches the
+// image only through the version-build-arg Docker build argument.
+void ValidateGenericContainerPublishContract()
+{
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-container-generic.yml");
+    var verifyWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-verify-publish-container-generic.yml");
+
+    foreach (var (path, expectedName, push) in new[]
+             {
+                 (workflowPath, "wf-publish-container-generic", "push: true"),
+                 (verifyWorkflowPath, "wf-verify-publish-container-generic", "push: false"),
+             })
+    {
+        if (!File.Exists(path))
+        {
+            AddFailure($"{path}: generic container workflow is required.");
+            continue;
+        }
+
+        var text = File.ReadAllText(path);
+        if (!Regex.IsMatch(text, $@"(?m)^name:\s*{Regex.Escape(expectedName)}\s*$"))
+        {
+            AddFailure($"{path}: workflow name must be {expectedName}.");
+        }
+
+        foreach (var forbidden in new[] { "dotnet-setversion", "setup-nuget-auth", "NUGET_AUTH_JSON", "csproj", ".ci/arkanis-ci" })
+        {
+            if (text.Contains(forbidden, StringComparison.Ordinal))
+            {
+                AddFailure($"{path}: generic container workflow must not depend on .NET stamping or NuGet credentials ({forbidden}).");
+            }
+        }
+
+        if (!text.Contains(push, StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: generic container workflow must build with '{push}'.");
+        }
+
+        var versionBuildArg = ReadWorkflowInputs(path).GetValueOrDefault("version-build-arg");
+        if (versionBuildArg is null || !string.Equals(NormalizeWorkflowDefault(versionBuildArg), "string:VERSION", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: generic container workflow must expose version-build-arg defaulting to VERSION.");
+        }
+
+        if (!text.Contains("printf '%s=%s\\n' \"$VERSION_BUILD_ARG\" \"$VERSION\"", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: generic container workflow must pass the release version through version-build-arg.");
+        }
+
+        ValidateContainerBuildCacheContract(path);
+    }
+
+    if (File.Exists(workflowPath))
+    {
+        var text = File.ReadAllText(workflowPath);
+        if (!Regex.IsMatch(text, @"(?m)^\s*environment:\s*\$\{\{\s*inputs\.environment-name\s*\}\}\s*$"))
+        {
+            AddFailure($"{workflowPath}: generic container publish job must bind inputs.environment-name.");
+        }
+
+        foreach (var forbidden in new[] { "id-token: write", "attestations: write" })
+        {
+            if (text.Contains(forbidden, StringComparison.Ordinal))
+            {
+                AddFailure($"{workflowPath}: buildx provenance and SBOM need no {forbidden}; keep the publish job least-privilege.");
+            }
+        }
+    }
+}
+
+// Rust workflows (ADR-0009): toolchain from the caller's rust-toolchain.toml, clippy always denies
+// warnings, tools come from prebuilt binaries only, and the Rust build cache honours enable-cache.
+void ValidateRustWorkflowContract()
+{
+    foreach (var workflowName in new[] { "wf-rust-check.yml", "wf-rust-test.yml" })
+    {
+        var path = Path.Combine(repoRoot, ".github", "workflows", workflowName);
+        if (!File.Exists(path))
+        {
+            AddFailure($"{path}: Rust workflow is required.");
+            continue;
+        }
+
+        var text = File.ReadAllText(path);
+        var lines = File.ReadAllLines(path);
+
+        if (!text.Contains("uses: actions-rust-lang/setup-rust-toolchain@", StringComparison.Ordinal)
+            || !text.Contains("rust-src-dir: ${{ inputs.working-directory }}", StringComparison.Ordinal)
+            || !text.Contains("cache: false", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: Rust workflows must install the caller's rust-toolchain.toml with setup-rust-toolchain (rust-src-dir from working-directory, its own cache off).");
+        }
+
+        if (!text.Contains("rust-toolchain.toml (or rust-toolchain) is required", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: Rust workflows must fail when the caller has no toolchain file instead of falling back to stable.");
+        }
+
+        if (Regex.IsMatch(text, @"(?m)^\s*[^#\n]*\bcargo install\b"))
+        {
+            AddFailure($"{path}: Rust workflows must not compile tools with cargo install; use prebuilt binaries.");
+        }
+
+        var installActionCount = Regex.Matches(text, @"uses: taiki-e/install-action@").Count;
+        var noFallbackCount = Regex.Matches(text, @"(?m)^\s+fallback: none\s*$").Count;
+        if (installActionCount == 0 || installActionCount != noFallbackCount)
+        {
+            AddFailure($"{path}: every taiki-e/install-action step must set 'fallback: none' so tools are never compiled from source.");
+        }
+
+        if (text.Contains("cargo binstall", StringComparison.Ordinal)
+            && !text.Contains("--disable-strategies compile", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: cargo binstall must disable the compile strategy.");
+        }
+
+        var enableCache = ReadWorkflowInputs(path).GetValueOrDefault("enable-cache");
+        if (enableCache is null || !string.Equals(NormalizeWorkflowDefault(enableCache), "boolean:true", StringComparison.Ordinal))
+        {
+            AddFailure($"{path}: Rust workflows must expose boolean enable-cache defaulting to true.");
+        }
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!lines[index].Contains("uses: Swatinem/rust-cache@", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (index == 0 || !lines[index - 1].Contains("if: inputs.enable-cache", StringComparison.Ordinal))
+            {
+                AddFailure($"{path}:{index + 1}: Swatinem/rust-cache step must be gated with 'if: inputs.enable-cache'.");
+            }
+        }
+    }
+
+    var checkPath = Path.Combine(repoRoot, ".github", "workflows", "wf-rust-check.yml");
+    if (File.Exists(checkPath))
+    {
+        var text = File.ReadAllText(checkPath);
+        if (!text.Contains("cargo clippy \"${clippy_args[@]}\" -- -D warnings", StringComparison.Ordinal))
+        {
+            AddFailure($"{checkPath}: clippy must always run with -D warnings after the caller arguments.");
+        }
+
+        if (!Regex.IsMatch(text, @"(?m)^    if: inputs\.sqlx-prepare-check\s*$"))
+        {
+            AddFailure($"{checkPath}: the sqlx job (and its Postgres container) must only run when sqlx-prepare-check is true.");
+        }
+
+        // Job and service containers fail on runners that are themselves containers on the host
+        // Docker daemon (daedalus, ARK-693): the sqlx job starts Postgres with docker run instead.
+        if (Regex.IsMatch(text, @"(?m)^    (container|services):"))
+        {
+            AddFailure($"{checkPath}: Rust check jobs must not use a job container or services; start Postgres with docker run on the runner.");
+        }
+
+        foreach (var requiredToken in new[] { "docker run -d --rm --name \"$container\"", "/.dockerenv", "pg_isready -h 127.0.0.1", "docker rm -f \"$CONTAINER\"" })
+        {
+            if (!text.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                AddFailure($"{checkPath}: the sqlx job must contain '{requiredToken}' (docker run Postgres, bridge gateway inside containers, TCP readiness probe, always-run cleanup).");
             }
         }
     }
@@ -1212,6 +1469,7 @@ void ValidateSplitVerificationWorkflowsContract()
         "wf-verify-release-semantic.yml",
         "wf-verify-publish-nuget.yml",
         "wf-verify-publish-container-dotnet.yml",
+        "wf-verify-publish-container-generic.yml",
         "wf-verify-deploy-k8s-aspire.yml",
     };
 
@@ -1596,6 +1854,65 @@ void ValidateGeneratedCodeContract()
     }
 }
 
+/*
+ * Summary:
+ *   Pins wf-publish-docs-openviking.yml's cross-repository and credential contract.
+ *
+ * Remarks:
+ *   The default include-paths must equal ArkanisCorporation/repo-standards OPENVIKING_DOC_GLOBS
+ *   and the paths filter of its caller template, or adopted repos publish a different doc set
+ *   than the one that triggers them. The key is plain runner env, so the workflow must mask it
+ *   itself and keep it off curl's command line; the default-branch gate keeps PR content out of
+ *   the mirror.
+ */
+void ValidateOpenVikingDocsContract()
+{
+    string[] expectedDocGlobs =
+    [
+        "README.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/**/*.md",
+        ".claude/rules/**/*.md",
+        ".claude/context/**/*.md",
+        "openspec/specs/**/*.md",
+    ];
+    var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-publish-docs-openviking.yml");
+    if (!File.Exists(workflowPath))
+    {
+        AddFailure($"{workflowPath}: OpenViking docs workflow is required.");
+        return;
+    }
+
+    var includePaths = ReadWorkflowInputs(workflowPath).GetValueOrDefault("include-paths")?.Default as string ?? "";
+    var actualDocGlobs = includePaths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    if (!actualDocGlobs.SequenceEqual(expectedDocGlobs, StringComparer.Ordinal))
+    {
+        AddFailure($"{workflowPath}: include-paths default must be exactly [{string.Join(", ", expectedDocGlobs)}] to match repo-standards OPENVIKING_DOC_GLOBS; found [{string.Join(", ", actualDocGlobs)}].");
+    }
+
+    var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
+    foreach (var requiredToken in new[]
+             {
+                 "echo \"::add-mask::${OPENVIKING_API_KEY}\"",
+                 "curl -K -",
+                 "DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}",
+                 "pull_request | pull_request_target)",
+                 "REPOSITORY_NAME: ${{ github.event.repository.name }}",
+             })
+    {
+        if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: OpenViking docs workflow must contain {requiredToken}.");
+        }
+    }
+
+    if (Regex.IsMatch(workflowText, @"X-API-Key:\s*\$\{?OPENVIKING_API_KEY") || workflowText.Contains("secrets.", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the OpenViking key must come only from runner env and never be passed as a curl argument.");
+    }
+}
+
 void ValidateWorkflowLintContract()
 {
     var workflowPath = Path.Combine(repoRoot, ".github", "workflows", "wf-lint-github-actions.yml");
@@ -1611,7 +1928,8 @@ void ValidateWorkflowLintContract()
         // setup-node and raven-actions/actionlint presence are enforced major-agnostically
         // by the ordering check below (both indices must be >= 0). ActionlintVersion stays a
         // literal on purpose -- it pins the actionlint binary, not the wrapper action major.
-        foreach (var requiredToken in new[] { "node-version: \"24.x\"", "package-manager-cache: false", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
+        // Python/Node versions are checked by ValidateLintToolchainVersionContract.
+        foreach (var requiredToken in new[] { "package-manager-cache: false", $"version: {ActionlintVersion}", "cache: ${{ inputs.enable-cache }}", "runs-on-self-hosted", "enable-cache" })
         {
             if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
             {
@@ -1626,7 +1944,7 @@ void ValidateWorkflowLintContract()
             AddFailure($"{workflowPath}: GitHub Actions lint workflow must set up Node.js before raven-actions/actionlint.");
         }
 
-        foreach (var requiredReportingToken in new[] { "Set up Python 3.14", "Set up Node.js 24 + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
+        foreach (var requiredReportingToken in new[] { "Set up Python", "Set up Node.js + npm", "python --version", "pyflakes --version", "node --version", "npm --version", "| Python |", "| pyflakes |", "| Node |", "| npm |" })
         {
             if (!workflowText.Contains(requiredReportingToken, StringComparison.Ordinal))
             {
@@ -1658,8 +1976,9 @@ void ValidatePlatformSelftestContract()
 
     // setup-python and setup-node presence is enforced major-agnostically by the ordering
     // checks below (setupPythonIndex / setupNodeIndex must be >= 0), so their `uses:` refs
-    // are intentionally absent from this literal token list.
-    foreach (var requiredToken in new[] { "python-version: \"3.14\"", "pyflakes==3.4.0", "node-version: \"24.x\"", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
+    // are intentionally absent from this literal token list. Python/Node versions are checked
+    // by ValidateLintToolchainVersionContract.
+    foreach (var requiredToken in new[] { "pyflakes==3.4.0", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -1695,6 +2014,72 @@ void ValidatePlatformSelftestContract()
     }
 }
 
+/*
+ * Summary:
+ *   Checks the Python and Node.js versions pinned by the two actionlint workflows without
+ *   hardcoding which versions they are.
+ *
+ * Remarks:
+ *   Renovate bumps `python-version` / `node-version` on actions/setup-python and
+ *   actions/setup-node in place (ci#28 moved 3.14 -> 3.15 and turned this validator red
+ *   because it required the old literal). The versions are read from the workflows, so a
+ *   Renovate bump passes untouched. What stays enforced: each version is an explicit literal
+ *   of the expected shape, both workflows agree, and the setup step names carry no version,
+ *   since Renovate never rewrites step names and a versioned name silently goes stale.
+ *   The installed versions are still reported at runtime via `python --version` / `node --version`.
+ */
+void ValidateLintToolchainVersionContract()
+{
+    var pins = new (string Action, string Input, string Pattern, string Example, string StepName)[]
+    {
+        ("actions/setup-python", "python-version", @"^\d+\.\d+$", "3.15", "Set up Python"),
+        ("actions/setup-node", "node-version", @"^\d+\.x$", "24.x", "Set up Node.js + npm"),
+    };
+
+    var workflowVersions = new List<(string Path, string Input, string Version)>();
+    foreach (var fileName in new[] { "wf-lint-github-actions.yml", "wf-platform-selftest.yml" })
+    {
+        var workflowPath = Path.Combine(repoRoot, ".github", "workflows", fileName);
+        if (!File.Exists(workflowPath))
+        {
+            // Absence is already reported by the lint / selftest contracts.
+            continue;
+        }
+
+        var workflowText = NormalizeLineEndings(File.ReadAllText(workflowPath));
+        foreach (var (action, input, pattern, example, stepName) in pins)
+        {
+            var version = ActionWithInput(workflowText, action, input);
+            if (version is null)
+            {
+                AddFailure($"{workflowPath}: {action} step must pass a quoted literal {input} (e.g. {input}: \"{example}\").");
+                continue;
+            }
+
+            if (!Regex.IsMatch(version, pattern))
+            {
+                AddFailure($"{workflowPath}: {action} {input} must match {pattern} (e.g. \"{example}\"), found \"{version}\".");
+            }
+
+            if (!Regex.IsMatch(workflowText, $@"(?m)^\s*- name: {Regex.Escape(stepName)}\s*$"))
+            {
+                AddFailure($"{workflowPath}: {action} step must be named exactly '{stepName}' (no version; Renovate does not update step names).");
+            }
+
+            workflowVersions.Add((workflowPath, input, version));
+        }
+    }
+
+    foreach (var group in workflowVersions.GroupBy(entry => entry.Input))
+    {
+        if (group.Select(entry => entry.Version).Distinct(StringComparer.Ordinal).Count() > 1)
+        {
+            var found = string.Join(", ", group.Select(entry => $"{Path.GetFileName(entry.Path)}=\"{entry.Version}\""));
+            AddFailure($"Actionlint workflows must pin the same {group.Key}; found {found}.");
+        }
+    }
+}
+
 void ValidateJobDisplayNameContract()
 {
     var expectedWorkflowJobNames = new[]
@@ -1707,6 +2092,11 @@ void ValidateJobDisplayNameContract()
         ("wf-verify-release-semantic.yml", "    name: ${{ github.head_ref || github.ref_name }}"),
         ("wf-verify-publish-nuget.yml", "    name: ${{ inputs.version }}"),
         ("wf-verify-publish-container-dotnet.yml", "    name: ${{ inputs.version || inputs.version-tag }}"),
+        ("wf-publish-container-generic.yml", "    name: ${{ inputs.version || inputs.version-tag }} @ ${{ inputs.environment-name }}"),
+        ("wf-verify-publish-container-generic.yml", "    name: ${{ inputs.version || inputs.version-tag }}"),
+        ("wf-rust-check.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-rust-check.yml", "    name: sqlx prepare ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-rust-test.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-verify-deploy-k8s-aspire.yml", "    name: ${{ inputs.image-tag || inputs.kubernetes-namespace }}"),
         ("wf-node-lint.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-node-test.yml", "    name: ${{ inputs.working-directory }} @ ${{ github.head_ref || github.ref_name }}"),
@@ -1716,6 +2106,7 @@ void ValidateJobDisplayNameContract()
         ("wf-setup-dotnet-generated-code.yml", "    name: ${{ inputs.solution }} @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-lint-github-actions.yml", "    name: workflows @ ${{ github.head_ref || github.ref_name }}"),
         ("wf-platform-selftest.yml", "    name: contracts @ ${{ github.head_ref || github.ref_name }}"),
+        ("wf-publish-docs-openviking.yml", "    name: docs @ ${{ github.head_ref || github.ref_name }}"),
     };
 
     foreach (var (fileName, expectedNameLine) in expectedWorkflowJobNames)
@@ -1751,6 +2142,10 @@ void ValidateJobDisplayNameContract()
                      "    name: dotnet-nuget-library test @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-nuget-verify @ ${{ github.head_ref || github.ref_name }}",
                      "    name: dotnet-container-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: rust-workspace check @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: rust-workspace test @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: rust-workspace container-verify @ ${{ github.head_ref || github.ref_name }}",
+                     "    name: docs-openviking dry-run @ ${{ github.head_ref || github.ref_name }}",
                      "    name: repo",
                      "    name: repo @ publish",
                  })
@@ -1792,6 +2187,35 @@ void ValidateStepDisplayNameContract()
         [
             "      - name: Build image (Dry Run) @ ${{ inputs.image }}",
             "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-publish-container-generic.yml"] =
+        [
+            "      - name: Publish image ${{ inputs.image }} @ ${{ inputs.platforms }}",
+            "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-verify-publish-container-generic.yml"] =
+        [
+            "      - name: Build image (Dry Run) @ ${{ inputs.image }}",
+            "      - name: Write image metadata @ ${{ steps.build.outputs.digest || inputs.image }}",
+        ],
+        ["wf-rust-check.yml"] =
+        [
+            "      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml",
+            "      - name: Verify formatting @ ${{ inputs.working-directory }}",
+            "      - name: Clippy ${{ inputs.working-directory }} @ -D warnings",
+            "      - name: cargo-deny ${{ inputs.working-directory }} @ ${{ inputs.cargo-deny-checks || 'all' }}",
+            "      - name: Verify sqlx offline metadata @ ${{ inputs.working-directory }}",
+        ],
+        ["wf-rust-test.yml"] =
+        [
+            "      - name: Setup Rust toolchain @ ${{ inputs.working-directory }}/rust-toolchain.toml",
+            "      - name: Test ${{ inputs.working-directory }} @ nextest profile ${{ inputs.nextest-profile }}",
+        ],
+        ["wf-publish-docs-openviking.yml"] =
+        [
+            "      - name: Collect docs @ ${{ github.sha }}",
+            "      - name: Import docs into OpenViking @ ${{ steps.collect.outputs.target-uri }}",
+            "      - name: Upload diagnostics @ ${{ github.event.repository.name }}-docs-openviking-${{ github.run_id }}-${{ github.run_attempt }}",
         ],
         ["wf-deploy-k8s-aspire.yml"] =
         [
@@ -1840,7 +2264,7 @@ void ValidateStepDisplayNameContract()
         ],
         ["wf-lint-github-actions.yml"] =
         [
-            "      - name: Set up Python 3.14",
+            "      - name: Set up Python",
             "      - name: Actionlint @ caller workflows",
         ],
     };
@@ -2007,7 +2431,10 @@ void ValidateRepositoryPipelineContract()
         + "      - dotnet-library-format\n"
         + "      - dotnet-library-test\n"
         + "      - dotnet-nuget\n"
-        + "      - dotnet-container\n";
+        + "      - dotnet-container\n"
+        + "      - rust-check\n"
+        + "      - rust-test\n"
+        + "      - rust-container\n";
     var repositoryPrerequisiteWorkflowUses = new[]
     {
         ("platform selftest", "uses: ./.github/workflows/wf-platform-selftest.yml"),
@@ -2018,6 +2445,9 @@ void ValidateRepositoryPipelineContract()
         (".NET library test fixture", "uses: ./.github/workflows/wf-dotnet-test.yml"),
         ("NuGet publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-nuget.yml"),
         ("container image publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-container-dotnet.yml"),
+        ("Rust check fixture", "uses: ./.github/workflows/wf-rust-check.yml"),
+        ("Rust test fixture", "uses: ./.github/workflows/wf-rust-test.yml"),
+        ("generic container publish verification fixture", "uses: ./.github/workflows/wf-verify-publish-container-generic.yml"),
     };
     var localDotNetFormatToolSetup =
         "      working-directory: tests/fixtures/mock-projects/dotnet-nuget-library\n"
@@ -2151,8 +2581,11 @@ void ValidateStateChangingWorkflowConcurrencyContract()
     RequireWorkflowText("wf-release-backpropagation.yml", "cancel-in-progress: false");
     RequireWorkflowText("wf-publish-container-dotnet.yml", "group: publish-container-${{ inputs.environment-name }}-${{ inputs.registry }}-${{ inputs.image }}");
     RequireWorkflowText("wf-publish-container-dotnet.yml", "cancel-in-progress: false");
+    RequireWorkflowText("wf-publish-container-generic.yml", "group: publish-container-generic-${{ inputs.environment-name }}-${{ inputs.registry }}-${{ inputs.image }}");
+    RequireWorkflowText("wf-publish-container-generic.yml", "cancel-in-progress: false");
     RequireWorkflowText("wf-publish-nuget.yml", "group: publish-nuget-${{ inputs.environment-name }}-${{ inputs.project }}");
     RequireWorkflowText("wf-deploy-k8s-aspire.yml", "group: deploy-k8s-${{ inputs.environment-name }}-${{ inputs.kubernetes-namespace }}");
+    RequireWorkflowText("wf-publish-docs-openviking.yml", "group: publish-docs-openviking-${{ github.repository }}-${{ inputs.target-root }}");
 
     void RequireWorkflowText(string workflowName, string expectedText)
     {
@@ -2194,6 +2627,7 @@ void ValidateRepositoryMainValidationConcurrencyContract()
                  "dotnet-library-test",
                  "dotnet-nuget",
                  "dotnet-container",
+                 "docs-openviking",
              })
     {
         var expectedGroup = Regex.Escape(mainPushGroupPrefix + jobId);
@@ -2534,6 +2968,18 @@ static int UsesActionRefIndex(string text, string action)
 {
     var match = Regex.Match(text, @"uses:\s+" + Regex.Escape(action) + @"@v\d+");
     return match.Success ? match.Index : -1;
+}
+
+// Quoted literal value of `<input>:` in the `with:` block of the first `uses: <action>@vN`
+// step, or null when the step, the input, or the quoting is missing. Expects LF line endings.
+// The `(?!-)` stops the scan at the next `- name:` / `- uses:` so it never reads another step.
+static string? ActionWithInput(string text, string action, string input)
+{
+    var match = Regex.Match(
+        text,
+        @"uses:\s+" + Regex.Escape(action) + @"@v\d+[^\n]*\n[ \t]+with:[ \t]*\n(?:[ \t]+(?!-)[^\n]*\n)*?[ \t]+"
+            + Regex.Escape(input) + @":[ \t]*""(?<value>[^""\n]+)""");
+    return match.Success ? match.Groups["value"].Value : null;
 }
 
 void ValidateUsesReferences(string file, string[] lines)

@@ -60,7 +60,8 @@ No artifact crosses into a higher-trust zone without a manifest and digest or pr
 
 Each workflow writes a step summary, run metadata, artifact manifest, tool versions, and failure diagnostics.
 Use log groups for noisy commands.
-Upload diagnostics with `if: always()`.
+Upload diagnostics with `if: ${{ always() && inputs.upload-diagnostics }}` and `continue-on-error: true`: an artifact upload never decides whether a job passes.
+Only uploads another job downloads stay required ([docs/artifacts.md](docs/artifacts.md#best-effort-and-required-uploads)).
 Summaries must be useful without exposing secrets.
 
 ## Development Workflow
@@ -72,6 +73,14 @@ Summaries must be useful without exposing secrets.
 5. Run validation scripts and actionlint.
 6. Run a bounded `act` smoke test when the workflow can run locally.
 7. Update docs, schemas, fixtures, and references.
+
+## Planning (OpenSpec)
+
+Non-trivial changes are planned with [OpenSpec](https://github.com/Fission-AI/OpenSpec) in `openspec/`.
+Propose a change (`/opsx:propose` in Claude Code, the `openspec-propose` skill elsewhere), get the proposal reviewed, implement with apply, then archive so the delta merges into `openspec/specs/`.
+Bounded, obvious changes need no proposal.
+The generated `.claude/{skills,commands}` and `.agents/skills` files come from `openspec init --tools claude,agents`; refresh them with `openspec update` instead of editing by hand.
+Older plans in `docs/superpowers/` stay as history.
 
 ## Review Checklist
 

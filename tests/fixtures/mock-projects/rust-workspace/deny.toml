@@ -1,0 +1,18 @@
+# cargo-deny policy for the mock workspace. No external dependencies, so every check is trivial;
+# the fixture proves the workflow wiring, not the policy.
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = ["MIT"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

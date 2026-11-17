@@ -33,6 +33,20 @@ Artifacts moving into a higher-trust zone require a manifest and digest or prove
 | `workflow_dispatch` | Publish and deploy require protected environments. |
 | `release` | Publish only after artifact verification. |
 
+## Container Publishing
+
+`wf-publish-container-dotnet.yml` and `wf-publish-container-generic.yml` publish from an environment-gated job (`environment-name`, default `container`).
+The generic publish job requests only `contents: read` and `packages: write`: buildx provenance and SBOM attestations are written by BuildKit into the pushed image index and need neither OIDC nor the attestations API.
+The verify workflows request `contents: read` only, never log in, and never push.
+Never pass secrets through `build-args`; they can persist in image metadata and provenance.
+
+## Rust Verification
+
+`wf-rust-check.yml` and `wf-rust-test.yml` run with `contents: read`, take no secrets, and are safe for fork pull requests.
+Cargo subcommands are installed from prebuilt release binaries only (`taiki-e/install-action` with `fallback: none`, `cargo binstall --disable-strategies compile`), so CI never compiles a tool from crates.io source.
+setup-rust-toolchain installs rustup through the official `sh.rustup.rs` script on runners without rustup.
+Build scripts and proc macros in the caller's dependency graph still run during clippy and tests; that is inherent to compiling Rust and is why these workflows hold no secrets.
+
 ## Semantic Release
 
 Pull requests in `release.yml` run semantic-release in dry-run mode with `contents: write` so semantic-release can verify tag push authorization.

@@ -1,0 +1,19 @@
+# Mock Cargo workspace for the Rust reusable workflow fixtures (wf-rust-check, wf-rust-test,
+# wf-verify-publish-container-generic). Kept dependency-free so CI compiles it in seconds.
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0" # Real version is injected at image build time through the VERSION build arg.
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "MIT"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }

@@ -1,0 +1,40 @@
+# Mirrors this repository's docs into OpenViking for cross-repo discovery (ARK-642).
+# Based on ArkanisCorporation/repo-standards templates/openviking-docs.yml, which consumer repos
+# receive verbatim. Differences here: top-level `permissions: {}` (this repo's validator requires
+# it of every workflow) and the job display name contract.
+# It calls the released @v1, not ./, so repo-standards' adoption check detects it.
+name: openviking-docs
+
+on:
+  push:
+    branches: [main]
+    # Must match repo-standards OPENVIKING_DOC_GLOBS and wf-publish-docs-openviking.yml's
+    # default include-paths, plus this file so changing it re-imports.
+    paths:
+      - README.md
+      - AGENTS.md
+      - CLAUDE.md
+      - docs/**/*.md
+      - .claude/rules/**/*.md
+      - .claude/context/**/*.md
+      - openspec/specs/**/*.md
+      - .github/workflows/openviking-docs.yml
+  # Manual backfill, for example after OpenViking was rebuilt.
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: openviking-docs
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: docs @ ${{ github.head_ref || github.ref_name }}
+    # arkanis-runners pods reach OpenViking in-cluster and carry the ingest key (ARK-651, ARK-652).
+    uses: ArkanisCorporation/ci/.github/workflows/wf-publish-docs-openviking.yml@v1
+    permissions:
+      contents: read
+    with:
+      runs-on: arkanis-runners
+      runs-on-self-hosted: true
