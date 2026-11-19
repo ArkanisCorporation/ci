@@ -606,6 +606,8 @@ sealed record ProcessOutput(int ExitCode, string Stdout, string Stderr)
 static class FakeCli
 {
     /*
+     * The `helm list` and `helm history` JSON shapes are those of real Helm 4.3.1 (tests/live/helm-release-guard-kind.sh):
+     * `list` gives the revision as a string, `history` as a number, and a missing release makes `history` exit 1.
      * One script installed as both `helm` and `kubectl`. It records `<tool> <args>` in calls.log and answers from
      * files in FAKE_K8S_DIR. A successful `helm rollback` flips the fake cluster to its "-after-rollback" files.
      */
@@ -624,7 +626,7 @@ static class FakeCli
           case "$args" in
             "list "*)
               if [[ -f "$dir/helm-list-exit" ]]; then echo "Error: Kubernetes cluster unreachable" >&2; exit 1; fi
-              if [[ -f "$dir/history.json" ]]; then echo '[{"name":"fixture","revision":"1","status":"deployed"}]'; else echo '[]'; fi ;;
+              if [[ -f "$dir/history.json" ]]; then echo '[{"name":"fixture","namespace":"example-production","revision":"1","updated":"2026-11-19 20:23:43.452234259 +0100 CET","status":"deployed","chart":"app-1.0.0","app_version":"1.0.0"}]'; else echo '[]'; fi ;;
             "history "*"--output json"*)
               if [[ ! -f "$dir/history.json" ]]; then echo "Error: release: not found" >&2; exit 1; fi
               cat "$dir/history.json" ;;

@@ -17,5 +17,5 @@ Release recording, rollback, diagnostics, and the schema rollback hook around a 
 - No NuGet package references in `helm-release-guard.cs`: a rollback must not wait on a package restore.
 - Bound every Helm and kubectl call and every wait.
 - No destructive recovery by guesswork: a stuck first install stops the job, it is not uninstalled.
-- Every decision change needs a scenario in `tests/helm-release-guard.cs`.
+- Every decision change needs a scenario in `tests/helm-release-guard.cs`. Its fake `helm list`, `helm history`, and kubectl JSON mirror real Helm 4.3.1 output; re-check them with `tests/live/helm-release-guard-kind.sh` (opt-in, needs kind) when Helm is bumped.
 - Delete `helm-timeout-shim.sh` once `aspire deploy` exposes its Helm arguments.
