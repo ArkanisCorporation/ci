@@ -15,6 +15,7 @@ Keep each action narrow; prefer more small actions over one flag-heavy action.
 | `dotnet-pack-nuget` | Restores, optionally stamps, and packs one NuGet project. | Writes packages, package-list.txt, metadata, and an artifact manifest under `artifacts/`. |
 | `dotnet-publish-nuget` | Pushes existing NuGet package files with a caller-provided API key. | Calls `dotnet nuget push` for each matched `.nupkg`. |
 | `dotnet-setversion` | Installs `dotnet-setversion` and applies a bare SemVer value to .NET project files. | Modifies matched `.csproj` files. |
+| `helm-release-guard` | Records a Helm release before a deployment, then verifies it or rolls it back and reports the outcome. | May run `helm rollback`, create and delete one Job, and writes the deploy report and diagnostics. |
 | `release-backpropagation` | Creates, approves, and optionally auto-merges release backpropagation PRs. | May create PRs, approve them, and enable auto-merge. |
 | `setup-dotnet` | Sets up .NET SDK, NuGet cache, optional local tools, and optional restore. | Writes `NUGET_PACKAGES` and restores cache/tools/dependencies. |
 | `setup-nuget-auth` | Prepares, applies, or cleans up private NuGet restore credentials. | Writes masked NuGet env credentials or a temporary BuildKit secret config. |
@@ -323,4 +324,55 @@ steps:
       version: 1.2.3
       working-directory: .
       recursive: true
+```
+
+## helm-release-guard
+
+Use `helm-release-guard` around a deployment that runs `helm upgrade` without a rollback of its own.
+`wf-deploy-k8s-aspire.yml` uses it around `aspire deploy`, whose Helm arguments are hardcoded.
+Call it twice in one job: `phase: capture` before the deployment, `phase: finalize` after it with `always()`.
+Behavior, outcomes, and the consumer contract are in [docs/deployments.md](../../docs/deployments.md#rollback).
+
+Preconditions:
+
+- The runner has Bash on Linux or macOS, the .NET 10 SDK, `helm`, and `kubectl`.
+- The kube context reaches the cluster and may roll the release back and create Jobs in the namespace.
+- The deployment step has an `id`, no `continue-on-error`, and passes its `outcome` to the finalize phase.
+
+Side effects:
+
+- Capture: may run `helm rollback` to recover a release stuck in a `pending-*` state, and fails when the release cannot be read.
+- Finalize: on a failed deployment may run `helm rollback`, and creates, awaits, and deletes one Job rendered from the failed release's schema rollback CronJob. The CronJob may be a Helm `pre-install,pre-upgrade` hook (recommended) or an ordinary chart resource. Every container of the Job receives `ARKANIS_DEPLOY_STARTED_AT`, the RFC 3339 UTC instant the capture phase ran; the hook must leave schema changes recorded before it alone.
+- Writes `release-state.json`, `deploy-report.json`, `deploy-report.md`, and `diagnostics/` under `report-directory`.
+- Exits non-zero for every outcome except `deployed` and `not-attempted`.
+- Reads no Secret, no release values, and no release manifest. Pod environment values are redacted from `describe` output.
+
+`helm-timeout-shim.sh` ships with the action.
+Copy it to a directory as `helm`, put that directory first on `PATH` for the deployment step only, and set `ARKANIS_REAL_HELM`, `ARKANIS_HELM_UPGRADE_TIMEOUT`, and `ARKANIS_HELM_SHIM_RECORD`.
+It appends `--timeout` to `helm upgrade` and records the release the deployment really targets, which the finalize phase reads through `shim-record-path`.
+
+Example:
+
+```yaml
+steps:
+  - name: Record release state
+    id: release-state
+    uses: ArkanisCorporation/ci/.github/actions/helm-release-guard@v1
+    with:
+      phase: capture
+      namespace: example-production
+      aspire-environment: Kubernetes-Production
+
+  - name: Deploy
+    id: deploy
+    run: ./deploy.sh
+
+  - name: Verify or roll back release
+    if: ${{ always() && steps.release-state.outcome != 'skipped' }}
+    uses: ArkanisCorporation/ci/.github/actions/helm-release-guard@v1
+    with:
+      phase: finalize
+      deploy-outcome: ${{ steps.deploy.outcome }}
+      namespace: example-production
+      aspire-environment: Kubernetes-Production
 ```

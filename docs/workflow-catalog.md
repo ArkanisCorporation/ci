@@ -25,7 +25,7 @@ Audience: consumers and platform maintainers.
 | `wf-rust-check.yml` | Verify rustfmt, clippy `-D warnings`, cargo-deny, and optionally sqlx offline metadata. | untrusted or trusted-build |
 | `wf-rust-test.yml` | Run Rust tests with cargo-nextest. | untrusted or trusted-build |
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying changes. | untrusted or trusted-build |
-| `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. | deploy |
+| `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes, and roll the release back when the deployment fails. | deploy |
 | `wf-platform-selftest.yml` | Validate platform workflow contracts. | trusted-build |
 | `wf-publish-docs-openviking.yml` | Mirror caller docs into OpenViking from the default branch. | publish |
 
@@ -52,7 +52,7 @@ Audience: consumers and platform maintainers.
 | `wf-rust-check.yml` | `contents: read` | rustfmt, clippy, cargo-deny, and sqlx logs, metadata, manifest |
 | `wf-rust-test.yml` | `contents: read` | nextest log, JUnit report when configured, metadata, manifest |
 | `wf-verify-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: read` for GitHub Packages restore | verification manifest |
-| `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | deploy output, manifest |
+| `wf-deploy-k8s-aspire.yml` | `contents: read`<br>`packages: write` for GHCR login during deployment | `outcome`, release revisions, `failed-resources`, deploy output, deploy report and failure diagnostics, manifest |
 | `wf-platform-selftest.yml` | `contents: read` | step summary |
 | `wf-publish-docs-openviking.yml` | `contents: read` | `published`, `file-count`, `target-uri`, file list, OpenViking responses, metadata, manifest |
 
@@ -118,9 +118,13 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `enable-cache` | boolean | no | `true` | n/a |
 | `kubectl-version` | string | no | `"v1.36.2"` | n/a |
 | `helm-version` | string | no | `"v4.2.2"` | n/a |
-| `timeout-minutes` | integer | no | `45` | Minimum: 1 |
+| `helm-release-name` | string | no | `""` | Helm release the AppHost deploys. Empty uses the lowercased aspire-environment, which is Aspire's default. |
+| `rollout-timeout` | string | no | `"15m"` | Helm duration (15m, 900s, 1h30m) for the deploy wait, the rollback wait, and the schema rollback Job. |
+| `rollback-on-failure` | boolean | no | `true` | Rolls the release back to its last deployed revision when the deployment fails. The job fails either way. |
+| `schema-rollback-cronjob` | string | no | `"schema-rollback"` | Suspended CronJob in the chart, as a Helm pre-install,pre-upgrade hook or an ordinary resource, whose Job undoes the failed release's schema changes after a rollback. Skipped when absent; empty disables it. |
+| `timeout-minutes` | integer | no | `60` | Deployment job timeout. Keep it above twice rollout-timeout plus build time so a rollback is never cancelled.<br>Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
-| `upload-diagnostics` | boolean | no | `true` | Uploads the deploy report artifact when true. The upload is best-effort and never fails the job. |
+| `upload-diagnostics` | boolean | no | `true` | Uploads the deploy report artifact, including failure diagnostics, when true. The upload is best-effort and never fails the job. |
 | `source-ref` | string | no | `""` | Optional caller checkout ref. Empty preserves the triggering commit; callers authorize selected deployment source. |
 
 Outputs: schema does not define workflow outputs.
@@ -2336,34 +2340,44 @@ If `KUBE_CONFIG` is omitted, the runner must already have a valid kube context.
 It logs into GHCR before checkout and tool setup so Aspire deployment can push or pull registry content with the job token.
 It serializes deployments per `environment-name` and `kubernetes-namespace` with `cancel-in-progress: false`.
 
+A failed deployment does not leave the environment broken ([ADR-0010](adr/0010-deploy-rollback-guard.md), [deployments.md](deployments.md#rollback)).
+`aspire deploy` runs `helm upgrade --install --wait` with a closed argument list, so the `helm-release-guard` action works around it:
+
+- Before the deploy it records the release's revisions and rolls back a release a cancelled run left in a `pending-*` state.
+- During the deploy a `helm` shim, on `PATH` for that step only, appends `--timeout <rollout-timeout>` to `helm upgrade`. Helm's default is 5 minutes.
+- After a successful deploy it verifies every Deployment rollout. A Deployment that is not rolled out counts as a failed deployment.
+- After a failed deploy it collects diagnostics, rolls the release back to the last deployed revision, runs the failed release's `schema-rollback` Job, and verifies again. The CronJob behind that Job may be a Helm `pre-install,pre-upgrade` hook (recommended) or an ordinary chart resource. The Job's containers receive `ARKANIS_DEPLOY_STARTED_AT`, and the hook must leave schema changes recorded before that instant alone ([contract](deployments.md#arkanis_deploy_started_at)).
+
+The job fails whenever the deployment failed, including when the rollback restored the environment.
+All of this is the default: callers that pass none of `helm-release-name`, `rollout-timeout`, `rollback-on-failure`, and `schema-rollback-cronjob` get it.
+
 Flow:
 
 ```mermaid
 flowchart TD
   caller[("Caller repository")] --> login[[Login to GHCR]]
   login --> checkout[[Checkout caller at selected source-ref or triggering commit]]
-  checkout --> dotnet[[Setup .NET]]
-  dotnet --> cache{enable cache?}
-  cache -->|yes| nugetCache[("NuGet cache")]
-  cache -->|no| tools[[Restore local .NET tools]]
-  nugetCache --> tools
-  tools --> kubectl[[Setup kubectl]]
-  kubectl --> helm[[Setup Helm]]
-  helm --> validate[[Validate runner contract]]
-  validate --> preflight{self-hosted?}
-  preflight -->|yes| sh[[Self-hosted preflight]]
-  preflight -->|no| kube{KUBE_CONFIG secret?}
-  sh --> kube
+  checkout --> tools[[Setup .NET, NuGet auth and cache, local tools, kubectl, Helm]]
+  tools --> validate[[Validate runner contract, self-hosted preflight]]
+  validate --> kube{KUBE_CONFIG secret?}
   kube -->|yes| tempKube[("RUNNER_TEMP kubeconfig")]
   kube -->|no| context[[Use runner kube context]]
   tempKube --> inputs[[Validate deployment inputs]]
   context --> inputs
   inputs --> namespace[[Ensure namespace]]
-  namespace --> aspire[[aspire deploy]]
-  aspire --> manifest
+  namespace --> record[[Record release state, recover a pending release]]
+  record --> aspire[[aspire deploy with helm timeout shim]]
+  aspire --> result{deploy succeeded?}
+  result -->|yes| verify{Deployments rolled out?}
+  verify -->|yes| manifest[/artifact-manifest.json/]
+  verify -->|no| diag
+  result -->|no| diag[[Collect diagnostics]]
+  diag --> rollback[[helm rollback, schema rollback Job, verify]]
+  rollback --> failJob>Job fails]
+  failJob --> manifest
   manifest --> summary>Step summary]
-  summary --> deployArtifact[/Deploy output artifact/]
-  manifest --> outputs(("artifact-manifest"))
+  summary --> deployArtifact[/Deploy output, deploy report, diagnostics/]
+  manifest --> outputs(("outcome, revisions, failed-resources, artifact-manifest"))
   classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
   classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
   classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
@@ -2371,12 +2385,31 @@ flowchart TD
   classDef output fill:#fef9c3,stroke:#a16207,color:#0f172a
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
-  class login,checkout,dotnet,tools,kubectl,helm,validate,sh,context,inputs,namespace,aspire action
-  class cache,preflight,kube decision
-  class manifest,summary,deployArtifact artifact
+  class login,checkout,tools,validate,context,inputs,namespace,record,aspire,diag,rollback action
+  class kube,result,verify decision
+  class manifest,summary,deployArtifact,failJob artifact
   class outputs output
-  class nugetCache,tempKube external
+  class tempKube external
 ```
+
+Outputs:
+
+| Output | Value |
+|---|---|
+| `outcome` | `deployed`, `rolled-back`, `rollback-failed`, `failed-no-previous-release`, `failed-release-unchanged`, `failed-rollback-disabled`, `cancelled`, or `not-attempted`. Meanings in [deployments.md](deployments.md#rollback). |
+| `helm-release` | Helm release that was deployed. |
+| `previous-revision` | Release revision before the deployment. Empty on a first install. |
+| `new-revision` | Revision this deployment created. Empty when Helm created none. |
+| `current-revision` | Revision that is live when the job ends. Differs from `new-revision` after a rollback. |
+| `schema-rollback` | `not-run`, `not-configured`, `not-found`, `skipped`, `succeeded`, `failed`, or `timed-out`. |
+| `failed-resources` | Comma-separated `deployment/<name>` and `pod/<name>` that were not ready when the deployment failed. |
+| `artifact-manifest` | Path to the generated artifact manifest. |
+
+Read them from a job that runs with `if: always()`: the deploy job is failed for every outcome except `deployed`.
+
+Artifacts: the deploy artifact holds the Aspire output under `output-path/environment-name` and `artifacts/deploy-report/`: `deploy-report.json`, `deploy-report.md`, `release-state.json`, and, after a failed deployment, `diagnostics/before-rollback`, `diagnostics/after-rollback`, and `diagnostics/schema-rollback`.
+
+Runner requirements: Linux or macOS with Bash (the helm shim is a Bash script), the .NET 10 SDK, and network access to the Kubernetes API.
 
 Preconditions:
 
@@ -2386,14 +2419,22 @@ Preconditions:
 - The AppHost project exists.
 - The target namespace is a valid Kubernetes namespace.
 - Production deployment binds the deploy job to `environment-name`.
+- The Helm release is named after the lowercased `aspire-environment`, or `helm-release-name` names it.
+- The chart follows the [consumer contract](deployments.md#consumer-contract): `maxUnavailable: 0`, a startup or readiness probe, migrations compatible with the previous release, and optionally the suspended `schema-rollback` CronJob, preferably as a Helm hook.
+- The kube identity can read workloads, pods, pod logs, events, and CronJobs, and can create and delete Jobs, in the target namespace.
+- `timeout-minutes` exceeds twice `rollout-timeout` plus build time. The workflow warns when it does not.
 
 Side effects:
 
 - Logs in to `ghcr.io` with the job `GITHUB_TOKEN` and logs out during action cleanup.
 - Creates the namespace when missing.
 - Reads and writes NuGet dependency cache when `enable-cache` is true, unless the runner advertises a persistent NuGet folder (`ARKANIS_PERSISTENT_NUGET_PACKAGES=true`).
+- Rolls back a release found in a `pending-*` state before deploying.
 - Applies deployment changes.
-- Writes deploy output under `output-path/environment-name`.
+- On a failed deployment: rolls the Helm release back, creates and deletes one `schema-rollback` Job, and fails the job.
+- Writes deploy output under `output-path/environment-name` and the deploy report under `artifacts/deploy-report`.
+
+Failure modes: see [deployments.md](deployments.md#failure-modes).
 
 ## OpenViking Docs Publish Workflow
 
@@ -2483,7 +2524,7 @@ jobs:
 ## Platform Selftest Workflow
 
 `wf-platform-selftest.yml` validates this CI platform repository.
-It runs actionlint 1.7.12, runs the static workflow contract validator, checks generated workflow input docs, and writes a step summary.
+It runs actionlint 1.7.12, runs the static workflow contract validator, checks generated workflow input docs, runs the NuGet auth and Helm release guard behavior tests, and writes a step summary.
 It is callable as a reusable workflow and directly runnable with `workflow_dispatch` for local `act` smoke tests.
 
 Flow:

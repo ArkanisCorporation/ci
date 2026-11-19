@@ -68,7 +68,7 @@ Recommended order:
 - `wf-rust-check.yml` verifies rustfmt, clippy `-D warnings`, cargo-deny, and an opt-in sqlx prepare check.
 - `wf-rust-test.yml` runs cargo-nextest with optional Docker preflight for testcontainers.
 - `wf-verify-deploy-k8s-aspire.yml` verifies Aspire Kubernetes deployment inputs without applying cluster changes.
-- `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes.
+- `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes; `helm-release-guard` records the release first and verifies it or rolls it back afterwards, and a failed deployment always fails the job.
 - `wf-platform-selftest.yml` validates this platform repository.
 - `wf-publish-docs-openviking.yml` mirrors caller docs into OpenViking from the default branch; it reads its key from `arkanis-runners` env and must mask it itself.
 
@@ -85,6 +85,7 @@ Recommended order:
 - Docker and NuGet publish jobs must fail closed when expected artifacts are missing.
 - K8s deployment consumes explicit environment, namespace, AppHost path, and optional image tag.
 - Do not deploy mutable image tags to production unless a documented exception exists.
+- A deploy step never sets `continue-on-error`, and rollback, diagnostics, and rollout verification run with `always()` before kube credentials are removed (`docs/deployments.md`).
 
 ## Observability Rules
 

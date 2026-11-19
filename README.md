@@ -41,7 +41,7 @@ Composite actions are optional step bundles for same-repository workflows or exp
 | `wf-rust-check.yml` | Verify Rust formatting, clippy with `-D warnings`, cargo-deny, and optionally sqlx offline metadata. |
 | `wf-rust-test.yml` | Run Rust tests with cargo-nextest, with Docker available for testcontainers. |
 | `wf-verify-deploy-k8s-aspire.yml` | Verify Aspire Kubernetes deployment inputs without applying cluster changes. |
-| `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes. |
+| `wf-deploy-k8s-aspire.yml` | Deploy an Aspire AppHost to Kubernetes; a failed deployment is rolled back and still fails the job. |
 | `wf-platform-selftest.yml` | Validate this platform repository. |
 | `wf-publish-docs-openviking.yml` | Mirror caller docs into OpenViking from the default branch (runs on `arkanis-runners`). |
 

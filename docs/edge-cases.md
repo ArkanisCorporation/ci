@@ -20,6 +20,8 @@ Audience: agents + maintainers.
 | Release/publish/deploy race | Job-level concurrency by protected target |
 | Obsolete queued main validation | Per-lane concurrency replaces only the prior pending job; running validation and release work continue |
 | K8s deploy race | Environment and namespace concurrency group |
+| K8s deploy fails or is cancelled mid-upgrade | `helm-release-guard` rolls back to the last deployed revision; a release left `pending-*` is recovered at the start of the next run |
+| Tool hardcodes its Helm arguments (`aspire deploy`) | `helm` shim first on `PATH` for that one step appends `--timeout`; delete it when the tool exposes the flags |
 | Queued concurrency backlog | Add `queue: max` after pinned actionlint supports it |
 | Artifact storage quota hit | Uploads are best-effort (`continue-on-error: true`); set `upload-diagnostics: false` to stop uploading |
 | Job or service containers on Docker-out-of-Docker runners | Avoid; runner externals are missing in job containers. Use `docker run` and reach published ports through the bridge gateway |

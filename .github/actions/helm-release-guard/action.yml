@@ -1,0 +1,104 @@
+# Summary:
+#   Records, verifies, and restores a Helm release around a deployment that offers no rollback of its own.
+# Remarks:
+#   Built for `aspire deploy`, which runs `helm upgrade --install --wait` with a closed argument list (ARK-744).
+#   Run it twice in one job: `phase: capture` before the deployment, `phase: finalize` after it with `always()`.
+#   The finalize phase exits non-zero for every outcome except `deployed` and `not-attempted`.
+#   It expects Bash, the .NET 10 SDK, helm, and kubectl on PATH, and a kube context that can reach the cluster.
+#   Linux and macOS runners only: helm-timeout-shim.sh, which ships with this action, is a Bash script.
+#   It never reads Secret objects and redacts pod environment values from the diagnostics it writes.
+
+name: Helm Release Guard
+description: Records a Helm release before a deployment, then verifies it or rolls it back and reports the outcome.
+
+inputs:
+  phase:
+    description: Use capture before the deployment and finalize after it.
+    required: true
+  namespace:
+    description: Kubernetes namespace of the Helm release.
+    required: true
+  aspire-environment:
+    description: Aspire environment name; its lowercased form is the default Helm release name.
+    required: true
+  helm-release-name:
+    description: Helm release name. Empty uses the lowercased aspire-environment.
+    required: false
+    default: ""
+  rollout-timeout:
+    description: Helm duration bounding the rollback wait, the schema rollback Job, and stuck-release recovery.
+    required: false
+    default: 15m
+  rollback-on-failure:
+    description: Rolls the release back to its last deployed revision when the deployment failed.
+    required: false
+    default: "true"
+  schema-rollback-cronjob:
+    description: Name of the suspended CronJob whose Job undoes the failed release's schema changes. Empty disables the hook.
+    required: false
+    default: schema-rollback
+  report-directory:
+    description: Directory receiving the release state, deploy report, and diagnostics. Relative paths resolve against the workspace.
+    required: false
+    default: artifacts/deploy-report
+  deploy-outcome:
+    description: Finalize only. The deployment step's outcome - success, failure, cancelled, or skipped.
+    required: false
+    default: ""
+  shim-record-path:
+    description: File helm-timeout-shim.sh writes the observed release name and namespace to.
+    required: false
+    default: ""
+  job-timeout-minutes:
+    description: Capture only. Job timeout, used to warn when it leaves no room for a rollback.
+    required: false
+    default: "0"
+
+outputs:
+  helm-release:
+    description: Helm release the guard acted on.
+    value: ${{ steps.guard.outputs.helm-release }}
+  previous-revision:
+    description: Release revision before the deployment; empty on a first install.
+    value: ${{ steps.guard.outputs.previous-revision }}
+  new-revision:
+    description: Finalize only. Revision the deployment created; empty when Helm created none.
+    value: ${{ steps.guard.outputs.new-revision }}
+  current-revision:
+    description: Finalize only. Revision that is live when the job ends.
+    value: ${{ steps.guard.outputs.current-revision }}
+  outcome:
+    description: Finalize only. deployed, rolled-back, rollback-failed, failed-no-previous-release, failed-release-unchanged, failed-rollback-disabled, cancelled, or not-attempted.
+    value: ${{ steps.guard.outputs.outcome }}
+  schema-rollback:
+    description: Finalize only. not-run, not-configured, not-found, skipped, succeeded, failed, or timed-out.
+    value: ${{ steps.guard.outputs.schema-rollback }}
+  failed-resources:
+    description: Finalize only. Comma-separated Deployments and pods that were not ready.
+    value: ${{ steps.guard.outputs.failed-resources }}
+  deploy-started-at:
+    description: Capture only. RFC 3339 UTC second at which the deployment attempt began; the schema rollback Job receives it as ARKANIS_DEPLOY_STARTED_AT.
+    value: ${{ steps.guard.outputs.deploy-started-at }}
+  recovered:
+    description: Capture only. True when a release stuck in a pending state was rolled back before the deployment.
+    value: ${{ steps.guard.outputs.recovered }}
+
+runs:
+  using: composite
+  steps:
+    - name: Guard Helm release
+      id: guard
+      run: dotnet run --file "$GITHUB_ACTION_PATH/helm-release-guard.cs" --no-launch-profile
+      shell: bash
+      env:
+        DEPLOY_GUARD_PHASE: ${{ inputs.phase }}
+        DEPLOY_GUARD_NAMESPACE: ${{ inputs.namespace }}
+        DEPLOY_GUARD_ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
+        DEPLOY_GUARD_RELEASE_NAME: ${{ inputs.helm-release-name }}
+        DEPLOY_GUARD_ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}
+        DEPLOY_GUARD_ROLLBACK_ON_FAILURE: ${{ inputs.rollback-on-failure }}
+        DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB: ${{ inputs.schema-rollback-cronjob }}
+        DEPLOY_GUARD_REPORT_DIR: ${{ inputs.report-directory }}
+        DEPLOY_GUARD_DEPLOY_OUTCOME: ${{ inputs.deploy-outcome }}
+        DEPLOY_GUARD_SHIM_RECORD: ${{ inputs.shim-record-path }}
+        DEPLOY_GUARD_JOB_TIMEOUT_MINUTES: ${{ inputs.job-timeout-minutes }}

@@ -5,6 +5,11 @@
 #   It assumes the runner already has cluster network access and either a current kube context or a KUBE_CONFIG secret.
 #   It logs into GHCR before checkout and tool setup so Aspire can push or pull registry content during deployment.
 #   It creates the target namespace when missing and then runs `dotnet tool run aspire -- deploy`.
+#   Aspire runs `helm upgrade --install --wait` with a closed argument list: no --timeout, no rollback (ARK-744).
+#   The helm-release-guard action therefore records the release before the deploy, recovers a release a cancelled
+#   run left pending, and afterwards verifies the rollout or collects diagnostics and rolls the release back.
+#   A helm shim on PATH for the deploy step alone supplies the --timeout Aspire does not set.
+#   A failed deploy always fails the job, whether or not the rollback restored the environment.
 #   Use wf-verify-deploy-k8s-aspire.yml for deployment input verification without cluster mutation.
 #   It calls runs-on/cache for NuGet only when enable-cache is true and the runner does not advertise a
 #   persistent NuGet folder (ARKANIS_PERSISTENT_NUGET_PACKAGES=true, ARK-528).
@@ -95,18 +100,38 @@ on:
         type: string
         required: false
         default: v4.2.2
+      helm-release-name:
+        description: Helm release the AppHost deploys. Empty uses the lowercased aspire-environment, which is Aspire's default.
+        type: string
+        required: false
+        default: ""
+      rollout-timeout:
+        description: Helm duration (15m, 900s, 1h30m) for the deploy wait, the rollback wait, and the schema rollback Job.
+        type: string
+        required: false
+        default: 15m
+      rollback-on-failure:
+        description: Rolls the release back to its last deployed revision when the deployment fails. The job fails either way.
+        type: boolean
+        required: false
+        default: true
+      schema-rollback-cronjob:
+        description: Suspended CronJob in the chart, as a Helm pre-install,pre-upgrade hook or an ordinary resource, whose Job undoes the failed release's schema changes after a rollback. Skipped when absent; empty disables it.
+        type: string
+        required: false
+        default: schema-rollback
       timeout-minutes:
-        description: Deployment job timeout.
+        description: Deployment job timeout. Keep it above twice rollout-timeout plus build time so a rollback is never cancelled.
         type: number
         required: false
-        default: 45
+        default: 60
       artifact-retention-days:
         description: Deployment artifact retention in days.
         type: number
         required: false
         default: 30
       upload-diagnostics:
-        description: Uploads the deploy report artifact when true. The upload is best-effort and never fails the job.
+        description: Uploads the deploy report artifact, including failure diagnostics, when true. The upload is best-effort and never fails the job.
         type: boolean
         required: false
         default: true
@@ -124,6 +149,27 @@ on:
       artifact-manifest:
         description: Path to the generated artifact manifest.
         value: ${{ jobs.deploy.outputs.artifact-manifest }}
+      outcome:
+        description: deployed, rolled-back, rollback-failed, failed-no-previous-release, failed-release-unchanged, failed-rollback-disabled, cancelled, or not-attempted.
+        value: ${{ jobs.deploy.outputs.outcome }}
+      helm-release:
+        description: Helm release that was deployed.
+        value: ${{ jobs.deploy.outputs.helm-release }}
+      previous-revision:
+        description: Release revision before the deployment; empty on a first install.
+        value: ${{ jobs.deploy.outputs.previous-revision }}
+      new-revision:
+        description: Release revision this deployment created; empty when Helm created none.
+        value: ${{ jobs.deploy.outputs.new-revision }}
+      current-revision:
+        description: Release revision that is live when the job ends; differs from new-revision after a rollback.
+        value: ${{ jobs.deploy.outputs.current-revision }}
+      schema-rollback:
+        description: Schema rollback hook result - not-run, not-configured, not-found, skipped, succeeded, failed, or timed-out.
+        value: ${{ jobs.deploy.outputs.schema-rollback }}
+      failed-resources:
+        description: Comma-separated Deployments and pods that were not ready when the deployment failed.
+        value: ${{ jobs.deploy.outputs.failed-resources }}
 
 permissions: {}
 
@@ -141,6 +187,13 @@ jobs:
       packages: write
     outputs:
       artifact-manifest: ${{ steps.manifest.outputs.path }}
+      outcome: ${{ steps.guard.outputs.outcome || 'not-attempted' }}
+      helm-release: ${{ steps.guard.outputs.helm-release || steps.release-state.outputs.helm-release }}
+      previous-revision: ${{ steps.guard.outputs.previous-revision || steps.release-state.outputs.previous-revision }}
+      new-revision: ${{ steps.guard.outputs.new-revision }}
+      current-revision: ${{ steps.guard.outputs.current-revision }}
+      schema-rollback: ${{ steps.guard.outputs.schema-rollback }}
+      failed-resources: ${{ steps.guard.outputs.failed-resources }}
     defaults:
       run:
         shell: bash
@@ -169,7 +222,7 @@ jobs:
           dotnet-version: ${{ inputs.dotnet-version }}
           global-json-file: ${{ inputs.global-json-file }}
 
-      - name: Checkout platform NuGet auth action @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
+      - name: Checkout platform actions @ ${{ fromJSON(toJSON(job)).workflow_repository }}:${{ fromJSON(toJSON(job)).workflow_sha }}
         uses: actions/checkout@v7
         with:
           # fromJSON(toJSON(job)) is only there because our pinned actionlint:1.7.12 does not know the newer documented job.workflow_ref / job.workflow_sha fields.
@@ -179,6 +232,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/setup-nuget-auth
+            .github/actions/helm-release-guard
           sparse-checkout-cone-mode: false
 
       - name: Prepare private NuGet auth references
@@ -336,18 +390,52 @@ jobs:
           kubectl create namespace "$KUBERNETES_NAMESPACE" --dry-run=client -o yaml > namespace.yaml
           kubectl apply -f namespace.yaml
 
+      # Before anything is deployed: record the release's revisions (the rollback target), roll back a release a
+      # cancelled run left in a pending-* state, and fail closed when the release cannot be read at all.
+      - name: Record release state @ ${{ inputs.helm-release-name || inputs.aspire-environment }}
+        id: release-state
+        uses: ./.ci/arkanis-ci/.github/actions/helm-release-guard
+        with:
+          phase: capture
+          namespace: ${{ inputs.kubernetes-namespace }}
+          aspire-environment: ${{ inputs.aspire-environment }}
+          helm-release-name: ${{ inputs.helm-release-name }}
+          rollout-timeout: ${{ inputs.rollout-timeout }}
+          rollback-on-failure: ${{ inputs.rollback-on-failure }}
+          schema-rollback-cronjob: ${{ inputs.schema-rollback-cronjob }}
+          report-directory: artifacts/deploy-report
+          shim-record-path: ${{ runner.temp }}/helm-shim/upgrade-record
+          job-timeout-minutes: ${{ inputs.timeout-minutes }}
+
+      # No continue-on-error here, ever: this step failing is what fails the job, and the guard step below can
+      # restore the environment but must never turn a failed deployment green.
       - name: Aspire deploy ${{ inputs.apphost-project }} @ ${{ inputs.aspire-environment }}
+        id: deploy
         env:
           ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
           APPHOST_PROJECT: ${{ inputs.apphost-project }}
           OUTPUT_PATH: ${{ inputs.output-path }}
           ENVIRONMENT_NAME: ${{ inputs.environment-name }}
           IMAGE_TAG: ${{ inputs.image-tag }}
+          ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}
         run: |
           mkdir -p "${OUTPUT_PATH}/${ENVIRONMENT_NAME}"
           if [[ -n "$IMAGE_TAG" ]]; then
             export Kubernetes__Images__Tag="$IMAGE_TAG"
           fi
+
+          # Aspire.Hosting.Kubernetes hardcodes `helm upgrade --install ... --wait` and accepts no extra arguments,
+          # so Helm's 5m default --timeout would apply. The shim is first on PATH for this step only and appends
+          # --timeout to `helm upgrade`; every other helm call passes through. Remove it once Aspire exposes the
+          # Helm arguments (ARK-744).
+          shim_dir="${RUNNER_TEMP}/helm-shim"
+          mkdir -p "$shim_dir"
+          ARKANIS_REAL_HELM="$(command -v helm)"
+          install -m 0755 .ci/arkanis-ci/.github/actions/helm-release-guard/helm-timeout-shim.sh "${shim_dir}/helm"
+          export ARKANIS_REAL_HELM
+          export ARKANIS_HELM_UPGRADE_TIMEOUT="$ROLLOUT_TIMEOUT"
+          export ARKANIS_HELM_SHIM_RECORD="${shim_dir}/upgrade-record"
+          export PATH="${shim_dir}:${PATH}"
 
           dotnet tool run aspire -- deploy \
             --apphost "$APPHOST_PROJECT" \
@@ -357,6 +445,25 @@ jobs:
             --pipeline-log-level debug \
             --include-exception-details \
             --debug
+
+      # Runs whatever the deploy step did. Success: verify every Deployment rollout. Failure: collect diagnostics,
+      # then roll back to the recorded revision, run the schema-rollback hook, and verify again. It exits non-zero
+      # for every outcome but `deployed` and `not-attempted`, and must stay ahead of the kubeconfig removal below.
+      - name: Verify or roll back release @ ${{ steps.release-state.outputs.helm-release || inputs.kubernetes-namespace }}
+        id: guard
+        if: ${{ always() && steps.release-state.outcome != 'skipped' }}
+        uses: ./.ci/arkanis-ci/.github/actions/helm-release-guard
+        with:
+          phase: finalize
+          deploy-outcome: ${{ steps.deploy.outcome }}
+          namespace: ${{ inputs.kubernetes-namespace }}
+          aspire-environment: ${{ inputs.aspire-environment }}
+          helm-release-name: ${{ inputs.helm-release-name }}
+          rollout-timeout: ${{ inputs.rollout-timeout }}
+          rollback-on-failure: ${{ inputs.rollback-on-failure }}
+          schema-rollback-cronjob: ${{ inputs.schema-rollback-cronjob }}
+          report-directory: artifacts/deploy-report
+          shim-record-path: ${{ runner.temp }}/helm-shim/upgrade-record
 
       - name: Clear private NuGet auth credentials
         if: always() && steps.nuget-auth.outputs.configured == 'true'
@@ -396,7 +503,7 @@ jobs:
               {
                 "name": "${GITHUB_REPOSITORY#*/}-k8s-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
                 "kind": "deploy-report",
-                "paths": ["${OUTPUT_PATH}/${ENVIRONMENT_NAME}", "artifacts/artifact-manifest.json"],
+                "paths": ["${OUTPUT_PATH}/${ENVIRONMENT_NAME}", "artifacts/deploy-report", "artifacts/artifact-manifest.json"],
                 "retention_days": ${RETENTION_DAYS}
               }
             ]
@@ -410,6 +517,12 @@ jobs:
           ENVIRONMENT_NAME: ${{ inputs.environment-name }}
           ASPIRE_ENVIRONMENT: ${{ inputs.aspire-environment }}
           KUBERNETES_NAMESPACE: ${{ inputs.kubernetes-namespace }}
+          DEPLOY_OUTCOME: ${{ steps.guard.outputs.outcome || 'not-attempted' }}
+          HELM_RELEASE: ${{ steps.guard.outputs.helm-release || steps.release-state.outputs.helm-release }}
+          PREVIOUS_REVISION: ${{ steps.guard.outputs.previous-revision || steps.release-state.outputs.previous-revision }}
+          NEW_REVISION: ${{ steps.guard.outputs.new-revision }}
+          CURRENT_REVISION: ${{ steps.guard.outputs.current-revision }}
+          FAILED_RESOURCES: ${{ steps.guard.outputs.failed-resources }}
         run: |
           {
             echo "# Aspire Kubernetes deployment"
@@ -421,6 +534,12 @@ jobs:
             echo "| Environment | \`${ENVIRONMENT_NAME}\` |"
             echo "| Aspire environment | \`${ASPIRE_ENVIRONMENT}\` |"
             echo "| Namespace | \`${KUBERNETES_NAMESPACE}\` |"
+            echo "| Outcome | \`${DEPLOY_OUTCOME}\` |"
+            echo "| Helm release | \`${HELM_RELEASE:-n/a}\` |"
+            echo "| Previous revision | \`${PREVIOUS_REVISION:-none}\` |"
+            echo "| New revision | \`${NEW_REVISION:-none}\` |"
+            echo "| Current revision | \`${CURRENT_REVISION:-n/a}\` |"
+            echo "| Failed resources | \`${FAILED_RESOURCES:-none}\` |"
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -432,6 +551,7 @@ jobs:
           name: ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ inputs.output-path }}/${{ inputs.environment-name }}
+            artifacts/deploy-report
             artifacts/artifact-manifest.json
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

@@ -1978,7 +1978,7 @@ void ValidatePlatformSelftestContract()
     // checks below (setupPythonIndex / setupNodeIndex must be >= 0), so their `uses:` refs
     // are intentionally absent from this literal token list. Python/Node versions are checked
     // by ValidateLintToolchainVersionContract.
-    foreach (var requiredToken in new[] { "pyflakes==3.4.0", "package-manager-cache: false", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
+    foreach (var requiredToken in new[] { "pyflakes==3.4.0", "package-manager-cache: false", "dotnet run --file tests/nuget-auth-source-names.cs --no-launch-profile", "dotnet run --file tests/helm-release-guard.cs --no-launch-profile", "python --version", "pyflakes --version", "node --version", "npm --version", "- Python: \\`", "- pyflakes: \\`", "- Node: \\`", "- npm: \\`" })
     {
         if (!workflowText.Contains(requiredToken, StringComparison.Ordinal))
         {
@@ -2219,7 +2219,9 @@ void ValidateStepDisplayNameContract()
         ],
         ["wf-deploy-k8s-aspire.yml"] =
         [
+            "      - name: Record release state @ ${{ inputs.helm-release-name || inputs.aspire-environment }}",
             "      - name: Aspire deploy ${{ inputs.apphost-project }} @ ${{ inputs.aspire-environment }}",
+            "      - name: Verify or roll back release @ ${{ steps.release-state.outputs.helm-release || inputs.kubernetes-namespace }}",
             "      - name: Upload deployment artifacts @ ${{ github.event.repository.name }}-k8s-${{ inputs.environment-name }}-${{ github.run_id }}-${{ github.run_attempt }}",
         ],
         ["wf-verify-deploy-k8s-aspire.yml"] =
@@ -2412,6 +2414,235 @@ void ValidateAspireDeployContract()
     if (loginStep >= 0 && checkoutStep >= 0 && loginStep > checkoutStep)
     {
         AddFailure($"{workflowPath}: Aspire deploy workflow must log in to GHCR at the beginning of the deploy job.");
+    }
+
+    ValidateAspireDeployRollbackContract(workflowPath, workflowText);
+}
+
+/*
+ * Summary:
+ *   Pins the guarantees that keep a failed Aspire deployment from leaving a broken environment (ARK-744).
+ *
+ * Remarks:
+ *   `aspire deploy` runs `helm upgrade --install --wait` with a closed argument list, so the rollback lives in the
+ *   helm-release-guard action around it. What must not regress:
+ *     - the release is recorded before the deploy and guarded after it, on every result, while kube access exists;
+ *     - a failed deploy step fails the job (no continue-on-error anywhere on that path);
+ *     - the helm shim that adds --timeout is on PATH for the deploy step only;
+ *     - the guard collects diagnostics before it rolls back, renders the schema Job before the rollback and applies
+ *       it after, and never reads Secrets, release values, or manifests;
+ *     - the safe behaviour is the default: callers that pass no new input still get the rollback.
+ *   The guard's decisions themselves are exercised by tests/helm-release-guard.cs.
+ */
+void ValidateAspireDeployRollbackContract(string workflowPath, string workflowText)
+{
+    const string CaptureStepName = "      - name: Record release state @";
+    const string DeployStepName = "      - name: Aspire deploy ";
+    const string GuardStepName = "      - name: Verify or roll back release @";
+    const string KubeconfigRemovalStepName = "      - name: Remove temporary kubeconfig @";
+    const string GuardAction = "uses: ./.ci/arkanis-ci/.github/actions/helm-release-guard";
+
+    var captureStep = StepBlock(CaptureStepName);
+    var deployStep = StepBlock(DeployStepName);
+    var guardStep = StepBlock(GuardStepName);
+    if (captureStep is null || deployStep is null || guardStep is null)
+    {
+        AddFailure($"{workflowPath}: Aspire deploy workflow must record the release state, deploy, and then verify or roll back the release.");
+        return;
+    }
+
+    var captureIndex = workflowText.IndexOf(CaptureStepName, StringComparison.Ordinal);
+    var deployIndex = workflowText.IndexOf(DeployStepName, StringComparison.Ordinal);
+    var guardIndex = workflowText.IndexOf(GuardStepName, StringComparison.Ordinal);
+    var kubeconfigRemovalIndex = workflowText.IndexOf(KubeconfigRemovalStepName, StringComparison.Ordinal);
+    if (!(captureIndex < deployIndex && deployIndex < guardIndex))
+    {
+        AddFailure($"{workflowPath}: the release state must be recorded before the Aspire deploy step and guarded after it.");
+    }
+
+    if (kubeconfigRemovalIndex >= 0 && guardIndex > kubeconfigRemovalIndex)
+    {
+        AddFailure($"{workflowPath}: the release guard must run before the temporary kubeconfig is removed, or it cannot roll back.");
+    }
+
+    foreach (var (name, step) in new[] { ("Record release state", captureStep), ("Aspire deploy", deployStep), ("Verify or roll back release", guardStep) })
+    {
+        if (Regex.IsMatch(step, @"(?m)^\s+continue-on-error:"))
+        {
+            AddFailure($"{workflowPath}: step '{name}' must not set continue-on-error; a failed deployment must fail the job even when the rollback succeeds.");
+        }
+    }
+
+    if (!captureStep.Contains(GuardAction, StringComparison.Ordinal)
+        || !captureStep.Contains("          phase: capture\n", StringComparison.Ordinal)
+        || Regex.IsMatch(captureStep, @"(?m)^        if:"))
+    {
+        AddFailure($"{workflowPath}: the release state must be captured unconditionally with helm-release-guard phase: capture before deploying.");
+    }
+
+    if (!deployStep.Contains("        id: deploy\n", StringComparison.Ordinal) || Regex.IsMatch(deployStep, @"(?m)^        if:"))
+    {
+        AddFailure($"{workflowPath}: the Aspire deploy step must keep 'id: deploy' and no condition so the guard can read its outcome.");
+    }
+
+    // Aspire hardcodes its helm arguments; the shim is the only way to bound the wait, and only for this step.
+    foreach (var requiredShimLine in new[]
+             {
+                 "install -m 0755 .ci/arkanis-ci/.github/actions/helm-release-guard/helm-timeout-shim.sh \"${shim_dir}/helm\"",
+                 "ARKANIS_REAL_HELM=\"$(command -v helm)\"",
+                 "export ARKANIS_HELM_UPGRADE_TIMEOUT=\"$ROLLOUT_TIMEOUT\"",
+                 "export PATH=\"${shim_dir}:${PATH}\"",
+                 "          ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}",
+             })
+    {
+        if (!deployStep.Contains(requiredShimLine, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: the Aspire deploy step must put the helm timeout shim on PATH ({requiredShimLine}).");
+        }
+    }
+
+    if (workflowText.Contains("GITHUB_PATH", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the helm shim must stay scoped to the Aspire deploy step; do not write to GITHUB_PATH.");
+    }
+
+    if (!guardStep.Contains(GuardAction, StringComparison.Ordinal)
+        || !guardStep.Contains("        id: guard\n", StringComparison.Ordinal)
+        || !guardStep.Contains("        if: ${{ always() && steps.release-state.outcome != 'skipped' }}\n", StringComparison.Ordinal)
+        || !guardStep.Contains("          phase: finalize\n", StringComparison.Ordinal)
+        || !guardStep.Contains("          deploy-outcome: ${{ steps.deploy.outcome }}\n", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the release guard must run helm-release-guard phase: finalize with always() and the deploy step outcome, so a failed deployment is rolled back.");
+    }
+
+    foreach (var sharedInput in new[] { "rollout-timeout", "rollback-on-failure", "schema-rollback-cronjob", "helm-release-name" })
+    {
+        var line = $"          {sharedInput}: ${{{{ inputs.{sharedInput} }}}}\n";
+        if (!captureStep.Contains(line, StringComparison.Ordinal) || !guardStep.Contains(line, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: both helm-release-guard steps must receive inputs.{sharedInput}.");
+        }
+    }
+
+    if (!workflowText.Contains("            .github/actions/helm-release-guard\n", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the platform action checkout must include .github/actions/helm-release-guard.");
+    }
+
+    if (Regex.Matches(workflowText, @"(?m)^            artifacts/deploy-report$").Count != 1
+        || !workflowText.Contains("\"artifacts/deploy-report\"", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the deploy report and failure diagnostics (artifacts/deploy-report) must be uploaded and listed in the artifact manifest.");
+    }
+
+    foreach (var output in new[] { "outcome", "helm-release", "previous-revision", "new-revision", "current-revision", "schema-rollback", "failed-resources" })
+    {
+        if (!workflowText.Contains($"        value: ${{{{ jobs.deploy.outputs.{output} }}}}\n", StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: Aspire deploy workflow must expose the '{output}' output.");
+        }
+    }
+
+    // Existing callers pass none of the new inputs and must still be protected.
+    var inputs = ReadWorkflowInputs(workflowPath);
+    foreach (var (inputName, expectedDefault) in new[]
+             {
+                 ("rollback-on-failure", "boolean:true"),
+                 ("rollout-timeout", "string:15m"),
+                 ("schema-rollback-cronjob", "string:schema-rollback"),
+                 ("helm-release-name", "string:"),
+             })
+    {
+        if (!inputs.TryGetValue(inputName, out var input) || !string.Equals(NormalizeWorkflowDefault(input), expectedDefault, StringComparison.Ordinal))
+        {
+            AddFailure($"{workflowPath}: input {inputName} must default to '{expectedDefault[(expectedDefault.IndexOf(':', StringComparison.Ordinal) + 1)..]}' so callers get the rollback without opting in.");
+        }
+    }
+
+    // 15m deploy wait + 15m rollback wait + build, push, diagnostics: a smaller job timeout cancels the rollback.
+    if (!inputs.TryGetValue("timeout-minutes", out var jobTimeout)
+        || !double.TryParse(Convert.ToString(jobTimeout.Default, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out var jobTimeoutMinutes)
+        || jobTimeoutMinutes < 40)
+    {
+        AddFailure($"{workflowPath}: timeout-minutes must default to at least 40 so a failed deployment at the default rollout-timeout can still be rolled back.");
+    }
+
+    var actionRoot = Path.Combine(repoRoot, ".github", "actions", "helm-release-guard");
+    var guardScriptPath = Path.Combine(actionRoot, "helm-release-guard.cs");
+    var shimPath = Path.Combine(actionRoot, "helm-timeout-shim.sh");
+    foreach (var requiredFile in new[] { Path.Combine(actionRoot, "action.yml"), guardScriptPath, shimPath, Path.Combine(actionRoot, "Directory.Build.props") })
+    {
+        if (!File.Exists(requiredFile))
+        {
+            AddFailure($"{requiredFile}: helm-release-guard action file is required by the Aspire deploy workflow.");
+        }
+    }
+
+    if (File.Exists(shimPath))
+    {
+        var shimText = NormalizeLineEndings(File.ReadAllText(shimPath));
+        if (!shimText.Contains("exec \"$real_helm\" \"$@\" --timeout \"$timeout\"", StringComparison.Ordinal)
+            || !shimText.Contains("if [[ \"$subcommand\" != \"upgrade\" ]]; then\n  exec \"$real_helm\" \"$@\"", StringComparison.Ordinal))
+        {
+            AddFailure($"{shimPath}: the helm shim must append --timeout to `helm upgrade` and pass every other invocation through untouched.");
+        }
+
+        if (!shimText.Contains("Delete it", StringComparison.Ordinal) || !shimText.Contains("Aspire.Hosting.Kubernetes hardcodes", StringComparison.Ordinal))
+        {
+            AddFailure($"{shimPath}: the helm shim must keep the comment explaining why it exists and when to delete it.");
+        }
+    }
+
+    if (File.Exists(guardScriptPath))
+    {
+        var guardText = NormalizeLineEndings(File.ReadAllText(guardScriptPath));
+        var finalizeStart = guardText.IndexOf("static int FinalizeDeploy(Settings settings)", StringComparison.Ordinal);
+        var diagnostics = guardText.IndexOf("CollectDiagnostics(settings, report, release, ns, \"before-rollback\", full: true);", StringComparison.Ordinal);
+        var renderSchemaJob = guardText.IndexOf("PrepareSchemaRollback(settings, state, report, ns);", StringComparison.Ordinal);
+        var rollback = guardText.IndexOf("HelmRollback(settings, release, ns, target.Revision);", StringComparison.Ordinal);
+        var runSchemaJob = guardText.IndexOf("RunSchemaRollback(settings, report, schemaJob, ns);", StringComparison.Ordinal);
+        if (finalizeStart < 0 || !(finalizeStart < diagnostics && diagnostics < renderSchemaJob && renderSchemaJob < rollback && rollback < runSchemaJob))
+        {
+            AddFailure($"{guardScriptPath}: on a failed deployment the guard must collect diagnostics, render the schema rollback Job, roll back, and only then run the Job, in that order.");
+        }
+
+        if (!guardText.Contains("return report.Outcome is Outcomes.Deployed or Outcomes.NotAttempted ? 0 : 1;", StringComparison.Ordinal))
+        {
+            AddFailure($"{guardScriptPath}: the guard must exit non-zero for every outcome except deployed and not-attempted, so a failed deployment cannot end green.");
+        }
+
+        if (Regex.IsMatch(guardText, @"""(secret|secrets)""") || Regex.IsMatch(guardText, @"""helm"",\s*\[\s*""get""") || guardText.Contains("\"--output\", \"yaml\"", StringComparison.Ordinal))
+        {
+            AddFailure($"{guardScriptPath}: the guard must never read Secrets, release values, or release manifests.");
+        }
+
+        // The schema hook's only way to tell this attempt's schema changes from an earlier deploy's (docs/deployments.md).
+        var startedAtCapture = guardText.IndexOf("DeployStartedAt = DateTime.UtcNow.ToString(DeployStartedAtFormat, CultureInfo.InvariantCulture),", StringComparison.Ordinal);
+        var firstClusterRead = guardText.IndexOf("var history = ReadHistory(state.Release, state.Namespace, out var readError);", StringComparison.Ordinal);
+        if (!guardText.Contains("public const string DeployStartedAtVariable = \"ARKANIS_DEPLOY_STARTED_AT\";", StringComparison.Ordinal)
+            || !guardText.Contains("const string DeployStartedAtFormat = \"yyyy-MM-dd'T'HH:mm:ss'Z'\";", StringComparison.Ordinal)
+            || !guardText.Contains("!InjectDeployStartedAt(spec, state.DeployStartedAt)", StringComparison.Ordinal)
+            || startedAtCapture < 0 || firstClusterRead < 0 || startedAtCapture > firstClusterRead)
+        {
+            AddFailure($"{guardScriptPath}: the guard must record the deployment start (RFC 3339 UTC, before any cluster call) and pass it to every schema rollback Job container as ARKANIS_DEPLOY_STARTED_AT.");
+        }
+
+        if (guardText.Contains("#:package", StringComparison.Ordinal))
+        {
+            AddFailure($"{guardScriptPath}: the guard must not depend on NuGet packages; a rollback must not wait on a package restore.");
+        }
+    }
+
+    string? StepBlock(string stepNamePrefix)
+    {
+        var start = workflowText.IndexOf(stepNamePrefix, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var end = workflowText.IndexOf("\n      - name: ", start + stepNamePrefix.Length, StringComparison.Ordinal);
+        return end < 0 ? workflowText[start..] : workflowText[start..(end + 1)];
     }
 }
 
