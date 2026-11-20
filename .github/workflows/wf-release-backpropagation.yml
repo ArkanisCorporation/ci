@@ -111,7 +111,7 @@ jobs:
       - name: Setup .NET action tooling @ 10.0.x
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 11.0.x
 
       - name: Validate runner contract @ ${{ inputs.runs-on-json || inputs.runs-on || 'ubuntu-latest' }}
         env:
