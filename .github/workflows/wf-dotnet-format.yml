@@ -104,7 +104,7 @@ on:
         required: false
         default: false
       tool-version:
-        description: Optional JetBrains.ReSharper.GlobalTools version used when install-tool is true.
+        description: JetBrains.ReSharper.GlobalTools version used when install-tool is true. Empty uses the action's Renovate-tracked pinned version.
         type: string
         required: false
         default: ""

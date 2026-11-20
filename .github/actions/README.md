@@ -104,13 +104,18 @@ Preconditions:
 - The runner has Bash, Git, and .NET 10 SDK.
 - The repository has already been checked out.
 - By default, `.config/dotnet-tools.json` contains `JetBrains.ReSharper.GlobalTools`.
-- Set `install-tool: true` and `tool-version` when the caller wants this action to install JetBrains tools instead of using local tools.
+- Set `install-tool: true` when the caller wants this action to install JetBrains tools instead of using local tools.
+  An empty `tool-version` installs the version pinned in `run-cleanupcode.cs`, which Renovate keeps current.
 
 Side effects:
 
 - Runs the action implementation as a .NET file script with `CliWrap`.
 - Runs `dotnet tool restore` by default.
+- Installs the tool without `--allow-roll-forward`, so the package's own `rollForward: LatestMajor` picks the runtime.
+  The flag downgrades it to `Major`, which made the net10.0 tool start on an installed 8.0 runtime and abort (ARK-745).
 - Runs CleanupCode, which can modify workspace files.
+- Fails with the tool's exit code and skips the Git diff check when `jb cleanupcode` exits non-zero.
+  A crashed run is reported as a tool failure, never as "no Git diff".
 - Writes logs, changed-file lists, diff stats, and diff previews under `artifacts/jetbrains-cleanupcode`.
 - Writes changed files and the applied diff preview to the log and `$GITHUB_STEP_SUMMARY`.
 
