@@ -56,7 +56,7 @@ Artifact storage is a shared, finite quota: when it is exhausted, `actions/uploa
 |---|---|---|---|
 | `wf-publish-nuget.yml` | NuGet package artifact | required | The publish jobs download it. |
 | `wf-verify-publish-nuget.yml` | Package artifact | best-effort | Nothing downloads it; the pack action already fails when no `.nupkg` is produced. |
-| `wf-deploy-k8s-aspire.yml` | Deploy report | best-effort | The deployment has already happened when the upload runs. |
+| `wf-deploy-k8s-aspire.yml` | Deploy report, with failure diagnostics | best-effort | The deployment, and any rollback, has already happened when the upload runs. Outcome and revisions are also job outputs and in the step summary. |
 | `wf-publish-container-dotnet.yml`, `wf-publish-container-generic.yml` | Image metadata | best-effort | The digest is a job output, not an artifact. |
 | All other `wf-*.yml` uploads | Diagnostics or dry-run reports | best-effort | Diagnostics only. |
 

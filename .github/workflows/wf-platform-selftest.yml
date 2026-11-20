@@ -81,6 +81,10 @@ jobs:
       - name: Verify NuGet auth source names @ tests/nuget-auth-source-names.cs
         run: dotnet run --file tests/nuget-auth-source-names.cs --no-launch-profile
 
+      # No cluster: a fake helm and kubectl on PATH replay canned output and record every call.
+      - name: Verify Helm release guard @ tests/helm-release-guard.cs
+        run: dotnet run --file tests/helm-release-guard.cs --no-launch-profile
+
       - name: Publish summary @ ${{ github.run_id }}
         if: always()
         env:

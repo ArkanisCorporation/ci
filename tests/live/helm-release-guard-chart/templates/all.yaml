@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+stringData:
+  password: fixture-secret-literal-not-real
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 30
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      terminationGracePeriodSeconds: 1
+      initContainers:
+        - name: migrator
+          image: {{ .Values.image }}
+          command: ["sh", "-c", "echo migrator for {{ .Values.marker }}"]
+      containers:
+        - name: web
+          image: {{ .Values.image }}
+          command: ["sh", "-c", "echo starting {{ .Values.marker }}; {{ if .Values.ready }}touch /tmp/ready;{{ end }} sleep 36000"]
+          env:
+            - name: MARKER
+              value: {{ .Values.marker | quote }}
+            - name: LITERAL_ENV
+              value: fixture-env-literal
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: password
+          readinessProbe:
+            exec:
+              command: ["cat", "/tmp/ready"]
+            periodSeconds: 2
+{{- if .Values.schemaCronJob }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: schema-rollback
+  {{- if .Values.hookShape }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+  {{- end }}
+spec:
+  suspend: true
+  schedule: "0 0 1 1 *"
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: migrator
+              image: {{ .Values.image }}
+              env:
+                - name: MARKER
+                  value: {{ .Values.marker | quote }}
+              command: ["sh", "-c", "echo schema-rollback marker=$MARKER started_at=$ARKANIS_DEPLOY_STARTED_AT; exit {{ .Values.schemaExit }}"]
+{{- end }}

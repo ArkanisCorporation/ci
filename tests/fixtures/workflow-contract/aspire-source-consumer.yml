@@ -28,3 +28,25 @@ jobs:
       kubernetes-namespace: example-production
       image-tag: v1.2.3
       environment-name: production
+      # Optional. Omitting all four keeps the same behaviour: a failed deployment is rolled back and fails the job.
+      helm-release-name: kubernetes-production
+      rollout-timeout: 15m
+      rollback-on-failure: true
+      schema-rollback-cronjob: schema-rollback
+      # Opt-in downtime for a release with a breaking migration: stops the previous version before deploying and
+      # exports ARKANIS_DEPLOY_EXCLUSIVE=true to the AppHost. Leave false for every backwards-compatible release.
+      exclusive: false
+  report:
+    needs: deploy
+    # The deploy job is failed for every outcome but `deployed`, so read its outputs with always().
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Report deployment outcome @ ${{ needs.deploy.outputs.outcome }}
+        env:
+          OUTCOME: ${{ needs.deploy.outputs.outcome }}
+          PREVIOUS_REVISION: ${{ needs.deploy.outputs.previous-revision }}
+          NEW_REVISION: ${{ needs.deploy.outputs.new-revision }}
+          FAILED_RESOURCES: ${{ needs.deploy.outputs.failed-resources }}
+        run: echo "outcome=${OUTCOME} previous=${PREVIOUS_REVISION} new=${NEW_REVISION} failed=${FAILED_RESOURCES}"

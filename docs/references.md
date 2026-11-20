@@ -58,6 +58,12 @@ Last verified: 2026-10-31.
 - 1Password load-secrets-action: https://github.com/1Password/load-secrets-action
 - nektos/act: https://github.com/nektos/act
 - actionlint: https://github.com/rhysd/actionlint
+- Helm upgrade (verified 2026-11-19, `--timeout`, `--wait`, `--rollback-on-failure`): https://helm.sh/docs/helm/helm_upgrade/
+- kubectl scale (verified 2026-11-20, exclusive deployments): https://kubernetes.io/docs/reference/kubectl/generated/kubectl_scale/
+- Helm rollback (verified 2026-11-19): https://helm.sh/docs/helm/helm_rollback/
+- Helm history, status, list (verified 2026-11-19): https://helm.sh/docs/helm/helm_history/ , https://helm.sh/docs/helm/helm_status/ , https://helm.sh/docs/helm/helm_list/
+- kubectl create job: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_job/
+- kubectl rollout status: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/
 - actions-rust-lang/setup-rust-toolchain: https://github.com/actions-rust-lang/setup-rust-toolchain
 - Swatinem/rust-cache: https://github.com/Swatinem/rust-cache
 - taiki-e/install-action: https://github.com/taiki-e/install-action

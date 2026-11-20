@@ -105,6 +105,8 @@ When `/.dockerenv` exists the job reaches Postgres through the default bridge ga
 `wf-deploy-k8s-aspire.yml` accepts an optional `KUBE_CONFIG` secret.
 When omitted, the runner must already have a valid kube context.
 This supports cluster-hosted runners where kube access is provided by the runner environment.
+Either way the identity must be able to roll the release back and run the schema rollback Job, not only apply it ([deployments.md](deployments.md#auth)).
+The job needs Bash on Linux or macOS: the `helm` shim that bounds Aspire's Helm wait is a Bash script.
 
 ## Required Hygiene
 
