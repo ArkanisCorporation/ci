@@ -39,7 +39,7 @@ on:
         description: Newline-delimited semantic-release plugins installed by cycjimmy/semantic-release-action.
         type: string
         required: false
-        default: "@semantic-release/changelog@6.0.3"
+        default: "@semantic-release/changelog@7.0.0"
       allow-exec-plugin:
         description: Allows @semantic-release/exec in configuration or extra plugins.
         type: boolean
