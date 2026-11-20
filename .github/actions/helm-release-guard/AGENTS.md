@@ -19,3 +19,8 @@ Release recording, rollback, diagnostics, and the schema rollback hook around a 
 - No destructive recovery by guesswork: a stuck first install stops the job, it is not uninstalled.
 - Every decision change needs a scenario in `tests/helm-release-guard.cs`. Its fake `helm list`, `helm history`, and kubectl JSON mirror real Helm 4.3.1 output; re-check them with `tests/live/helm-release-guard-kind.sh` (opt-in, needs kind) when Helm is bumped.
 - Delete `helm-timeout-shim.sh` once `aspire deploy` exposes its Helm arguments.
+- Exclusive mode is opt-in (`DEPLOY_GUARD_EXCLUSIVE=true`). The stop is the last act of the capture phase: record replica counts in the state file before the first `kubectl scale`, wait until no selected pod exists (terminating pods count), and on any failure restore the counts, verify, and exit non-zero so the deploy never runs.
+- Never stop StatefulSets: they are the data tier the migrator needs.
+- In exclusive mode the failure path is diagnostics, render, stop the failed release, schema Job, `helm rollback --wait`, restore recorded replicas, verify. Never run the schema Job after the rollback there: the previous version cannot become ready on the unreverted schema.
+- Never assume Helm restored the replica counts; read each recorded Deployment and scale it when it is not at its count.
+- `ARKANIS_DEPLOY_EXCLUSIVE` (constant `DeployExclusiveVariable`) is exported by the workflow's deploy step only, gated on the capture output `exclusive=true`. The guard never sets it anywhere else.

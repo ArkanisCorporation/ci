@@ -45,6 +45,7 @@ try
         var capture = s.Guard("capture");
         Check(capture.ExitCode == 0, "capture must succeed for a healthy release", capture.Log);
         Check(capture.Output("previous-revision") == "3" && capture.Output("helm-release") == Release, "capture must record the current revision");
+        Check(capture.Output("exclusive") == "false", "a rolling deployment must not tell the deploy step it is exclusive", capture.Output("exclusive"));
 
         s.History((3, "superseded"), (4, "deployed"));
         var result = s.Guard("finalize", "success");
@@ -57,6 +58,9 @@ try
         Check(result.Summary.Contains($"helm rollback {Release} 3 --namespace example-production --wait", StringComparison.Ordinal),
             "the summary must carry the manual rollback reference");
         Check(File.Exists(Path.Combine(s.ReportDir, "deploy-report.json")), "the report must be written to the artifact directory");
+        Check(!s.Called("kubectl scale"), "a rolling deployment must never scale a Deployment", s.Calls);
+        Check(!result.Summary.Contains("exclusive", StringComparison.Ordinal) && result.Output("downtime-started-at").Length == 0,
+            "a rolling deployment must report no downtime", result.Summary);
     }
 
     // ---- First install fails: nothing to restore, diagnostics still collected, no secret material stored.
@@ -155,6 +159,146 @@ try
             "the rendered Job pod spec must not reach the uploaded report");
         Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "schema-rollback", "job-logs.txt")), "schema Job logs must be captured");
         Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "after-rollback", "helm-history.txt")), "post-rollback state must be captured");
+        Check(!s.Called("kubectl scale"), "a rolling rollback must not scale anything", s.Calls);
+    }
+
+    // ---- Exclusive success: the release is stopped before the deploy, Helm restores the replicas, downtime reported.
+    {
+        var s = NewScenario("exclusive-success");
+        s.History((3, "deployed"));
+        s.RunningPods();
+        var capture = s.Guard("capture", exclusive: true);
+        Check(capture.ExitCode == 0, "an exclusive capture must succeed when the release stops", capture.Log);
+        Check(capture.Output("exclusive") == "true", "the deploy step must learn that the release is stopped", capture.Log);
+        Check(s.Called("kubectl scale deployment/web --namespace example-production --replicas=0"), "every Deployment of the release must be scaled to 0", s.Calls);
+        Check(!s.Called("deployment/unrelated"), "a Deployment of another release must not be touched", s.Calls);
+        Check(!s.Called("statefulset/"), "StatefulSets stay up: the migrator needs the data tier", s.Calls);
+        var state = JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "release-state.json")))!["exclusive"]!;
+        Check(state["status"]!.GetValue<string>() == "stopped" && state["workloads"]![0]!["name"]!.GetValue<string>() == "web"
+            && state["workloads"]![0]!["replicas"]!.GetValue<long>() == 2 && state["downtime_started_at"]!.GetValue<string>().Length > 0,
+            "the pre-scale replica counts and the start of the downtime must be in the state file", state.ToJsonString());
+
+        s.HelmApplied();
+        s.History((3, "superseded"), (4, "deployed"));
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed", "a verified exclusive deployment must end green", result.Log);
+        Check(!s.Called("--replicas=2"), "replicas Helm restored itself must not be scaled again", s.Calls);
+        Check(s.LastIndexOfCall("kubectl rollout status deployment/web") > s.IndexOfCall("--replicas=0"), "rollouts must be verified after the deploy");
+        Check(result.Output("downtime-started-at").Length > 0 && result.Output("downtime-ended-at").Length > 0, "the downtime window must be an output", result.Log);
+        Check(result.Summary.Contains($"This deployment was exclusive: the service was down from {result.Output("downtime-started-at")} to {result.Output("downtime-ended-at")}.", StringComparison.Ordinal),
+            "the summary must state the downtime window", result.Summary);
+        var report = JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!["exclusive"]!;
+        Check(report["workloads"]![0]!["replicas"]!.GetValue<long>() == 2 && report["restore"]!.GetValue<string>() == "restored",
+            "the report must carry the stopped replica counts", report.ToJsonString());
+    }
+
+    // ---- Exclusive success whose chart leaves replicas alone: a Deployment still at 0 is put back.
+    {
+        var s = NewScenario("exclusive-success-left-at-zero");
+        s.History((3, "deployed"));
+        Check(s.Guard("capture", exclusive: true).ExitCode == 0, "capture must succeed");
+        s.History((3, "superseded"), (4, "deployed"));
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed", "the deployment must end green once the replicas are back", result.Log);
+        Check(s.Called("kubectl scale deployment/web --namespace example-production --replicas=2"), "a Deployment left at 0 must be scaled back", s.Calls);
+        Check(result.Summary.Contains("| Replicas restored by the guard | `web` |", StringComparison.Ordinal), "the summary must say the guard restored it", result.Summary);
+    }
+
+    // ---- Exclusive deploy fails: stop the failed release, revert the schema, roll back, restore the replicas, verify.
+    {
+        var s = NewScenario("exclusive-failure-rolled-back");
+        s.History((3, "deployed"));
+        s.CronJob(generation: 1, uid: "uid-release-3");
+        s.RunningPods();
+        Check(s.Guard("capture", exclusive: true).ExitCode == 0, "capture must succeed");
+
+        s.HelmApplied();
+        s.History((3, "deployed"), (4, "failed"));
+        s.HistoryAfterRollback((3, "superseded"), (4, "failed"), (5, "deployed"));
+        s.CronJob(generation: 1, uid: "uid-release-4");
+        s.BreakDeployment("web", healedByRollback: true);
+        s.Write("rollback-keeps-scale", "1");
+        var result = s.Guard("finalize", "failure");
+        Check(result.ExitCode != 0 && result.Output("outcome") == "rolled-back", "a failed exclusive deployment must be rolled back and end red", result.Log);
+        Check(result.Output("schema-rollback") == "succeeded", "the schema hook must run", result.Log);
+
+        var logs = s.IndexOfCall("kubectl logs web-new");
+        var render = s.IndexOfCall("kubectl create job schema-rollback-4242-1");
+        var stopFailed = render < 0 ? -1 : s.Calls.IndexOf("kubectl scale deployment/web --namespace example-production --replicas=0", render, StringComparison.Ordinal);
+        var schema = s.IndexOfCall("kubectl create --filename");
+        var rollback = s.IndexOfCall($"helm rollback {Release} 3 --namespace example-production --wait --timeout 15m");
+        var restore = s.IndexOfCall("kubectl scale deployment/web --namespace example-production --replicas=2");
+        var verify = s.LastIndexOfCall("kubectl rollout status deployment/web");
+        Check(logs >= 0 && render >= 0 && stopFailed >= 0 && schema >= 0 && rollback >= 0 && restore >= 0 && verify >= 0, "every exclusive rollback stage must run", s.Calls);
+        Check(logs < render && render < stopFailed && stopFailed < schema && schema < rollback && rollback < restore && restore < verify,
+            "order: diagnostics, render, stop the failed release, schema Job, helm rollback, restore replicas, verify", s.Calls);
+        Check(result.Summary.Contains("This deployment was exclusive: the service was down from ", StringComparison.Ordinal), "the summary must state the downtime window", result.Summary);
+        Check(result.Output("downtime-ended-at").Length > 0, "a restored release ends the downtime", result.Log);
+    }
+
+    // ---- Exclusive: the Helm rollback restores the replicas itself; the guard checks and does not scale again.
+    {
+        var s = NewScenario("exclusive-failure-helm-restores");
+        s.History((3, "deployed"));
+        Check(s.Guard("capture", exclusive: true).ExitCode == 0, "capture must succeed");
+        s.HelmApplied();
+        s.History((3, "deployed"), (4, "failed"));
+        s.BreakDeployment("web", healedByRollback: true);
+        var result = s.Guard("finalize", "failure");
+        Check(result.Output("outcome") == "rolled-back" && result.Output("schema-rollback") == "not-found", "a rollback without a schema hook must still restore the release", result.Log);
+        Check(s.Called("kubectl get deployment web --namespace example-production --ignore-not-found --output jsonpath={.spec.replicas}"), "the replica count must be checked, not assumed", s.Calls);
+        Check(!s.Called("--replicas=2"), "replicas the rollback restored must not be scaled again", s.Calls);
+    }
+
+    // ---- Exclusive stop never completes (a terminating pod stays): no deploy, replicas restored, distinct outcome.
+    {
+        var s = NewScenario("exclusive-stop-times-out");
+        s.History((3, "deployed"));
+        s.RunningPods(terminating: true);
+        s.Write("pods-stuck", "1");
+        var capture = s.Guard("capture", timeout: "1s", exclusive: true);
+        Check(capture.ExitCode != 0, "a stop that does not complete must stop the job before the deploy", capture.Log);
+        Check(capture.Output("exclusive") == "false", "the deploy step must not be told it may migrate", capture.Log);
+        Check(capture.Log.Contains("web-old", StringComparison.Ordinal), "the pods still present must be named", capture.Log);
+        Check(s.IndexOfCall("--replicas=0") < s.IndexOfCall("kubectl scale deployment/web --namespace example-production --replicas=2"), "the recorded replicas must be restored after the failed stop", s.Calls);
+        Check(s.Called("kubectl rollout status deployment/web"), "the restored release must be verified", s.Calls);
+        var result = s.Guard("finalize", "skipped", timeout: "1s");
+        Check(result.ExitCode != 0 && result.Output("outcome") == "failed-exclusive-stop", "a failed exclusive stop must have its own outcome", result.Log);
+        Check(!s.Called("helm rollback") && !s.Called("helm upgrade"), "nothing may be deployed or rolled back", s.Calls);
+        Check(result.Summary.Contains("This deployment was exclusive: the service was down from ", StringComparison.Ordinal), "the summary must state the downtime", result.Summary);
+    }
+
+    // ---- Exclusive stop: the scale call itself fails. Restore what may have changed, no deploy.
+    {
+        var s = NewScenario("exclusive-scale-fails");
+        s.History((3, "deployed"));
+        s.Write("scale-zero-exit", "1");
+        Check(s.Guard("capture", exclusive: true).ExitCode != 0, "a failed scale-down must stop the job before the deploy");
+        var result = s.Guard("finalize", "skipped");
+        Check(result.Output("outcome") == "failed-exclusive-stop" && s.Called("kubectl get deployment web"), "the replica counts must be checked after a failed scale-down", result.Log);
+    }
+
+    // ---- Exclusive first install: nothing runs yet, so nothing is stopped and the deploy may migrate.
+    {
+        var s = NewScenario("exclusive-first-install");
+        var capture = s.Guard("capture", exclusive: true);
+        Check(capture.ExitCode == 0 && capture.Output("exclusive") == "true", "an exclusive first install must proceed", capture.Log);
+        Check(!s.Called("kubectl scale") && !s.Called("kubectl get deployments"), "a first install has nothing to stop", s.Calls);
+        s.History((1, "deployed"));
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed", "an exclusive first install must deploy", result.Log);
+        Check(result.Summary.Contains("first install, so nothing was stopped", StringComparison.Ordinal), "the summary must say nothing was stopped", result.Summary);
+    }
+
+    // ---- Exclusive deploy fails before Helm touched the release: put the stopped release back as it was.
+    {
+        var s = NewScenario("exclusive-failed-before-helm");
+        s.History((3, "deployed"));
+        Check(s.Guard("capture", exclusive: true).ExitCode == 0, "capture must succeed");
+        var result = s.Guard("finalize", "failure");
+        Check(result.ExitCode != 0 && result.Output("outcome") == "failed-release-unchanged", "an untouched release is still unchanged", result.Log);
+        Check(s.Called("kubectl scale deployment/web --namespace example-production --replicas=2") && !s.Called("helm rollback"),
+            "the stopped release must be restored without a rollback", s.Calls);
     }
 
     // ---- Upgrade fails and the rollback fails too: loud, and the schema hook must not run.
@@ -484,6 +628,25 @@ sealed class Scenario(string root, string guardScript)
 
     public void HistoryAfterRollback(params (int Revision, string Status)[] entries) => Write("history-after-rollback.json", Json(entries));
 
+    // What a Helm upgrade does to a release the exclusive stop scaled to 0: it re-applies the chart's replica counts.
+    public void HelmApplied()
+    {
+        foreach (var file in Directory.EnumerateFiles(FakeDir, "replicas-*"))
+        {
+            File.Delete(file);
+        }
+    }
+
+    // The previous version's pod, serving until the exclusive stop scales it away. A terminating pod carries a deletionTimestamp.
+    public void RunningPods(bool terminating = false) => Write("pods.json", """
+        {"items":[
+          {"metadata":{"name":"web-old","labels":{"app":"web"}@DELETION@},"spec":{"containers":[{"name":"web"}]},
+           "status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}},
+          {"metadata":{"name":"unrelated-1","labels":{"app":"unrelated"}},"spec":{"containers":[{"name":"main"}]},
+           "status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}
+        ]}
+        """.Replace("@DELETION@", terminating ? ",\"deletionTimestamp\":\"2026-11-20T10:00:00Z\"" : string.Empty, StringComparison.Ordinal));
+
     // uid + generation are what the guard compares: a chart resource keeps its uid and bumps the generation,
     // a Helm hook with before-hook-creation is recreated (new uid) and starts at generation 1 again.
     public void CronJob(int generation, string uid = "uid-a") =>
@@ -534,7 +697,7 @@ sealed class Scenario(string root, string guardScript)
             """.Replace("@SECRET@", SecretLiteral, StringComparison.Ordinal));
     }
 
-    public GuardResult Guard(string phase, string deployOutcome = "", string timeout = "15m", string rollbackOnFailure = "true", string release = "")
+    public GuardResult Guard(string phase, string deployOutcome = "", string timeout = "15m", string rollbackOnFailure = "true", string release = "", bool exclusive = false)
     {
         var outputFile = Path.Combine(root, $"output-{Guid.NewGuid():N}.txt");
         var summaryFile = Path.Combine(root, $"summary-{Guid.NewGuid():N}.md");
@@ -552,6 +715,7 @@ sealed class Scenario(string root, string guardScript)
         start.Environment["DEPLOY_GUARD_RELEASE_NAME"] = release;
         start.Environment["DEPLOY_GUARD_ROLLOUT_TIMEOUT"] = timeout;
         start.Environment["DEPLOY_GUARD_ROLLBACK_ON_FAILURE"] = rollbackOnFailure;
+        start.Environment["DEPLOY_GUARD_EXCLUSIVE"] = exclusive ? "true" : "false";
         start.Environment["DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB"] = "schema-rollback";
         start.Environment["DEPLOY_GUARD_REPORT_DIR"] = "artifacts/deploy-report";
         start.Environment["DEPLOY_GUARD_DEPLOY_OUTCOME"] = deployOutcome;
@@ -610,6 +774,9 @@ static class FakeCli
      * `list` gives the revision as a string, `history` as a number, and a missing release makes `history` exit 1.
      * One script installed as both `helm` and `kubectl`. It records `<tool> <args>` in calls.log and answers from
      * files in FAKE_K8S_DIR. A successful `helm rollback` flips the fake cluster to its "-after-rollback" files.
+     * `kubectl scale` writes replicas-<name>; while a Deployment is at 0 its pods are gone unless pods-stuck exists.
+     * A rollback re-applies the chart's replica counts (deletes replicas-*) unless rollback-keeps-scale exists, which
+     * is how real Helm 4.3.1 behaves after `kubectl scale` (tests/live/helm-release-guard-kind.sh).
      */
     public const string Script = """
         #!/usr/bin/env bash
@@ -636,6 +803,7 @@ static class FakeCli
               code="$(exit_code rollback-exit)"
               if [[ "$code" == "0" ]]; then
                 touch "$dir/rolled-back"
+                if [[ ! -f "$dir/rollback-keeps-scale" ]]; then rm -f "$dir"/replicas-*; fi
                 if [[ -f "$dir/history-after-rollback.json" ]]; then cp "$dir/history-after-rollback.json" "$dir/history.json"; fi
                 echo "Rollback was a success! Happy Helming!"
               else
@@ -652,7 +820,18 @@ static class FakeCli
           "get cronjob "*) if [[ -f "$dir/cronjob.json" ]]; then cat "$dir/cronjob.json"; fi ;;
           "get deployments,statefulsets,daemonsets,jobs "*)
             if rolled_back && [[ -f "$dir/workloads-after-rollback.json" ]]; then cat "$dir/workloads-after-rollback.json"; else cat "$dir/workloads.json"; fi ;;
-          "get pods "*) if [[ -f "$dir/pods.json" ]]; then cat "$dir/pods.json"; else echo '{"items":[]}'; fi ;;
+          "get pods "*)
+            if [[ ! -f "$dir/pods-stuck" ]] && grep -qx 0 "$dir"/replicas-* 2> /dev/null; then echo '{"items":[]}'
+            elif [[ -f "$dir/pods.json" ]]; then cat "$dir/pods.json"; else echo '{"items":[]}'; fi ;;
+          "get deployment "*"jsonpath={.spec.replicas}"*)
+            if [[ -f "$dir/replicas-$3" ]]; then cat "$dir/replicas-$3"; else echo 2; fi ;;
+          "scale deployment/"*)
+            name="${2#deployment/}"
+            replicas=""
+            for arg in "$@"; do case "$arg" in --replicas=*) replicas="${arg#--replicas=}" ;; esac; done
+            if [[ "$replicas" == "0" && -f "$dir/scale-zero-exit" ]]; then echo "error: fixture scale failure" >&2; exit 1; fi
+            printf '%s\n' "$replicas" > "$dir/replicas-$name"
+            echo "deployment.apps/$name scaled" ;;
           "get job "*"--output json"*)
             if [[ -f "$dir/job-status.json" ]]; then cat "$dir/job-status.json"; else echo '{"status":{"conditions":[{"type":"Complete","status":"True"}]}}'; fi ;;
           "get "*) echo "fixture table" ;;

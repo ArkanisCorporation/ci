@@ -27,6 +27,9 @@ using System.Text.RegularExpressions;
  *   Two phases, selected by DEPLOY_GUARD_PHASE and driven by environment variables only:
  *     capture   Before the deploy. Records the release's revisions, recovers a release a cancelled run left
  *               in a pending state, and remembers the schema-rollback CronJob's identity (uid and generation).
+ *               In exclusive mode (DEPLOY_GUARD_EXCLUSIVE=true) it then stops the release: every Deployment it
+ *               owns is scaled to 0 and the guard waits until none of their pods exists, so a migration the
+ *               previous version cannot tolerate never runs under it. Downtime is the price, by design.
  *     finalize  After the deploy, always. Verifies rollouts on success. On failure it collects diagnostics,
  *               rolls the release back, runs the schema-rollback hook, verifies again, and reports.
  *
@@ -68,6 +71,14 @@ static class Guard
     public const string DeployStartedAtVariable = "ARKANIS_DEPLOY_STARTED_AT";
 
     const string DeployStartedAtFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+
+    /*
+     * Environment variable the workflow exports into the deploy step, set to "true", only for an exclusive deployment
+     * whose capture phase stopped the previous version (or found none to stop). Part of the consumer contract
+     * (docs/deployments.md): the AppHost reads it at publish time, and the migrator may apply a migration marked
+     * breaking only when it is "true". It is never set otherwise, so a rolling deploy keeps refusing such migrations.
+     */
+    public const string DeployExclusiveVariable = "ARKANIS_DEPLOY_EXCLUSIVE";
 
     public static int Execute()
     {
@@ -112,7 +123,8 @@ static class Guard
         };
 
         // 2 x rollout-timeout covers the deploy's own wait plus the rollback's; the rest is build, push and reporting.
-        var needed = (settings.RolloutTimeout * 2) + TimeSpan.FromMinutes(10);
+        // An exclusive deployment adds a third: the wait for the stopped release's pods to disappear.
+        var needed = (settings.RolloutTimeout * (settings.Exclusive ? 3 : 2)) + TimeSpan.FromMinutes(10);
         if (settings.JobTimeoutMinutes > 0 && TimeSpan.FromMinutes(settings.JobTimeoutMinutes) < needed)
         {
             Annotate("warning", $"timeout-minutes ({settings.JobTimeoutMinutes}) leaves little room for a rollback after rollout-timeout {settings.RolloutTimeoutText}. "
@@ -170,6 +182,17 @@ static class Guard
 
         state.History = history;
         state.SchemaCronJobIdentity = ReadCronJobIdentity(settings, state.Namespace);
+
+        // Last step before the deploy may start: everything above must be recorded first, so a failed stop can
+        // still be reported, and the stop itself must be the final thing that happens before the deploy.
+        if (settings.Exclusive && !StopReleaseForExclusiveDeploy(settings, state))
+        {
+            SaveState(settings, state);
+            WriteOutput(settings, "helm-release", state.Release);
+            WriteOutput(settings, "exclusive", "false");
+            return 1;
+        }
+
         state.Captured = true;
         SaveState(settings, state);
 
@@ -183,9 +206,209 @@ static class Guard
         WriteOutput(settings, "previous-revision", latest is null ? string.Empty : Text(latest.Revision));
         WriteOutput(settings, "recovered", state.Recovery == "recovered" ? "true" : "false");
         WriteOutput(settings, "deploy-started-at", state.DeployStartedAt);
+        WriteOutput(settings, "exclusive", settings.Exclusive ? "true" : "false");
         Console.WriteLine($"Deployment attempt started at {state.DeployStartedAt} ({DeployStartedAtVariable} for the schema rollback Job).");
+        if (settings.Exclusive)
+        {
+            Console.WriteLine($"Exclusive deployment: the deploy step receives {DeployExclusiveVariable}=true.");
+        }
+
         return 0;
     }
+
+    // ---------------------------------------------------------------- exclusive deployment
+
+    /*
+     * Stops every Deployment the release owns before an exclusive deployment and waits until none of their pods
+     * exists any more, terminating pods included: a terminating pod can still hold connections and write with the
+     * old code. The replica counts are written to the state file before the first scale call, so a failure at any
+     * point can put them back. On failure it restores them, verifies the rollouts, and returns false: the deploy
+     * must not start.
+     *
+     * StatefulSets are deliberately left running. In an Aspire chart they are the data tier (a database or broker
+     * container with a volume), which the new version's migrator needs in order to migrate; stopping the database
+     * would only guarantee that the migration fails. The application code whose schema expectations break lives in
+     * Deployments. DaemonSets cannot be scaled; Jobs and CronJobs are not long-running servers.
+     */
+    static bool StopReleaseForExclusiveDeploy(Settings settings, GuardState state)
+    {
+        var exclusive = state.Exclusive;
+        exclusive.Enabled = true;
+        if (state.History.Count == 0)
+        {
+            exclusive.Status = ExclusiveStatuses.FirstInstall;
+            Console.WriteLine("Exclusive deployment of a first install: nothing runs yet, so nothing is stopped.");
+            return true;
+        }
+
+        var workloads = ReadWorkloads(state.Release, state.Namespace, out var listed);
+        if (!listed)
+        {
+            Annotate("error", $"EXCLUSIVE STOP FAILED: could not list the Deployments of release '{state.Release}'. Nothing was stopped and nothing was deployed.");
+            exclusive.Status = ExclusiveStatuses.StopFailed;
+            exclusive.Restore = ExclusiveRestores.NotNeeded;
+            return false;
+        }
+
+        var deployments = workloads.Where(workload => workload.Kind == "Deployment").ToList();
+        if (deployments.Count == 0)
+        {
+            Annotate("warning", $"Exclusive deployment, but no Deployment carries release '{state.Release}''s Helm ownership annotation. Nothing was stopped.");
+            exclusive.Status = ExclusiveStatuses.NoDeployments;
+            return true;
+        }
+
+        var unselectable = deployments.Where(deployment => deployment.Selector.Count == 0).Select(deployment => deployment.Name).ToList();
+        if (unselectable.Count > 0)
+        {
+            Annotate("error", $"EXCLUSIVE STOP FAILED: these Deployments have no matchLabels selector, so their pods cannot be confirmed gone: {string.Join(", ", unselectable)}. Nothing was stopped and nothing was deployed.");
+            exclusive.Status = ExclusiveStatuses.StopFailed;
+            exclusive.Restore = ExclusiveRestores.NotNeeded;
+            return false;
+        }
+
+        exclusive.Workloads = [.. deployments.Select(deployment => new ExclusiveWorkload(deployment.Name, deployment.Replicas, deployment.Selector))];
+        exclusive.DowntimeStartedAt = Now();
+        SaveState(settings, state);
+        Console.WriteLine($"Exclusive deployment: stopping {string.Join(", ", exclusive.Workloads.Select(workload => $"{workload.Name} ({Text(workload.Replicas)} replicas)"))}. The service is down from {exclusive.DowntimeStartedAt}.");
+
+        if (StopDeployments(settings, exclusive.Workloads, state.Namespace, "before the deployment"))
+        {
+            exclusive.Status = ExclusiveStatuses.Stopped;
+            Console.WriteLine("Every pod of the release is gone; the deployment may migrate.");
+            return true;
+        }
+
+        Annotate("error", "EXCLUSIVE STOP FAILED: the release could not be stopped. Nothing was deployed; restoring the recorded replica counts.");
+        exclusive.Status = ExclusiveStatuses.StopFailed;
+        var failed = new List<string>();
+        RestoreExclusiveReplicas(settings, exclusive, state.Namespace, onlyWhereZero: false, failed, "after the failed stop");
+        return false;
+    }
+
+    /*
+     * Scales the given Deployments to 0 and waits, bounded by rollout-timeout, until no pod any of them selects is
+     * left. A pod list that cannot be read counts as "not gone yet": the wait only ends early on proof.
+     */
+    static bool StopDeployments(Settings settings, List<ExclusiveWorkload> targets, string ns, string when)
+    {
+        Console.WriteLine($"::group::Stop Deployments {when}");
+        try
+        {
+            foreach (var target in targets)
+            {
+                var scale = Run("kubectl", ["scale", $"deployment/{target.Name}", "--namespace", ns, "--replicas=0", "--request-timeout=60s"], QueryTimeout, echoOutput: true);
+                if (scale.ExitCode != 0)
+                {
+                    Annotate("error", $"Scaling deployment/{target.Name} to 0 failed: {FirstLine(scale.Stderr, "kubectl scale failed.")}");
+                    return false;
+                }
+            }
+
+            var selectors = targets.Select(target => new Workload("Deployment", target.Name, target.Selector, RolledOut: false, Replicas: 0)).ToList();
+            var elapsed = Stopwatch.StartNew();
+            var lastReported = -1;
+            while (true)
+            {
+                var pods = ReadPods(ns, out var listed);
+                var remaining = listed ? pods.Where(pod => selectors.Any(selector => selector.Selects(pod))).Select(pod => pod.Name).ToList() : null;
+                if (remaining is { Count: 0 })
+                {
+                    Console.WriteLine($"No pod of {string.Join(", ", targets.Select(target => target.Name))} is left ({Text((int)elapsed.Elapsed.TotalSeconds)}s).");
+                    return true;
+                }
+
+                if (elapsed.Elapsed >= settings.RolloutTimeout)
+                {
+                    Annotate("error", remaining is null
+                        ? $"The pods could not be listed within {settings.RolloutTimeoutText}, so the release is not known to be stopped."
+                        : $"These pods still exist after {settings.RolloutTimeoutText}: {string.Join(", ", remaining)}.");
+                    return false;
+                }
+
+                var count = remaining?.Count ?? -1;
+                if (count != lastReported)
+                {
+                    Console.WriteLine(remaining is null ? "Pods could not be listed; retrying." : $"Waiting for {Text(count)} pods to disappear: {string.Join(", ", remaining)}");
+                    lastReported = count;
+                }
+
+                Thread.Sleep(settings.PollInterval);
+            }
+        }
+        finally
+        {
+            Console.WriteLine("::endgroup::");
+        }
+    }
+
+    /*
+     * Puts the recorded replica counts back after an exclusive deployment, then verifies the rollouts. Helm restores
+     * them when it re-applies a release (upgrade or rollback), but that is not assumed: each Deployment is read and
+     * scaled when it is not where it should be. onlyWhereZero is for a successful deploy, whose chart may change the
+     * replica count on purpose; only a Deployment still at 0 is then put back. A Deployment the release no longer has
+     * is left alone. Sets the restore result and, when every rollout is verified, the end of the downtime.
+     */
+    static bool RestoreExclusiveReplicas(Settings settings, ExclusiveState exclusive, string ns, bool onlyWhereZero, List<string> failed, string when)
+    {
+        var ok = true;
+        var present = new List<ExclusiveWorkload>();
+        Console.WriteLine($"::group::Restore replica counts {when}");
+        foreach (var target in exclusive.Workloads)
+        {
+            var read = Run("kubectl", ["get", "deployment", target.Name, "--namespace", ns, "--ignore-not-found", "--output", "jsonpath={.spec.replicas}", "--request-timeout=60s"], QueryTimeout);
+            if (read.ExitCode != 0)
+            {
+                Annotate("error", $"Could not read deployment/{target.Name}: {FirstLine(read.Stderr, "kubectl get failed.")}");
+                failed.Add($"deployment/{target.Name}");
+                ok = false;
+                continue;
+            }
+
+            if (read.Stdout.Trim().Length == 0)
+            {
+                Console.WriteLine($"deployment/{target.Name} no longer exists in the release; nothing to restore.");
+                continue;
+            }
+
+            present.Add(target);
+            var current = long.TryParse(read.Stdout.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : -1;
+            if (current == target.Replicas || (onlyWhereZero && current != 0))
+            {
+                Console.WriteLine($"deployment/{target.Name} is at {Text(current)} replicas.");
+                continue;
+            }
+
+            var scale = Run("kubectl", ["scale", $"deployment/{target.Name}", "--namespace", ns, $"--replicas={Text(target.Replicas)}", "--request-timeout=60s"], QueryTimeout, echoOutput: true);
+            if (scale.ExitCode != 0)
+            {
+                Annotate("error", $"Restoring deployment/{target.Name} to {Text(target.Replicas)} replicas failed: {FirstLine(scale.Stderr, "kubectl scale failed.")}");
+                failed.Add($"deployment/{target.Name}");
+                ok = false;
+                continue;
+            }
+
+            exclusive.RestoredByGuard.Add(target.Name);
+        }
+
+        Console.WriteLine("::endgroup::");
+        var notRolledOut = present.Count == 0 ? [] : VerifyRollouts(settings, [.. present.Select(target => new Workload("Deployment", target.Name, target.Selector, RolledOut: false, Replicas: target.Replicas))], ns, when);
+        foreach (var name in notRolledOut.Where(name => !failed.Contains(name)))
+        {
+            failed.Add(name);
+        }
+
+        ok = ok && notRolledOut.Count == 0;
+        exclusive.Restore = ok ? ExclusiveRestores.Restored : ExclusiveRestores.Failed;
+        if (ok)
+        {
+            exclusive.DowntimeEndedAt = Now();
+        }
+
+        return ok;
+    }
+
+    static string Now() => DateTime.UtcNow.ToString(DeployStartedAtFormat, CultureInfo.InvariantCulture);
 
     // ---------------------------------------------------------------- finalize
 
@@ -207,7 +430,29 @@ static class Guard
         report.Release = state.Release;
         report.Namespace = state.Namespace;
         report.Recovery = state.Recovery;
+        report.Exclusive = state.Exclusive;
         var baseline = state.History;
+
+        // Exclusive deployment whose stop failed in the capture phase: the deploy never ran, and the capture phase
+        // already tried to restore the replica counts. Its own outcome, so a caller can tell it from a deploy failure.
+        if (state.Exclusive.Status == ExclusiveStatuses.StopFailed)
+        {
+            SetRevisions(report, baseline, null);
+            if (state.Exclusive.Restore == ExclusiveRestores.Failed)
+            {
+                report.Outcome = Outcomes.RollbackFailed;
+                report.Detail = "Stopping the release for an exclusive deployment failed, and restoring its replica counts failed too. Nothing was deployed.";
+            }
+            else
+            {
+                report.Outcome = Outcomes.FailedExclusiveStop;
+                report.Detail = state.Exclusive.Restore == ExclusiveRestores.NotNeeded
+                    ? "Stopping the release for an exclusive deployment failed before anything was scaled. Nothing was deployed."
+                    : "Stopping the release for an exclusive deployment failed. Nothing was deployed; the recorded replica counts are restored and rolled out.";
+            }
+
+            return Publish(settings, report);
+        }
 
         if (!state.Captured)
         {
@@ -222,11 +467,18 @@ static class Guard
             return Publish(settings, report);
         }
 
+        var stopped = state.Exclusive.Status == ExclusiveStatuses.Stopped;
         if (settings.DeployOutcome == "skipped")
         {
             SetRevisions(report, baseline, null);
             report.Outcome = Outcomes.NotAttempted;
             report.Detail = "An earlier step failed, so the deployment did not start. The release is untouched.";
+            if (stopped && !RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: false, report.FailedResources, "after a deployment that did not start"))
+            {
+                report.Outcome = Outcomes.RollbackFailed;
+                report.Detail = "The deployment did not start, but the release stopped for it could not be restored to its recorded replica counts.";
+            }
+
             return Publish(settings, report);
         }
 
@@ -235,6 +487,26 @@ static class Guard
             SetRevisions(report, baseline, null);
             report.Outcome = Outcomes.Cancelled;
             report.Detail = "The deployment was cancelled or timed out. No rollback was attempted; the next run recovers a release left pending before it deploys.";
+
+            // A stopped release Helm never touched is safe to start again: same manifests as before the run. Once Helm
+            // created a revision the pods would start a half-applied release, so that is left to the next run's recovery.
+            if (stopped)
+            {
+                var untouched = ReadHistory(state.Release, state.Namespace, out var cancelReadError);
+                if (cancelReadError is null && (Latest(untouched)?.Revision ?? 0) == (Latest(baseline)?.Revision ?? 0))
+                {
+                    report.Detail = "The deployment was cancelled before Helm changed the release. The release stopped for it is restored to its recorded replica counts.";
+                    if (!RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: false, report.FailedResources, "after the cancelled deployment"))
+                    {
+                        report.Detail = "The deployment was cancelled before Helm changed the release, and restoring the stopped release's replica counts failed.";
+                    }
+                }
+                else
+                {
+                    report.Detail = "The exclusive deployment was cancelled after Helm started changing the release. Its Deployments may still be scaled to 0; the next run recovers a release left pending.";
+                }
+            }
+
             return Publish(settings, report);
         }
 
@@ -272,13 +544,23 @@ static class Guard
 
         if (!deployFailed)
         {
+            // The new chart decides the replica counts; only a Deployment it left at the exclusive stop's 0 is put back.
+            var restoreFailures = new List<string>();
+            var restored = !stopped || RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: true, restoreFailures, "after the deployment");
             var workloads = ReadWorkloads(release, ns);
             var notRolledOut = VerifyRollouts(settings, workloads, ns, "after the deployment");
-            if (notRolledOut.Count == 0)
+            notRolledOut.AddRange(restoreFailures.Where(name => !notRolledOut.Contains(name)));
+            if (notRolledOut.Count == 0 && restored)
             {
                 report.Outcome = Outcomes.Deployed;
                 report.Detail = "Helm reported success and every Deployment of the release is rolled out.";
                 return Publish(settings, report);
+            }
+
+            if (stopped)
+            {
+                // The downtime is not over until the rollback below brings the release back.
+                state.Exclusive.DowntimeEndedAt = string.Empty;
             }
 
             Annotate("error", $"Helm reported success but these Deployments are not rolled out: {string.Join(", ", notRolledOut)}. Treating the deployment as failed.");
@@ -292,6 +574,16 @@ static class Guard
             CollectDiagnostics(settings, report, release, ns, "before-rollback", full: false);
             report.Outcome = Outcomes.FailedReleaseUnchanged;
             report.Detail = "The deployment failed before Helm created a new revision, so the release is exactly as it was.";
+            if (stopped)
+            {
+                report.Detail = "The deployment failed before Helm created a new revision. The release stopped for it is restored to its recorded replica counts.";
+                if (!RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: false, report.FailedResources, "after the failed deployment"))
+                {
+                    report.Outcome = Outcomes.RollbackFailed;
+                    report.Detail = "The deployment failed before Helm created a new revision, but the release stopped for it could not be restored to its recorded replica counts.";
+                }
+            }
+
             return Publish(settings, report);
         }
 
@@ -318,11 +610,19 @@ static class Guard
         var schemaJob = PrepareSchemaRollback(settings, state, report, ns);
         try
         {
+            // Exclusive: the previous version cannot run on the failed release's schema, so `helm rollback --wait`
+            // would wait for pods that never become ready, and the schema Job would never run. The schema is
+            // reverted first instead, with the failed release stopped; the service is down anyway.
+            if (stopped && schemaJob is not null)
+            {
+                RunSchemaRollbackBeforeExclusiveRollback(settings, report, schemaJob, release, ns);
+            }
+
             var rollback = HelmRollback(settings, release, ns, target.Revision);
             if (rollback.ExitCode != 0)
             {
                 Annotate("error", $"ROLLBACK FAILED: helm rollback {release} {Text(target.Revision)} did not succeed. The environment needs attention.");
-                if (schemaJob is not null)
+                if (schemaJob is not null && !stopped)
                 {
                     report.SchemaRollback = SchemaOutcomes.Skipped;
                     report.SchemaRollbackDetail = "Not run: the Helm rollback failed, so new-version pods may still use the schema.";
@@ -336,7 +636,7 @@ static class Guard
             }
 
             report.HelmRollbackSucceeded = true;
-            if (schemaJob is not null)
+            if (schemaJob is not null && !stopped)
             {
                 RunSchemaRollback(settings, report, schemaJob, ns);
             }
@@ -349,12 +649,24 @@ static class Guard
             }
         }
 
-        var stillBroken = VerifyRollouts(settings, ReadWorkloads(release, ns), ns, "after the rollback");
+        // Helm re-applied the previous manifests, which normally restores the replica counts. Checked, not assumed.
+        var stillBroken = new List<string>();
+        if (stopped)
+        {
+            RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: false, stillBroken, "after the rollback");
+        }
+
+        foreach (var name in VerifyRollouts(settings, ReadWorkloads(release, ns), ns, "after the rollback").Where(name => !stillBroken.Contains(name)))
+        {
+            stillBroken.Add(name);
+        }
+
         CollectDiagnostics(settings, report, release, ns, "after-rollback", full: false);
         SetRevisions(report, baseline, ReadHistory(release, ns, out _), keepNew: true);
 
         if (stillBroken.Count > 0)
         {
+            state.Exclusive.DowntimeEndedAt = string.Empty;
             Annotate("error", $"ROLLBACK FAILED: after rolling back, these Deployments are still not rolled out: {string.Join(", ", stillBroken)}.");
             foreach (var name in stillBroken.Where(name => !report.FailedResources.Contains(name)))
             {
@@ -366,7 +678,7 @@ static class Guard
             return Publish(settings, report);
         }
 
-        if (report.SchemaRollback is SchemaOutcomes.Failed or SchemaOutcomes.TimedOut)
+        if (report.SchemaRollback is SchemaOutcomes.Failed or SchemaOutcomes.TimedOut || report.SchemaRollbackBlocked)
         {
             report.Outcome = Outcomes.RollbackFailed;
             report.Detail = $"Workloads are restored to revision {Text(target.Revision)}, but the schema rollback did not complete. The database needs attention.";
@@ -376,6 +688,28 @@ static class Guard
         report.Outcome = Outcomes.RolledBack;
         report.Detail = $"The deployment failed and the environment was restored to revision {Text(target.Revision)}.";
         return Publish(settings, report);
+    }
+
+    /*
+     * Exclusive failure path: stops every Deployment the failed release owns, then runs the schema rollback Job, both
+     * before the Helm rollback. Stopping first keeps the guarantee the rolling path gets from `helm rollback --wait`:
+     * no new-version pod uses the schema while it is reverted. A stop that fails leaves the Job unrun and blocks a
+     * clean outcome, because the previous version is then about to start on a schema it cannot run on.
+     */
+    static void RunSchemaRollbackBeforeExclusiveRollback(Settings settings, Report report, SchemaJob job, string release, string ns)
+    {
+        var failedRelease = ReadWorkloads(release, ns).Where(workload => workload.Kind == "Deployment" && workload.Selector.Count > 0)
+            .Select(workload => new ExclusiveWorkload(workload.Name, workload.Replicas, workload.Selector)).ToList();
+        if (failedRelease.Count > 0 && !StopDeployments(settings, failedRelease, ns, "before the schema rollback"))
+        {
+            Annotate("error", "SCHEMA ROLLBACK NOT RUN: the failed release's pods did not stop, so they may still use the schema.");
+            report.SchemaRollback = SchemaOutcomes.Skipped;
+            report.SchemaRollbackDetail = "Not run: the failed release's pods did not stop before the exclusive rollback.";
+            report.SchemaRollbackBlocked = true;
+            return;
+        }
+
+        RunSchemaRollback(settings, report, job, ns);
     }
 
     // ---------------------------------------------------------------- helm
@@ -459,11 +793,15 @@ static class Guard
 
     // ---------------------------------------------------------------- workloads
 
-    static List<Workload> ReadWorkloads(string release, string ns)
+    static List<Workload> ReadWorkloads(string release, string ns) => ReadWorkloads(release, ns, out _);
+
+    // `listed` tells "the release has no workloads" from "the workloads could not be read"; the exclusive stop must not confuse them.
+    static List<Workload> ReadWorkloads(string release, string ns, out bool listed)
     {
         var result = Run("kubectl", ["get", "deployments,statefulsets,daemonsets,jobs", "--namespace", ns, "--output", "json", "--request-timeout=60s"], QueryTimeout);
         var workloads = new List<Workload>();
-        if (result.ExitCode != 0 || !TryParseItems(result.Stdout, out var items))
+        listed = result.ExitCode == 0 && TryParseItems(result.Stdout, out _);
+        if (!listed || !TryParseItems(result.Stdout, out var items))
         {
             Annotate("warning", "Could not list the workloads in the namespace; rollout verification has nothing to check.");
             return workloads;
@@ -491,7 +829,8 @@ static class Guard
                 Kind: item?["kind"]?.GetValue<string>() ?? string.Empty,
                 Name: metadata?["name"]?.GetValue<string>() ?? string.Empty,
                 Selector: selector,
-                RolledOut: IsRolledOut(item)));
+                RolledOut: IsRolledOut(item),
+                Replicas: Number(item?["spec"]?["replicas"]) ?? 1));
         }
 
         return workloads;
@@ -623,13 +962,17 @@ static class Guard
         }
     }
 
-    static List<Pod> ReadPods(string ns)
+    static List<Pod> ReadPods(string ns) => ReadPods(ns, out _, quiet: false);
+
+    static List<Pod> ReadPods(string ns, out bool listed, bool quiet = true)
     {
         var pods = new List<Pod>();
 
         // Parsed in memory and never written out: a pod object carries its literal environment values.
-        var result = Run("kubectl", ["get", "pods", "--namespace", ns, "--output", "json", "--request-timeout=60s"], QueryTimeout);
-        if (result.ExitCode != 0 || !TryParseItems(result.Stdout, out var items))
+        // Terminating pods are listed too (they carry a deletionTimestamp), which the exclusive stop relies on.
+        var result = Run("kubectl", ["get", "pods", "--namespace", ns, "--output", "json", "--request-timeout=60s"], QueryTimeout, quiet: quiet);
+        listed = result.ExitCode == 0 && TryParseItems(result.Stdout, out _);
+        if (!listed || !TryParseItems(result.Stdout, out var items))
         {
             return pods;
         }
@@ -978,6 +1321,8 @@ static class Guard
         WriteOutput(settings, "outcome", report.Outcome);
         WriteOutput(settings, "schema-rollback", report.SchemaRollback);
         WriteOutput(settings, "failed-resources", failedResources);
+        WriteOutput(settings, "downtime-started-at", report.Exclusive.DowntimeStartedAt);
+        WriteOutput(settings, "downtime-ended-at", report.Exclusive.DowntimeEndedAt);
 
         var headline = report.Outcome switch
         {
@@ -988,6 +1333,7 @@ static class Guard
             Outcomes.RollbackFailed => "ROLLBACK FAILED, environment needs attention.",
             Outcomes.FailedNoPreviousRelease => "DEPLOYMENT FAILED - first install, no previous release to restore. Environment needs attention.",
             Outcomes.FailedRollbackDisabled => "DEPLOYMENT FAILED - rollback-on-failure is false, nothing was restored. Environment needs attention.",
+            Outcomes.FailedExclusiveStop => "DEPLOYMENT NOT STARTED - the release could not be stopped for the exclusive deployment. Replica counts restored.",
             Outcomes.FailedReleaseUnchanged => "DEPLOYMENT FAILED before Helm changed the release - environment untouched.",
             Outcomes.Cancelled => "DEPLOYMENT CANCELLED - release state not verified.",
             _ => "Deployment did not start - environment untouched.",
@@ -997,6 +1343,12 @@ static class Guard
         summary.Append("## Helm release guard\n\n");
         summary.Append("**").Append(headline).Append("**\n\n");
         summary.Append(report.Detail).Append("\n\n");
+        var downtime = DowntimeSentence(report.Exclusive);
+        if (downtime.Length > 0)
+        {
+            summary.Append("**").Append(downtime).Append("**\n\n");
+        }
+
         summary.Append("| Field | Value |\n| --- | --- |\n");
         void Row(string field, string value) => summary.Append("| ").Append(field).Append(" | `").Append(value.Length == 0 ? "n/a" : value).Append("` |\n");
         Row("Outcome", report.Outcome);
@@ -1010,6 +1362,15 @@ static class Guard
         Row("Failed resources", string.Join(", ", report.FailedResources));
         Row("Stuck release recovery", report.Recovery);
         Row("Rollout timeout", report.RolloutTimeout);
+        Row("Deploy mode", report.Exclusive.Enabled ? $"exclusive ({report.Exclusive.Status})" : "rolling");
+        if (report.Exclusive.Enabled)
+        {
+            Row("Stopped replicas", string.Join(", ", report.Exclusive.Workloads.Select(workload => $"{workload.Name}={Text(workload.Replicas)}")));
+            Row("Downtime", report.Exclusive.DowntimeStartedAt.Length == 0
+                ? string.Empty
+                : $"{report.Exclusive.DowntimeStartedAt} to {(report.Exclusive.DowntimeEndedAt.Length == 0 ? "not restored" : report.Exclusive.DowntimeEndedAt)}");
+            Row("Replicas restored by the guard", string.Join(", ", report.Exclusive.RestoredByGuard));
+        }
         if (report.Outcome == Outcomes.Deployed && report.PreviousRevision is not null)
         {
             summary.Append("\nManual rollback reference: `helm rollback ").Append(report.Release).Append(' ').Append(Text(report.PreviousRevision))
@@ -1045,10 +1406,16 @@ static class Guard
             ["verification_failed_after_helm_success"] = report.VerificationFailedAfterHelmSuccess,
             ["rollout_timeout"] = report.RolloutTimeout,
             ["failed_resources"] = new JsonArray([.. report.FailedResources.Select(name => (JsonNode?)JsonValue.Create(name))]),
+            ["exclusive"] = report.Exclusive.ToJson(),
         };
         File.WriteAllText(Path.Combine(settings.ReportDirectory, "deploy-report.json"), json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
 
         Console.WriteLine(headline);
+        if (downtime.Length > 0)
+        {
+            Console.WriteLine(downtime);
+        }
+
         if (report.Outcome is not (Outcomes.Deployed or Outcomes.NotAttempted))
         {
             Annotate("error", headline);
@@ -1057,6 +1424,29 @@ static class Guard
         // A job that already failed stays failed. This exit code is what fails it when Helm said "success" but the
         // rollout verification disagreed, and it keeps every non-deployed outcome red in its own right.
         return report.Outcome is Outcomes.Deployed or Outcomes.NotAttempted ? 0 : 1;
+    }
+
+    // Plain statement of the outage an exclusive deployment caused; empty for a rolling one or when nothing was stopped.
+    static string DowntimeSentence(ExclusiveState exclusive)
+    {
+        if (!exclusive.Enabled)
+        {
+            return string.Empty;
+        }
+
+        if (exclusive.DowntimeStartedAt.Length == 0)
+        {
+            return exclusive.Status switch
+            {
+                ExclusiveStatuses.FirstInstall => "This deployment was exclusive. It was a first install, so nothing was stopped and there was no downtime.",
+                ExclusiveStatuses.NoDeployments => "This deployment was exclusive, but the release owned no Deployment, so nothing was stopped.",
+                _ => "This deployment was exclusive. Nothing was stopped.",
+            };
+        }
+
+        return exclusive.DowntimeEndedAt.Length > 0
+            ? $"This deployment was exclusive: the service was down from {exclusive.DowntimeStartedAt} to {exclusive.DowntimeEndedAt}."
+            : $"This deployment was exclusive: the service has been down since {exclusive.DowntimeStartedAt} and is NOT restored.";
     }
 
     static void WriteOutput(Settings settings, string name, string value)
@@ -1081,6 +1471,7 @@ static class Guard
             ["recovered_from_status"] = state.RecoveredFromStatus,
             ["schema_cronjob_identity"] = state.SchemaCronJobIdentity,
             ["deploy_started_at"] = state.DeployStartedAt,
+            ["exclusive"] = state.Exclusive.ToJson(),
             ["history"] = HistoryEntry.ToJson(state.History),
         };
         File.WriteAllText(settings.StatePath, json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
@@ -1105,6 +1496,7 @@ static class Guard
                 RecoveredFromStatus = json?["recovered_from_status"]?.GetValue<string>() ?? string.Empty,
                 SchemaCronJobIdentity = json?["schema_cronjob_identity"]?.GetValue<string>() ?? string.Empty,
                 DeployStartedAt = json?["deploy_started_at"]?.GetValue<string>() ?? string.Empty,
+                Exclusive = ExclusiveState.FromJson(json?["exclusive"]),
                 History = HistoryEntry.Parse(json?["history"]?.ToJsonString() ?? "[]") ?? [],
             };
         }
@@ -1258,6 +1650,7 @@ static class Outcomes
     public const string FailedNoPreviousRelease = "failed-no-previous-release";
     public const string FailedReleaseUnchanged = "failed-release-unchanged";
     public const string FailedRollbackDisabled = "failed-rollback-disabled";
+    public const string FailedExclusiveStop = "failed-exclusive-stop";
     public const string Cancelled = "cancelled";
     public const string NotAttempted = "not-attempted";
 }
@@ -1277,7 +1670,100 @@ sealed class GuardInputException(string message) : Exception(message);
 
 sealed record ProcessResult(int ExitCode, string Stdout, string Stderr);
 
-sealed record Workload(string Kind, string Name, Dictionary<string, string> Selector, bool RolledOut)
+static class ExclusiveStatuses
+{
+    public const string Off = "off";
+    public const string FirstInstall = "first-install";
+    public const string NoDeployments = "no-deployments";
+    public const string Stopped = "stopped";
+    public const string StopFailed = "stop-failed";
+}
+
+static class ExclusiveRestores
+{
+    public const string NotRun = "not-run";
+    public const string NotNeeded = "not-needed";
+    public const string Restored = "restored";
+    public const string Failed = "failed";
+}
+
+// A Deployment an exclusive deployment stopped: its name, the replica count to put back, and the selector its pods carry.
+sealed record ExclusiveWorkload(string Name, long Replicas, Dictionary<string, string> Selector);
+
+/*
+ * What an exclusive deployment stopped and when. Written to the state file by the capture phase before the first
+ * scale call, so the finalize phase can put the replica counts back whatever happens in between.
+ */
+sealed class ExclusiveState
+{
+    public bool Enabled { get; set; }
+
+    // off | first-install | no-deployments | stopped | stop-failed
+    public string Status { get; set; } = ExclusiveStatuses.Off;
+
+    public List<ExclusiveWorkload> Workloads { get; set; } = [];
+
+    // RFC 3339 UTC second the first Deployment was scaled to 0; empty when nothing was stopped.
+    public string DowntimeStartedAt { get; set; } = string.Empty;
+
+    // RFC 3339 UTC second the restored or newly deployed release was verified rolled out; empty while still down.
+    public string DowntimeEndedAt { get; set; } = string.Empty;
+
+    // not-run | not-needed | restored | failed
+    public string Restore { get; set; } = ExclusiveRestores.NotRun;
+
+    // Deployments Helm did not bring back by itself, so the guard scaled them.
+    public List<string> RestoredByGuard { get; set; } = [];
+
+    public JsonObject ToJson() => new()
+    {
+        ["enabled"] = Enabled,
+        ["status"] = Status,
+        ["downtime_started_at"] = DowntimeStartedAt,
+        ["downtime_ended_at"] = DowntimeEndedAt,
+        ["restore"] = Restore,
+        ["restored_by_guard"] = new JsonArray([.. RestoredByGuard.Select(name => (JsonNode?)JsonValue.Create(name))]),
+        ["workloads"] = new JsonArray([.. Workloads.Select(workload => (JsonNode?)new JsonObject
+        {
+            ["name"] = workload.Name,
+            ["replicas"] = workload.Replicas,
+            ["selector"] = new JsonObject([.. workload.Selector.Select(label => KeyValuePair.Create(label.Key, (JsonNode?)JsonValue.Create(label.Value)))]),
+        })]),
+    };
+
+    public static ExclusiveState FromJson(JsonNode? json)
+    {
+        var state = new ExclusiveState();
+        if (json is not JsonObject)
+        {
+            return state;
+        }
+
+        state.Enabled = json["enabled"]?.GetValue<bool>() ?? false;
+        state.Status = json["status"]?.GetValue<string>() ?? ExclusiveStatuses.Off;
+        state.DowntimeStartedAt = json["downtime_started_at"]?.GetValue<string>() ?? string.Empty;
+        state.DowntimeEndedAt = json["downtime_ended_at"]?.GetValue<string>() ?? string.Empty;
+        state.Restore = json["restore"]?.GetValue<string>() ?? ExclusiveRestores.NotRun;
+        state.RestoredByGuard = [.. (json["restored_by_guard"] as JsonArray ?? []).Select(name => name?.GetValue<string>() ?? string.Empty).Where(name => name.Length > 0)];
+        foreach (var item in json["workloads"] as JsonArray ?? [])
+        {
+            var selector = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (item?["selector"] is JsonObject labels)
+            {
+                foreach (var label in labels)
+                {
+                    selector[label.Key] = label.Value?.GetValue<string>() ?? string.Empty;
+                }
+            }
+
+            state.Workloads.Add(new ExclusiveWorkload(item?["name"]?.GetValue<string>() ?? string.Empty, Guard.Number(item?["replicas"]) ?? 1, selector));
+        }
+
+        return state;
+    }
+}
+
+sealed record Workload(string Kind, string Name, Dictionary<string, string> Selector, bool RolledOut, long Replicas)
 {
     public bool Selects(Pod pod) =>
         Selector.Count > 0 && Selector.All(label => pod.Labels.TryGetValue(label.Key, out var value) && value == label.Value);
@@ -1355,6 +1841,8 @@ sealed class GuardState
     // RFC 3339 UTC second at which the capture phase began; handed to the schema rollback Job.
     public string DeployStartedAt { get; set; } = string.Empty;
 
+    public ExclusiveState Exclusive { get; set; } = new();
+
     public List<HistoryEntry> History { get; set; } = [];
 }
 
@@ -1396,6 +1884,11 @@ sealed class Report
 
     public bool VerificationFailedAfterHelmSuccess { get; set; }
 
+    // Exclusive only: a schema Job was due but could not run safely, so the outcome cannot be a clean rollback.
+    public bool SchemaRollbackBlocked { get; set; }
+
+    public ExclusiveState Exclusive { get; set; } = new();
+
     public string RolloutTimeout { get; set; } = string.Empty;
 
     public List<string> FailedResources { get; } = [];
@@ -1436,6 +1929,7 @@ sealed record Settings(
     string RolloutTimeoutText,
     TimeSpan RolloutTimeout,
     bool RollbackOnFailure,
+    bool Exclusive,
     string SchemaRollbackCronJob,
     string ReportDirectory,
     string StatePath,
@@ -1495,6 +1989,9 @@ sealed record Settings(
             RolloutTimeoutText: timeoutText,
             RolloutTimeout: ParseDuration(timeoutText),
             RollbackOnFailure: !string.Equals(Optional("DEPLOY_GUARD_ROLLBACK_ON_FAILURE"), "false", StringComparison.OrdinalIgnoreCase),
+
+            // Opt-in, unlike the rollback: only an explicit "true" accepts the downtime.
+            Exclusive: string.Equals(Optional("DEPLOY_GUARD_EXCLUSIVE"), "true", StringComparison.OrdinalIgnoreCase),
             SchemaRollbackCronJob: cronJob,
             ReportDirectory: reportDirectory,
             StatePath: Path.Combine(reportDirectory, "release-state.json"),

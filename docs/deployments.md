@@ -94,6 +94,7 @@ The step summary, the workflow outputs, and `artifacts/deploy-report/deploy-repo
 | `failed-no-previous-release` | A first install failed. Nothing exists to return to; the failed release stays for inspection. | **needs attention** |
 | `failed-release-unchanged` | The deployment failed before Helm created a revision (build, push, render). | untouched |
 | `failed-rollback-disabled` | The deployment failed and `rollback-on-failure` is `false`. | **needs attention** |
+| `failed-exclusive-stop` | `exclusive: true`, and the release could not be stopped before the deploy. Nothing was deployed; the recorded replica counts are restored and rolled out. When that restore fails too, the outcome is `rollback-failed`. | previous release |
 | `cancelled` | The run was cancelled or hit the job timeout. No rollback is attempted; the next run recovers a pending release first. | unverified |
 | `not-attempted` | An earlier step failed. | untouched |
 
@@ -107,7 +108,8 @@ The rollback only restores an environment whose chart cooperates.
 |---|---|
 | Deployments use `strategy.rollingUpdate.maxUnavailable: 0`. | Old pods keep serving while new pods fail, so users see no outage between the failure and the rollback. |
 | Every container has a startup or readiness probe that fails when the app cannot work. | `--wait` and the rollout verification only see readiness. A pod that reports ready while broken deploys green. |
-| Migrations stay compatible with the previous release. | Old and new pods run side by side during every rollout, and old pods keep running after a failed one. Expand first, contract in a later release. |
+| Migrations stay compatible with the previous release, unless the deployment is [exclusive](#rolling-versus-exclusive). | Old and new pods run side by side during every rollout, and old pods keep running after a failed one. Expand first, contract in a later release. |
+| The migrator refuses a migration marked breaking unless `ARKANIS_DEPLOY_EXCLUSIVE` is `true`. | A rolling deploy of a breaking migration breaks the previous version while it still serves. See [Rolling versus exclusive](#rolling-versus-exclusive). |
 | The chart ships a suspended `schema-rollback` CronJob when a release changes the schema in a way the previous release cannot run on, preferably as a Helm `pre-install,pre-upgrade` hook. | Helm reverts manifests, not data. |
 | The schema hook is idempotent and depends only on objects the previous release also has. | It may run when the migrator never did, and it runs after the rollback reverted the release's ConfigMaps and Secrets. |
 | The schema hook leaves alone every schema change it recorded before `ARKANIS_DEPLOY_STARTED_AT`, and succeeds doing nothing when there is no later one. | A hook-shaped CronJob also runs when a redeploy of an already deployed version fails. Its checkpoint from the earlier, successful deploy must not be reverted under the restored release. |
@@ -191,9 +193,93 @@ A failed or timed-out Job raises an error, sets `schema-rollback` to `failed` or
 | Deploy green but pods crash later | Probes report ready before the app works. | Pod restarts after the rollout. | Add a startup probe that reflects real readiness. | Probe contract above. |
 | Schema hook `skipped`, "not changed by this deployment" | The CronJob is an ordinary chart resource and its spec is identical to the previous release's, the upgrade failed before applying it, or the deploy ran with `--no-hooks`. | `kubectl get cronjob schema-rollback -o jsonpath='{.metadata.uid}/{.metadata.generation}'` before and after. | Ship it as a `pre-install,pre-upgrade` hook with `before-hook-creation`. | Same. |
 | `cancelled`, release left `pending-upgrade` | Job timeout or manual cancel during the Helm wait. | `helm status <release> -n <ns>`. | Rerun; the next run recovers the release before deploying. | Raise `timeout-minutes`. |
+| `failed-exclusive-stop`, "These pods still exist after ..." | A pod of the release does not terminate within `rollout-timeout`: long `terminationGracePeriodSeconds`, a finalizer, an unreachable node. | The capture log names the pods; `kubectl get pods -n <ns> -o wide`. | Fix the pod, rerun. The replica counts were restored. | Keep the grace period well below `rollout-timeout`. |
+| Migrator refuses to start, "breaking migration" | A breaking migration in a rolling deploy. | The migrator log in `diagnostics/before-rollback/logs`. | The rollback restored the previous release. Redeploy with `exclusive: true`, or split the change into expand and contract releases. | Plan schema changes as expand/contract (ARK-746). |
+| `cancelled` during an exclusive deploy, workloads at 0 replicas | The run was cancelled after Helm started the upgrade. | `kubectl get deployments -n <ns>` shows `0/0`. | Rerun: the next run recovers a pending release, and Helm re-applies the replica counts. A cancel before Helm ran is restored in the same run. | Raise `timeout-minutes`. |
 
 Diagnostics can still contain whatever the application writes to its own log.
 The guard itself reads no Secret, no release values, and no release manifest, and replaces every literal value in a pod's `Environment` block with `<redacted>`.
+
+## Rolling versus exclusive
+
+Last verified: 2026-11-20 against the `kubectl scale` reference, and live against a kind cluster (Kubernetes v1.37.0, Helm v4.3.1) with `tests/live/helm-release-guard-kind.sh`.
+
+| Mode | Input | Previous version during the migration | Downtime | Migrations allowed |
+|---|---|---|---|---|
+| **Rolling** (default) | `exclusive: false` | Keeps serving (`maxUnavailable: 0`). | None. | Backwards compatible only. |
+| **Exclusive** | `exclusive: true` | Stopped before the deploy starts. | From the stop until the new (or restored) release is verified. | Breaking ones too. |
+
+Rolling is the normal way to deploy. The previous version serves while the new version's migrator changes the schema, so every migration must be one the previous version can run on.
+Exclusive is the escape hatch for the release whose schema change the previous version cannot tolerate. The preferred way is still expand/contract across releases (expand in one release, migrate code, contract in a later release), tracked as ARK-746.
+
+### What exclusive does
+
+> Diagram: the exclusive path through the guard, from stopping the previous version to the reported downtime window.
+
+<details>
+<summary>Exclusive deployment flow</summary>
+
+```mermaid
+flowchart TD
+  capture[[Record release, recover if pending]] --> exists{Release exists?}
+  exists -->|no| deploy
+  exists -->|yes| stop[[Record replicas, scale Deployments to 0]]
+  stop --> gone{Pods gone within rollout-timeout?}
+  gone -->|no| restoreStop[[Restore replicas, verify]]
+  restoreStop --> stopFailed(("failed-exclusive-stop"))
+  gone -->|yes| deploy[[aspire deploy with ARKANIS_DEPLOY_EXCLUSIVE=true]]
+  deploy -->|success| fixZero[[Put back Deployments left at 0, verify]]
+  fixZero --> deployed(("deployed, downtime T1 to T2"))
+  deploy -->|failure| diag[[Diagnostics, render schema Job]]
+  diag --> stopNew[[Stop the failed release]]
+  stopNew --> schema[[Run schema rollback Job]]
+  schema --> rollback[[helm rollback --wait]]
+  rollback --> restore[[Restore recorded replicas, verify]]
+  restore --> rolledBack(("rolled-back, downtime T1 to T2"))
+```
+
+</details>
+
+1. **Capture, after recording and recovery.** Every Deployment carrying the release's `meta.helm.sh/release-name` annotation is recorded with its `spec.replicas` (in `release-state.json`), then scaled to 0. The guard waits, bounded by `rollout-timeout`, until no pod any of them selects exists. Terminating pods count as still present.
+2. **Deploy.** The deploy step receives `ARKANIS_DEPLOY_EXCLUSIVE=true`, and only then: the variable is exported only when `exclusive` is `true` and the capture step confirmed the stop. Helm's upgrade re-applies the chart's replica counts.
+3. **Success.** The guard puts back any recorded Deployment the new chart left at 0, then verifies every rollout as usual. A different non-zero count is the new chart's decision and is kept.
+4. **Failure.** Diagnostics, render the schema Job, **stop the failed release** (all its Deployments to 0, wait for the pods), run the schema Job, `helm rollback --wait`, then set every recorded Deployment back to its recorded count when it is not there already, and verify.
+5. **Report.** The summary says plainly that the deployment was exclusive and the service was down from T1 to T2 (`downtime-started-at`, `downtime-ended-at`), or that it is still down.
+
+The schema Job runs **before** the Helm rollback in exclusive mode, unlike the rolling path.
+The previous version cannot run on the failed release's schema, which is why the deploy was exclusive: `helm rollback --wait` would wait for pods that never become ready, and the schema Job would never run.
+Stopping the failed release first keeps the guarantee the rolling path gets from the rollback: no new-version pod uses the schema while it is reverted.
+The Job therefore runs with the failed release's ConfigMaps and Secrets still applied.
+
+| Situation | Behaviour | Outcome |
+|---|---|---|
+| Release does not exist yet | Nothing to stop. The variable is still exported. | as usual |
+| Release owns no Deployment | Warning, nothing stopped. | as usual |
+| Deployments cannot be listed, or one has no `matchLabels` | Nothing is stopped, nothing is deployed. | `failed-exclusive-stop` |
+| Scale-down fails, or pods remain after `rollout-timeout` | Nothing is deployed. Recorded replica counts restored, rollouts verified. | `failed-exclusive-stop` (`rollback-failed` when the restore fails) |
+| Deploy fails before Helm created a revision | Recorded replica counts restored, rollouts verified. | `failed-release-unchanged` |
+| Failed release cannot be stopped before the schema Job | Job not run; rollback and restore still run. | `rollback-failed` |
+| `helm rollback` fails | No replica restore: the manifests are in an unknown state. Still down. | `rollback-failed` |
+| Cancelled before Helm changed the release | Recorded replica counts restored. | `cancelled` |
+| Cancelled after Helm changed the release | Left alone; the next run recovers the pending release. | `cancelled` |
+
+StatefulSets are not stopped.
+In an Aspire chart they are the data tier, a database or broker container with a volume, which the new version's migrator needs in order to migrate.
+The application code whose schema expectations break runs in Deployments.
+DaemonSets cannot be scaled, and Jobs and CronJobs are not long-running servers.
+
+### Consumer contract for breaking migrations
+
+| Requirement | Why |
+|---|---|
+| Mark every migration the previous release cannot run on as breaking. | Only the migrator knows which change is breaking. |
+| The migrator refuses to apply a breaking migration unless `ARKANIS_DEPLOY_EXCLUSIVE` is exactly `true`. The AppHost reads the variable at publish time and passes the permission to the migrator. | A rolling deploy then fails before it changes the schema, and the guard rolls it back, instead of breaking the previous version while it still serves. |
+| Treat an unset or empty variable as "not exclusive". | The workflow never sets it for a rolling deploy, not even to `false`. |
+| Ship the `schema-rollback` hook for every breaking migration. | Exclusive mode reverts the schema before the rollback; without the hook the restored release cannot start. |
+| No HorizontalPodAutoscaler may scale a stopped Deployment back up. | The HPA controller does not act on a Deployment at 0 replicas, so this holds unless HPA scale-to-zero is enabled. |
+| Use it rarely, and plan the downtime. | Every exclusive deploy is an outage; a release that needs one is a release that skipped expand/contract. |
+
+`ARKANIS_DEPLOY_EXCLUSIVE` is defined as `DeployExclusiveVariable` in `helm-release-guard.cs`, next to `ARKANIS_DEPLOY_STARTED_AT`.
 
 ## Auth
 
@@ -203,6 +289,7 @@ The guard itself reads no Secret, no release values, and no release manifest, an
 - Delete credentials in cleanup.
 
 The deploy identity needs, in the target namespace: read on Deployments, StatefulSets, DaemonSets, Jobs, ReplicaSets, Pods, pod logs, Events, and CronJobs; create, get, and delete on Jobs; and whatever Helm needs to apply and roll back the chart, including its release Secrets.
+Exclusive deployments also need `get` and `patch` on `deployments/scale`.
 
 ## Concurrency
 

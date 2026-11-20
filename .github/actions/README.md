@@ -15,7 +15,7 @@ Keep each action narrow; prefer more small actions over one flag-heavy action.
 | `dotnet-pack-nuget` | Restores, optionally stamps, and packs one NuGet project. | Writes packages, package-list.txt, metadata, and an artifact manifest under `artifacts/`. |
 | `dotnet-publish-nuget` | Pushes existing NuGet package files with a caller-provided API key. | Calls `dotnet nuget push` for each matched `.nupkg`. |
 | `dotnet-setversion` | Installs `dotnet-setversion` and applies a bare SemVer value to .NET project files. | Modifies matched `.csproj` files. |
-| `helm-release-guard` | Records a Helm release before a deployment, then verifies it or rolls it back and reports the outcome. | May run `helm rollback`, create and delete one Job, and writes the deploy report and diagnostics. |
+| `helm-release-guard` | Records a Helm release before a deployment, then verifies it or rolls it back and reports the outcome. | May run `helm rollback`, create and delete one Job, scale the release's Deployments in exclusive mode, and writes the deploy report and diagnostics. |
 | `release-backpropagation` | Creates, approves, and optionally auto-merges release backpropagation PRs. | May create PRs, approve them, and enable auto-merge. |
 | `setup-dotnet` | Sets up .NET SDK, NuGet cache, optional local tools, and optional restore. | Writes `NUGET_PACKAGES` and restores cache/tools/dependencies. |
 | `setup-nuget-auth` | Prepares, applies, or cleans up private NuGet restore credentials. | Writes masked NuGet env credentials or a temporary BuildKit secret config. |
@@ -342,6 +342,8 @@ Preconditions:
 Side effects:
 
 - Capture: may run `helm rollback` to recover a release stuck in a `pending-*` state, and fails when the release cannot be read.
+- Capture with `exclusive: "true"`: records and then scales every Deployment of the release to 0, waits until their pods are gone, and outputs `exclusive=true`. When that fails it restores the replica counts and fails; the finalize phase then reports `failed-exclusive-stop`. Export `ARKANIS_DEPLOY_EXCLUSIVE=true` into the deployment step only when `steps.<capture>.outputs.exclusive == 'true'`. StatefulSets are not stopped.
+- Finalize after an exclusive capture: on success puts back a Deployment the chart left at 0; on failure stops the failed release, runs the schema Job, rolls back, restores the recorded replica counts, and verifies. Outputs `downtime-started-at` and `downtime-ended-at`; the summary states the window.
 - Finalize: on a failed deployment may run `helm rollback`, and creates, awaits, and deletes one Job rendered from the failed release's schema rollback CronJob. The CronJob may be a Helm `pre-install,pre-upgrade` hook (recommended) or an ordinary chart resource. Every container of the Job receives `ARKANIS_DEPLOY_STARTED_AT`, the RFC 3339 UTC instant the capture phase ran; the hook must leave schema changes recorded before it alone.
 - Writes `release-state.json`, `deploy-report.json`, `deploy-report.md`, and `diagnostics/` under `report-directory`.
 - Exits non-zero for every outcome except `deployed` and `not-attempted`.

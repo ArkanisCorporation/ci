@@ -7,6 +7,8 @@
 #   It expects Bash, the .NET 10 SDK, helm, and kubectl on PATH, and a kube context that can reach the cluster.
 #   Linux and macOS runners only: helm-timeout-shim.sh, which ships with this action, is a Bash script.
 #   It never reads Secret objects and redacts pod environment values from the diagnostics it writes.
+#   exclusive: "true" (opt-in) stops the release's Deployments before the deployment; the finalize phase reads that
+#   from the state file, restores the recorded replica counts, and reports the downtime window.
 
 name: Helm Release Guard
 description: Records a Helm release before a deployment, then verifies it or rolls it back and reports the outcome.
@@ -33,6 +35,10 @@ inputs:
     description: Rolls the release back to its last deployed revision when the deployment failed.
     required: false
     default: "true"
+  exclusive:
+    description: Capture only. When true, scales every Deployment of the release to 0 and waits until their pods are gone before the deployment (downtime); restores the replica counts and fails when that does not succeed.
+    required: false
+    default: "false"
   schema-rollback-cronjob:
     description: Name of the suspended CronJob whose Job undoes the failed release's schema changes. Empty disables the hook.
     required: false
@@ -68,7 +74,7 @@ outputs:
     description: Finalize only. Revision that is live when the job ends.
     value: ${{ steps.guard.outputs.current-revision }}
   outcome:
-    description: Finalize only. deployed, rolled-back, rollback-failed, failed-no-previous-release, failed-release-unchanged, failed-rollback-disabled, cancelled, or not-attempted.
+    description: Finalize only. deployed, rolled-back, rollback-failed, failed-no-previous-release, failed-release-unchanged, failed-rollback-disabled, failed-exclusive-stop, cancelled, or not-attempted.
     value: ${{ steps.guard.outputs.outcome }}
   schema-rollback:
     description: Finalize only. not-run, not-configured, not-found, skipped, succeeded, failed, or timed-out.
@@ -82,6 +88,15 @@ outputs:
   recovered:
     description: Capture only. True when a release stuck in a pending state was rolled back before the deployment.
     value: ${{ steps.guard.outputs.recovered }}
+  exclusive:
+    description: Capture only. True when exclusive was requested and the release is stopped (or is a first install); the deploy step may then export ARKANIS_DEPLOY_EXCLUSIVE=true.
+    value: ${{ steps.guard.outputs.exclusive }}
+  downtime-started-at:
+    description: Finalize only. RFC 3339 UTC second an exclusive deployment stopped the release; empty when nothing was stopped.
+    value: ${{ steps.guard.outputs.downtime-started-at }}
+  downtime-ended-at:
+    description: Finalize only. RFC 3339 UTC second the service was verified back after an exclusive deployment; empty while it is still down.
+    value: ${{ steps.guard.outputs.downtime-ended-at }}
 
 runs:
   using: composite
@@ -97,6 +112,7 @@ runs:
         DEPLOY_GUARD_RELEASE_NAME: ${{ inputs.helm-release-name }}
         DEPLOY_GUARD_ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}
         DEPLOY_GUARD_ROLLBACK_ON_FAILURE: ${{ inputs.rollback-on-failure }}
+        DEPLOY_GUARD_EXCLUSIVE: ${{ inputs.exclusive }}
         DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB: ${{ inputs.schema-rollback-cronjob }}
         DEPLOY_GUARD_REPORT_DIR: ${{ inputs.report-directory }}
         DEPLOY_GUARD_DEPLOY_OUTCOME: ${{ inputs.deploy-outcome }}

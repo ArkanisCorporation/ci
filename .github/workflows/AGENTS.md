@@ -68,7 +68,7 @@ Recommended order:
 - `wf-rust-check.yml` verifies rustfmt, clippy `-D warnings`, cargo-deny, and an opt-in sqlx prepare check.
 - `wf-rust-test.yml` runs cargo-nextest with optional Docker preflight for testcontainers.
 - `wf-verify-deploy-k8s-aspire.yml` verifies Aspire Kubernetes deployment inputs without applying cluster changes.
-- `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes; `helm-release-guard` records the release first and verifies it or rolls it back afterwards, and a failed deployment always fails the job.
+- `wf-deploy-k8s-aspire.yml` deploys an Aspire AppHost to Kubernetes; `helm-release-guard` records the release first and verifies it or rolls it back afterwards, and a failed deployment always fails the job. `exclusive: true` stops the release first (downtime) and exports `ARKANIS_DEPLOY_EXCLUSIVE=true` into the deploy step only.
 - `wf-platform-selftest.yml` validates this platform repository.
 - `wf-publish-docs-openviking.yml` mirrors caller docs into OpenViking from the default branch; it reads its key from `arkanis-runners` env and must mask it itself.
 

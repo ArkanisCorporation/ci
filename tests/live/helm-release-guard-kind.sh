@@ -12,7 +12,8 @@
 #
 #   The "deploy step" is `helm upgrade --install <release> <chart> --namespace <ns> --create-namespace --wait`
 #   through the shim on PATH: the argument shape `aspire deploy` uses. The guard is driven with the same
-#   environment contract as action.yml.
+#   environment contract as action.yml. EXCLUSIVE=true before `run` drives the guard in exclusive mode and asserts
+#   that no pod of the release exists any more when the deploy step starts.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -46,6 +47,7 @@ guard() {
   : > "$dir/output-$3.txt"
   (cd "$dir/workspace" && DEPLOY_GUARD_PHASE="$3" DEPLOY_GUARD_NAMESPACE="$2" DEPLOY_GUARD_ASPIRE_ENVIRONMENT=Proof \
     DEPLOY_GUARD_RELEASE_NAME="" DEPLOY_GUARD_ROLLOUT_TIMEOUT="$rollout_timeout" DEPLOY_GUARD_ROLLBACK_ON_FAILURE=true \
+    DEPLOY_GUARD_EXCLUSIVE="${EXCLUSIVE:-false}" \
     DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB=schema-rollback DEPLOY_GUARD_REPORT_DIR=artifacts/deploy-report \
     DEPLOY_GUARD_DEPLOY_OUTCOME="${4:-}" DEPLOY_GUARD_SHIM_RECORD="$dir/runner-temp/helm-shim/upgrade-record" \
     DEPLOY_GUARD_JOB_TIMEOUT_MINUTES=60 GITHUB_WORKSPACE="$dir/workspace" RUNNER_TEMP="$dir/runner-temp" \
@@ -58,6 +60,11 @@ run() {
   local scenario="$1" ns="$2" expected="$3" shim="$work/$1/runner-temp/helm-shim" outcome=success code=0
   shift 3
   guard "$scenario" "$ns" capture || fail "$scenario: capture failed: $(tail -3 "$work/$scenario/capture.log")"
+  if [[ "${EXCLUSIVE:-false}" == true ]]; then
+    grep -q '^exclusive=true' "$work/$scenario/output-capture.txt" || fail "$scenario: capture did not confirm the exclusive stop"
+    [[ -z "$(kubectl get pods --namespace "$ns" --selector app=web --output name)" ]] || fail "$scenario: pods of the previous version still exist when the deploy starts"
+    [[ "$(kubectl get deployment web --namespace "$ns" --output jsonpath='{.spec.replicas}')" == 0 ]] || fail "$scenario: web is not scaled to 0 before the deploy"
+  fi
   install -m 0755 "$repo/.github/actions/helm-release-guard/helm-timeout-shim.sh" "$shim/helm"
   (export ARKANIS_REAL_HELM="$real_helm" ARKANIS_HELM_UPGRADE_TIMEOUT="$rollout_timeout" ARKANIS_HELM_SHIM_RECORD="$shim/upgrade-record" PATH="$shim:$PATH"
     timeout 300 helm upgrade --install proof "$chart" --namespace "$ns" --create-namespace --wait "$@") > "$work/$scenario/deploy.log" 2>&1 || outcome=failure
@@ -121,5 +128,28 @@ run schemafail plain nonzero --set marker=v3 --set ready=false --set hookShape=f
 expect schemafail outcome rollback-failed
 expect schemafail schema-rollback failed
 [[ "$(marker plain)" == v1 ]] || fail "schemafail: workload was not restored"
+
+# 8. Exclusive deployment succeeds: the previous version is stopped before the upgrade, Helm brings the replicas back.
+run exclusiveinstall excl zero --set marker=v1
+EXCLUSIVE=true run exclusive excl zero --set marker=v2
+expect exclusive outcome deployed
+[[ "$(marker excl)" == v2 ]] || fail "exclusive: workload is not v2"
+[[ "$(kubectl get deployment web --namespace excl --output jsonpath='{.spec.replicas}/{.status.readyReplicas}')" == 1/1 ]] || fail "exclusive: replicas not restored"
+[[ -n "$(output exclusive downtime-started-at)" && -n "$(output exclusive downtime-ended-at)" ]] || fail "exclusive: downtime window missing"
+grep -q "This deployment was exclusive: the service was down from $(output exclusive downtime-started-at) to $(output exclusive downtime-ended-at)." "$work/exclusive/summary.md" \
+  || fail "exclusive: summary does not state the downtime window"
+
+# 9. Exclusive deployment fails: failed release stopped, schema Job run, rolled back, replicas restored.
+EXCLUSIVE=true run exclusivebroken excl nonzero --set marker=v3 --set ready=false
+expect exclusivebroken outcome rolled-back
+expect exclusivebroken schema-rollback succeeded
+[[ "$(marker excl)" == v2 ]] || fail "exclusivebroken: workload was not restored to v2"
+[[ "$(kubectl get deployment web --namespace excl --output jsonpath='{.spec.replicas}/{.status.readyReplicas}')" == 1/1 ]] || fail "exclusivebroken: replicas not restored"
+job_log exclusivebroken | grep -q "marker=v3" || fail "exclusivebroken: schema Job did not run the failed release's hook"
+stop_line="$(grep -n 'Stop Deployments before the schema rollback' "$work/exclusivebroken/finalize.log" | head -1 | cut -d: -f1)"
+rollback_line="$(grep -n '^\$ helm rollback' "$work/exclusivebroken/finalize.log" | head -1 | cut -d: -f1)"
+[[ -n "$stop_line" && -n "$rollback_line" && "$stop_line" -lt "$rollback_line" ]] || fail "exclusivebroken: the failed release was not stopped before the rollback"
+[[ -n "$(output exclusivebroken downtime-ended-at)" ]] || fail "exclusivebroken: downtime did not end"
+grep -q "This deployment was exclusive: the service was down from" "$work/exclusivebroken/summary.md" || fail "exclusivebroken: summary does not state the downtime"
 
 echo "Helm release guard live proof passed ($(helm version --short), $(kubectl version --output json 2> /dev/null | grep -o '"gitVersion": *"[^"]*"' | tail -1))."

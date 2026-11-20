@@ -33,6 +33,9 @@ jobs:
       rollout-timeout: 15m
       rollback-on-failure: true
       schema-rollback-cronjob: schema-rollback
+      # Opt-in downtime for a release with a breaking migration: stops the previous version before deploying and
+      # exports ARKANIS_DEPLOY_EXCLUSIVE=true to the AppHost. Leave false for every backwards-compatible release.
+      exclusive: false
   report:
     needs: deploy
     # The deploy job is failed for every outcome but `deployed`, so read its outputs with always().

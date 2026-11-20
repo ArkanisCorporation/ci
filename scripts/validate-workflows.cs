@@ -2515,7 +2515,24 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
         AddFailure($"{workflowPath}: the release guard must run helm-release-guard phase: finalize with always() and the deploy step outcome, so a failed deployment is rolled back.");
     }
 
-    foreach (var sharedInput in new[] { "rollout-timeout", "rollback-on-failure", "schema-rollback-cronjob", "helm-release-name" })
+    // Exclusive mode (ARK-744): ARKANIS_DEPLOY_EXCLUSIVE is the consumer's licence to apply a breaking migration, so it
+    // may only reach the deploy step, and only when the caller opted in AND the capture step confirmed the stop.
+    const string ExclusiveGate = "          DEPLOY_EXCLUSIVE: ${{ inputs.exclusive && steps.release-state.outputs.exclusive == 'true' }}\n";
+    const string ExclusiveExport = "          if [[ \"$DEPLOY_EXCLUSIVE\" == \"true\" ]]; then\n            export ARKANIS_DEPLOY_EXCLUSIVE=true\n";
+    if (!deployStep.Contains(ExclusiveGate, StringComparison.Ordinal) || !deployStep.Contains(ExclusiveExport, StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the Aspire deploy step must export ARKANIS_DEPLOY_EXCLUSIVE=true only when inputs.exclusive is true and the capture step stopped the release.");
+    }
+
+    if (Regex.Count(workflowText, "export ARKANIS_DEPLOY_EXCLUSIVE") != 1
+        || Regex.Count(deployStep, "export ARKANIS_DEPLOY_EXCLUSIVE") != 1
+        || Regex.IsMatch(workflowText, @"(?m)^\s+ARKANIS_DEPLOY_EXCLUSIVE:")
+        || Regex.IsMatch(workflowText, @"(?m)ARKANIS_DEPLOY_EXCLUSIVE.*GITHUB_ENV"))
+    {
+        AddFailure($"{workflowPath}: ARKANIS_DEPLOY_EXCLUSIVE must be set by the deploy step's conditional export alone, never as an env key or outside that step.");
+    }
+
+    foreach (var sharedInput in new[] { "rollout-timeout", "rollback-on-failure", "schema-rollback-cronjob", "helm-release-name", "exclusive" })
     {
         var line = $"          {sharedInput}: ${{{{ inputs.{sharedInput} }}}}\n";
         if (!captureStep.Contains(line, StringComparison.Ordinal) || !guardStep.Contains(line, StringComparison.Ordinal))
@@ -2557,6 +2574,12 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
         {
             AddFailure($"{workflowPath}: input {inputName} must default to '{expectedDefault[(expectedDefault.IndexOf(':', StringComparison.Ordinal) + 1)..]}' so callers get the rollback without opting in.");
         }
+    }
+
+    // Downtime is never a default: a caller that passes nothing keeps the rolling deploy.
+    if (!inputs.TryGetValue("exclusive", out var exclusiveInput) || !string.Equals(NormalizeWorkflowDefault(exclusiveInput), "boolean:false", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: input exclusive must be a boolean defaulting to false; stopping the release is opt-in.");
     }
 
     // 15m deploy wait + 15m rollback wait + build, push, diagnostics: a smaller job timeout cancels the rollback.
@@ -2625,6 +2648,26 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
             || startedAtCapture < 0 || firstClusterRead < 0 || startedAtCapture > firstClusterRead)
         {
             AddFailure($"{guardScriptPath}: the guard must record the deployment start (RFC 3339 UTC, before any cluster call) and pass it to every schema rollback Job container as ARKANIS_DEPLOY_STARTED_AT.");
+        }
+
+        // Exclusive mode: the stop is the capture phase's last act before the deploy may start, a failed stop restores the
+        // recorded replicas, and the failure path reverts the schema with the failed release stopped, before the Helm
+        // rollback, then restores the replicas after it.
+        var captureStart = guardText.IndexOf("static int CaptureState(Settings settings)", StringComparison.Ordinal);
+        var cronJobCapture = guardText.IndexOf("state.SchemaCronJobIdentity = ReadCronJobIdentity(settings, state.Namespace);", StringComparison.Ordinal);
+        var exclusiveStop = guardText.IndexOf("if (settings.Exclusive && !StopReleaseForExclusiveDeploy(settings, state))", StringComparison.Ordinal);
+        var captured = guardText.IndexOf("state.Captured = true;", StringComparison.Ordinal);
+        var stopMethod = guardText.IndexOf("static bool StopReleaseForExclusiveDeploy(Settings settings, GuardState state)", StringComparison.Ordinal);
+        var stopFailureRestore = guardText.IndexOf("RestoreExclusiveReplicas(settings, exclusive, state.Namespace, onlyWhereZero: false, failed, \"after the failed stop\");", StringComparison.Ordinal);
+        var exclusiveSchema = guardText.IndexOf("RunSchemaRollbackBeforeExclusiveRollback(settings, report, schemaJob, release, ns);", StringComparison.Ordinal);
+        var restoreAfterRollback = guardText.IndexOf("RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: false, stillBroken, \"after the rollback\");", StringComparison.Ordinal);
+        var verifyAfterRollback = guardText.IndexOf("VerifyRollouts(settings, ReadWorkloads(release, ns), ns, \"after the rollback\")", StringComparison.Ordinal);
+        if (!guardText.Contains("public const string DeployExclusiveVariable = \"ARKANIS_DEPLOY_EXCLUSIVE\";", StringComparison.Ordinal)
+            || !(captureStart >= 0 && captureStart < cronJobCapture && cronJobCapture < exclusiveStop && exclusiveStop < captured && captured < finalizeStart)
+            || stopMethod < 0 || stopFailureRestore < stopMethod
+            || !(renderSchemaJob < exclusiveSchema && exclusiveSchema < rollback && rollback < restoreAfterRollback && restoreAfterRollback < verifyAfterRollback))
+        {
+            AddFailure($"{guardScriptPath}: exclusive mode must stop the release last in the capture phase, restore the recorded replicas when the stop fails, and on a failed deployment revert the schema before the Helm rollback and restore the replicas after it, before verifying.");
         }
 
         if (guardText.Contains("#:package", StringComparison.Ordinal))

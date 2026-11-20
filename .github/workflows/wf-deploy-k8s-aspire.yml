@@ -10,6 +10,8 @@
 #   run left pending, and afterwards verifies the rollout or collects diagnostics and rolls the release back.
 #   A helm shim on PATH for the deploy step alone supplies the --timeout Aspire does not set.
 #   A failed deploy always fails the job, whether or not the rollback restored the environment.
+#   exclusive: true stops every Deployment of the release before the deploy (downtime) and exports
+#   ARKANIS_DEPLOY_EXCLUSIVE=true into the deploy step alone, so the AppHost may allow a breaking migration.
 #   Use wf-verify-deploy-k8s-aspire.yml for deployment input verification without cluster mutation.
 #   It calls runs-on/cache for NuGet only when enable-cache is true and the runner does not advertise a
 #   persistent NuGet folder (ARKANIS_PERSISTENT_NUGET_PACKAGES=true, ARK-528).
@@ -115,6 +117,11 @@ on:
         type: boolean
         required: false
         default: true
+      exclusive:
+        description: Stops every workload of the release before deploying, causing downtime. For releases whose schema change the previous version cannot tolerate; the deploy step then receives ARKANIS_DEPLOY_EXCLUSIVE=true.
+        type: boolean
+        required: false
+        default: false
       schema-rollback-cronjob:
         description: Suspended CronJob in the chart, as a Helm pre-install,pre-upgrade hook or an ordinary resource, whose Job undoes the failed release's schema changes after a rollback. Skipped when absent; empty disables it.
         type: string
@@ -150,7 +157,7 @@ on:
         description: Path to the generated artifact manifest.
         value: ${{ jobs.deploy.outputs.artifact-manifest }}
       outcome:
-        description: deployed, rolled-back, rollback-failed, failed-no-previous-release, failed-release-unchanged, failed-rollback-disabled, cancelled, or not-attempted.
+        description: deployed, rolled-back, rollback-failed, failed-no-previous-release, failed-release-unchanged, failed-rollback-disabled, failed-exclusive-stop, cancelled, or not-attempted.
         value: ${{ jobs.deploy.outputs.outcome }}
       helm-release:
         description: Helm release that was deployed.
@@ -392,6 +399,8 @@ jobs:
 
       # Before anything is deployed: record the release's revisions (the rollback target), roll back a release a
       # cancelled run left in a pending-* state, and fail closed when the release cannot be read at all.
+      # With exclusive: true it then scales every Deployment of the release to 0 and waits until their pods are gone;
+      # when that fails it restores the replica counts and fails, so the deploy step never runs.
       - name: Record release state @ ${{ inputs.helm-release-name || inputs.aspire-environment }}
         id: release-state
         uses: ./.ci/arkanis-ci/.github/actions/helm-release-guard
@@ -402,6 +411,7 @@ jobs:
           helm-release-name: ${{ inputs.helm-release-name }}
           rollout-timeout: ${{ inputs.rollout-timeout }}
           rollback-on-failure: ${{ inputs.rollback-on-failure }}
+          exclusive: ${{ inputs.exclusive }}
           schema-rollback-cronjob: ${{ inputs.schema-rollback-cronjob }}
           report-directory: artifacts/deploy-report
           shim-record-path: ${{ runner.temp }}/helm-shim/upgrade-record
@@ -418,10 +428,19 @@ jobs:
           ENVIRONMENT_NAME: ${{ inputs.environment-name }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}
+          # True only when the caller asked for exclusive AND the capture step confirmed the release is stopped.
+          DEPLOY_EXCLUSIVE: ${{ inputs.exclusive && steps.release-state.outputs.exclusive == 'true' }}
         run: |
           mkdir -p "${OUTPUT_PATH}/${ENVIRONMENT_NAME}"
           if [[ -n "$IMAGE_TAG" ]]; then
             export Kubernetes__Images__Tag="$IMAGE_TAG"
+          fi
+
+          # Consumer contract (docs/deployments.md): the AppHost reads this at publish time and lets the migrator apply
+          # a migration marked breaking only when it is "true". A rolling deploy must never see it, not even empty.
+          if [[ "$DEPLOY_EXCLUSIVE" == "true" ]]; then
+            export ARKANIS_DEPLOY_EXCLUSIVE=true
+            echo "Exclusive deployment: the previous version is stopped; ARKANIS_DEPLOY_EXCLUSIVE=true."
           fi
 
           # Aspire.Hosting.Kubernetes hardcodes `helm upgrade --install ... --wait` and accepts no extra arguments,
@@ -461,6 +480,7 @@ jobs:
           helm-release-name: ${{ inputs.helm-release-name }}
           rollout-timeout: ${{ inputs.rollout-timeout }}
           rollback-on-failure: ${{ inputs.rollback-on-failure }}
+          exclusive: ${{ inputs.exclusive }}
           schema-rollback-cronjob: ${{ inputs.schema-rollback-cronjob }}
           report-directory: artifacts/deploy-report
           shim-record-path: ${{ runner.temp }}/helm-shim/upgrade-record
@@ -523,6 +543,9 @@ jobs:
           NEW_REVISION: ${{ steps.guard.outputs.new-revision }}
           CURRENT_REVISION: ${{ steps.guard.outputs.current-revision }}
           FAILED_RESOURCES: ${{ steps.guard.outputs.failed-resources }}
+          DEPLOY_MODE: ${{ inputs.exclusive && 'exclusive' || 'rolling' }}
+          DOWNTIME_STARTED_AT: ${{ steps.guard.outputs.downtime-started-at }}
+          DOWNTIME_ENDED_AT: ${{ steps.guard.outputs.downtime-ended-at }}
         run: |
           {
             echo "# Aspire Kubernetes deployment"
@@ -540,6 +563,10 @@ jobs:
             echo "| New revision | \`${NEW_REVISION:-none}\` |"
             echo "| Current revision | \`${CURRENT_REVISION:-n/a}\` |"
             echo "| Failed resources | \`${FAILED_RESOURCES:-none}\` |"
+            echo "| Deploy mode | \`${DEPLOY_MODE}\` |"
+            if [[ -n "$DOWNTIME_STARTED_AT" ]]; then
+              echo "| Downtime | \`${DOWNTIME_STARTED_AT} to ${DOWNTIME_ENDED_AT:-not restored}\` |"
+            fi
             echo "| Manifest | \`${{ steps.manifest.outputs.path }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 

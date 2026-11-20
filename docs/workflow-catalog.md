@@ -121,6 +121,7 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `helm-release-name` | string | no | `""` | Helm release the AppHost deploys. Empty uses the lowercased aspire-environment, which is Aspire's default. |
 | `rollout-timeout` | string | no | `"15m"` | Helm duration (15m, 900s, 1h30m) for the deploy wait, the rollback wait, and the schema rollback Job. |
 | `rollback-on-failure` | boolean | no | `true` | Rolls the release back to its last deployed revision when the deployment fails. The job fails either way. |
+| `exclusive` | boolean | no | `false` | Stops every workload of the release before deploying, causing downtime. For releases whose schema change the previous version cannot tolerate; the deploy step then receives ARKANIS_DEPLOY_EXCLUSIVE=true. |
 | `schema-rollback-cronjob` | string | no | `"schema-rollback"` | Suspended CronJob in the chart, as a Helm pre-install,pre-upgrade hook or an ordinary resource, whose Job undoes the failed release's schema changes after a rollback. Skipped when absent; empty disables it. |
 | `timeout-minutes` | integer | no | `60` | Deployment job timeout. Keep it above twice rollout-timeout plus build time so a rollback is never cancelled.<br>Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
@@ -2351,6 +2352,12 @@ A failed deployment does not leave the environment broken ([ADR-0010](adr/0010-d
 The job fails whenever the deployment failed, including when the rollback restored the environment.
 All of this is the default: callers that pass none of `helm-release-name`, `rollout-timeout`, `rollback-on-failure`, and `schema-rollback-cronjob` get it.
 
+`exclusive: true` (default `false`) is for the release whose schema change the previous version cannot tolerate, and causes downtime ([Rolling versus exclusive](deployments.md#rolling-versus-exclusive)):
+
+- Before the deploy the guard scales every Deployment of the release to 0 and waits until their pods are gone. If that fails it restores the replica counts and nothing is deployed (`failed-exclusive-stop`).
+- The deploy step then receives `ARKANIS_DEPLOY_EXCLUSIVE=true`; it is never set otherwise. The consumer's migrator must refuse breaking migrations unless it is `true`.
+- On failure it stops the failed release, runs the schema Job, rolls back, restores the recorded replica counts, and verifies. The summary states the downtime window.
+
 Flow:
 
 ```mermaid
@@ -2366,7 +2373,9 @@ flowchart TD
   context --> inputs
   inputs --> namespace[[Ensure namespace]]
   namespace --> record[[Record release state, recover a pending release]]
-  record --> aspire[[aspire deploy with helm timeout shim]]
+  record --> exclusive{exclusive?}
+  exclusive -->|"yes: scale Deployments to 0, wait"| aspire
+  exclusive -->|no| aspire[[aspire deploy with helm timeout shim]]
   aspire --> result{deploy succeeded?}
   result -->|yes| verify{Deployments rolled out?}
   verify -->|yes| manifest[/artifact-manifest.json/]
@@ -2386,7 +2395,7 @@ flowchart TD
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
   class login,checkout,tools,validate,context,inputs,namespace,record,aspire,diag,rollback action
-  class kube,result,verify decision
+  class kube,result,verify,exclusive decision
   class manifest,summary,deployArtifact,failJob artifact
   class outputs output
   class tempKube external
@@ -2396,7 +2405,7 @@ Outputs:
 
 | Output | Value |
 |---|---|
-| `outcome` | `deployed`, `rolled-back`, `rollback-failed`, `failed-no-previous-release`, `failed-release-unchanged`, `failed-rollback-disabled`, `cancelled`, or `not-attempted`. Meanings in [deployments.md](deployments.md#rollback). |
+| `outcome` | `deployed`, `rolled-back`, `rollback-failed`, `failed-no-previous-release`, `failed-release-unchanged`, `failed-rollback-disabled`, `failed-exclusive-stop`, `cancelled`, or `not-attempted`. Meanings in [deployments.md](deployments.md#rollback). |
 | `helm-release` | Helm release that was deployed. |
 | `previous-revision` | Release revision before the deployment. Empty on a first install. |
 | `new-revision` | Revision this deployment created. Empty when Helm created none. |
@@ -2421,7 +2430,7 @@ Preconditions:
 - Production deployment binds the deploy job to `environment-name`.
 - The Helm release is named after the lowercased `aspire-environment`, or `helm-release-name` names it.
 - The chart follows the [consumer contract](deployments.md#consumer-contract): `maxUnavailable: 0`, a startup or readiness probe, migrations compatible with the previous release, and optionally the suspended `schema-rollback` CronJob, preferably as a Helm hook.
-- The kube identity can read workloads, pods, pod logs, events, and CronJobs, and can create and delete Jobs, in the target namespace.
+- The kube identity can read workloads, pods, pod logs, events, and CronJobs, and can create and delete Jobs, in the target namespace. With `exclusive: true` it can also scale Deployments.
 - `timeout-minutes` exceeds twice `rollout-timeout` plus build time. The workflow warns when it does not.
 
 Side effects:
@@ -2432,6 +2441,7 @@ Side effects:
 - Rolls back a release found in a `pending-*` state before deploying.
 - Applies deployment changes.
 - On a failed deployment: rolls the Helm release back, creates and deletes one `schema-rollback` Job, and fails the job.
+- With `exclusive: true`: scales every Deployment of the release to 0 before deploying (downtime) and restores the recorded replica counts afterwards when Helm did not.
 - Writes deploy output under `output-path/environment-name` and the deploy report under `artifacts/deploy-report`.
 
 Failure modes: see [deployments.md](deployments.md#failure-modes).

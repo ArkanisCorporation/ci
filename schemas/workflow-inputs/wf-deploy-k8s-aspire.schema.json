@@ -90,6 +90,11 @@
       "default": true,
       "description": "Rolls the release back to its last deployed revision when the deployment fails. The job fails either way."
     },
+    "exclusive": {
+      "type": "boolean",
+      "default": false,
+      "description": "Stops every workload of the release before deploying, causing downtime. For releases whose schema change the previous version cannot tolerate; the deploy step then receives ARKANIS_DEPLOY_EXCLUSIVE=true."
+    },
     "schema-rollback-cronjob": {
       "type": "string",
       "default": "schema-rollback",
