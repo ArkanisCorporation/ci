@@ -2345,7 +2345,7 @@ A failed deployment does not leave the environment broken ([ADR-0010](adr/0010-d
 `aspire deploy` runs `helm upgrade --install --wait` with a closed argument list, so the `helm-release-guard` action works around it:
 
 - Before the deploy it records the release's revisions and rolls back a release a cancelled run left in a `pending-*` state.
-- During the deploy a `helm` shim, on `PATH` for that step only, appends `--timeout <rollout-timeout>` to `helm upgrade`. Helm's default is 5 minutes.
+- During the deploy a `helm` shim, on `PATH` for that step only, appends `--timeout <rollout-timeout>` to `helm upgrade`. Helm's default is 5 minutes. For a server-side release it also appends `--force-conflicts`, so a field changed by hand on the cluster is overwritten by the chart instead of failing the deployment.
 - After a successful deploy it verifies every Deployment rollout. A Deployment that is not rolled out counts as a failed deployment.
 - After a failed deploy it collects diagnostics, rolls the release back to the last deployed revision, runs the failed release's `schema-rollback` Job, and verifies again. The CronJob behind that Job may be a Helm `pre-install,pre-upgrade` hook (recommended) or an ordinary chart resource. The Job's containers receive `ARKANIS_DEPLOY_STARTED_AT`, and the hook must leave schema changes recorded before that instant alone ([contract](deployments.md#arkanis_deploy_started_at)).
 

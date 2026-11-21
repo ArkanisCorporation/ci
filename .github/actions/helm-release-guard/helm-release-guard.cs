@@ -543,6 +543,13 @@ static class Guard
         }
 
         SetRevisions(report, baseline, after);
+        if (deployFailed && report.NewRevision is not null)
+        {
+            // Helm stores why an upgrade failed in the failed revision's description. That is the exact error
+            // (a field conflict, a timeout, a rejected object), so nobody has to dig it out of the deploy log.
+            report.FailureReason = after.FirstOrDefault(entry => entry.Revision == report.NewRevision && entry.Status == "failed")?.Description.Trim() ?? string.Empty;
+        }
+
         var baselineRevision = Latest(baseline)?.Revision ?? 0;
         var changed = (Latest(after)?.Revision ?? 0) > baselineRevision;
 
@@ -576,6 +583,7 @@ static class Guard
 
             Annotate("error", $"Helm reported success but these Deployments are not rolled out: {string.Join(", ", notRolledOut)}. Treating the deployment as failed.");
             report.FailedResources.AddRange(notRolledOut);
+            report.FailureReason = $"Helm reported success, but these Deployments did not roll out: {string.Join(", ", notRolledOut)}.";
             report.VerificationFailedAfterHelmSuccess = true;
             changed = true;
         }
@@ -697,7 +705,9 @@ static class Guard
         }
 
         report.Outcome = Outcomes.RolledBack;
-        report.Detail = $"The deployment failed and the environment was restored to revision {Text(target.Revision)}.";
+        report.Detail = report.SchemaRollback == SchemaOutcomes.Succeeded
+            ? "Every Deployment was verified rolled out after the rollback, and the schema rollback Job completed."
+            : "Every Deployment was verified rolled out after the rollback.";
         return Publish(settings, report);
     }
 
@@ -768,13 +778,45 @@ static class Guard
     static ProcessResult HelmRollback(Settings settings, string release, string ns, int revision)
     {
         Console.WriteLine($"::group::helm rollback {release} {Text(revision)}");
+        string[] arguments = ["rollback", release, Text(revision), "--namespace", ns, "--wait", "--timeout", settings.RolloutTimeoutText];
+        if (AppliedServerSide(release, ns))
+        {
+            // A field someone changed by hand (kubectl edit, kubectl patch) belongs to that tool's field manager,
+            // and server-side apply refuses to overwrite it. A rollback must never be blocked by a hotfix.
+            arguments = [.. arguments, "--force-conflicts"];
+        }
+
         var result = Run(
             "helm",
-            ["rollback", release, Text(revision), "--namespace", ns, "--wait", "--timeout", settings.RolloutTimeoutText],
+            arguments,
             settings.RolloutTimeout + HelmProcessGrace,
             echoOutput: true);
         Console.WriteLine("::endgroup::");
         return result;
+    }
+
+    /*
+     * True when Helm applies this release server-side. Only then is --force-conflicts valid: on a client-side
+     * release Helm rejects the flag outright ("forceConflicts enabled when serverSideApply disabled") and records
+     * a failed revision. Anything unreadable counts as "not server-side", which leaves Helm's default behavior.
+     * `helm get metadata` carries names, revision and apply method only: no values, no manifest.
+     */
+    static bool AppliedServerSide(string release, string ns)
+    {
+        var result = Run("helm", ["get", "metadata", release, "--namespace", ns, "--output", "json"], QueryTimeout, quiet: true);
+        if (result.ExitCode != 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            return JsonNode.Parse(result.Stdout)?["applyMethod"]?.GetValue<string>() == "ssa";
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     static HistoryEntry? Latest(List<HistoryEntry> history) => history.MaxBy(entry => entry.Revision);
@@ -1354,7 +1396,7 @@ static class Guard
         var headline = report.Outcome switch
         {
             Outcomes.Deployed => $"Deployed revision {Text(report.CurrentRevision)}.",
-            Outcomes.RolledBack => $"DEPLOYMENT FAILED - environment restored to revision {Text(report.RollbackTargetRevision)}.",
+            Outcomes.RolledBack => $"DEPLOYMENT FAILED - rolled back to revision {Text(report.RollbackTargetRevision)}, the previous release is live.",
             Outcomes.RollbackFailed when report.HelmRollbackSucceeded && report.SchemaRollback is SchemaOutcomes.Failed or SchemaOutcomes.TimedOut =>
                 $"ROLLBACK FAILED, environment needs attention - workloads restored to revision {Text(report.RollbackTargetRevision)}, SCHEMA ROLLBACK FAILED.",
             Outcomes.RollbackFailed => "ROLLBACK FAILED, environment needs attention.",
@@ -1370,6 +1412,18 @@ static class Guard
         summary.Append("## Helm release guard\n\n");
         summary.Append("**").Append(headline).Append("**\n\n");
         summary.Append(report.Detail).Append("\n\n");
+        if (report.FailureReason.Length > 0)
+        {
+            // Indented code block: the error is Helm's text and may itself contain backticks or fences.
+            summary.Append("**Why it failed**\n\n");
+            foreach (var line in report.FailureReason.ReplaceLineEndings("\n").Split('\n'))
+            {
+                summary.Append("    ").Append(line).Append('\n');
+            }
+
+            summary.Append('\n');
+        }
+
         var downtime = DowntimeSentence(report.Exclusive);
         if (downtime.Length > 0)
         {
@@ -1381,10 +1435,9 @@ static class Guard
         Row("Outcome", report.Outcome);
         Row("Helm release", report.Release);
         Row("Namespace", report.Namespace);
-        Row("Previous revision", report.PreviousRevision is null ? "none (first install)" : $"{Text(report.PreviousRevision)} ({report.PreviousStatus})");
-        Row("New revision", Text(report.NewRevision));
-        Row("Current revision", report.CurrentRevision is null ? string.Empty : $"{Text(report.CurrentRevision)} ({report.CurrentStatus})");
-        Row("Rolled back to", Text(report.RollbackTargetRevision));
+        Row("Revision before this deployment", RevisionBefore(report));
+        Row("Revision this deployment created", RevisionCreated(report));
+        Row("Revision live now", RevisionLive(report));
         Row("Schema rollback", report.SchemaRollbackDetail.Length == 0 ? report.SchemaRollback : $"{report.SchemaRollback}: {report.SchemaRollbackDetail}");
         if (report.Outcome == Outcomes.Deployed)
         {
@@ -1420,6 +1473,7 @@ static class Guard
             ["schema"] = "ci-deploy-report/v1",
             ["outcome"] = report.Outcome,
             ["detail"] = report.Detail,
+            ["failure_reason"] = report.FailureReason,
             ["helm_release"] = report.Release,
             ["namespace"] = report.Namespace,
             ["deploy_step_outcome"] = report.DeployStepOutcome,
@@ -1452,11 +1506,61 @@ static class Guard
         if (report.Outcome is not (Outcomes.Deployed or Outcomes.NotAttempted))
         {
             Annotate("error", headline);
+            if (report.FailureReason.Length > 0)
+            {
+                Annotate("error", $"Cause: {report.FailureReason}");
+            }
         }
 
         // A job that already failed stays failed. This exit code is what fails it when Helm said "success" but the
         // rollout verification disagreed, and it keeps every non-deployed outcome red in its own right.
         return report.Outcome is Outcomes.Deployed or Outcomes.NotAttempted ? 0 : 1;
+    }
+
+    /*
+     * The three revision rows of the summary. Helm's status words are spelled out in plain language on purpose:
+     * a bare "(deployed)" next to a revision reads like a verdict on this run, while it only says that the
+     * revision is the one Helm currently counts as installed.
+     */
+    static string RevisionBefore(Report report) => report.PreviousRevision is null
+        ? "none (first install)"
+        : report.PreviousStatus is "deployed" or ""
+            ? Text(report.PreviousRevision)
+            : $"{Text(report.PreviousRevision)} (was already in Helm status '{report.PreviousStatus}')";
+
+    static string RevisionCreated(Report report) => report.NewRevision is null
+        ? "none (Helm did not get that far)"
+        : report.Outcome == Outcomes.Deployed
+            ? $"{Text(report.NewRevision)} (succeeded)"
+            : report.VerificationFailedAfterHelmSuccess
+                ? $"{Text(report.NewRevision)} (Helm succeeded, rollout did not)"
+                : $"{Text(report.NewRevision)} (failed)";
+
+    static string RevisionLive(Report report)
+    {
+        if (report.CurrentRevision is null)
+        {
+            return "unknown";
+        }
+
+        var current = Text(report.CurrentRevision);
+        if (report.HelmRollbackSucceeded && report.NewRevision is not null && report.RollbackTargetRevision is not null)
+        {
+            // Helm records a rollback as a new revision with the old content, so the number alone misleads.
+            return $"{current} (rolled back from {Text(report.NewRevision)} to {Text(report.RollbackTargetRevision)}: same content as revision {Text(report.RollbackTargetRevision)})";
+        }
+
+        if (report.Outcome == Outcomes.Deployed)
+        {
+            return $"{current} (this deployment)";
+        }
+
+        if (report.CurrentRevision == report.PreviousRevision)
+        {
+            return $"{current} (unchanged)";
+        }
+
+        return report.CurrentStatus.Length == 0 ? current : $"{current} (NOT restored, Helm status '{report.CurrentStatus}')";
     }
 
     // Plain statement of the outage an exclusive deployment caused; empty for a rolling one or when nothing was stopped.
@@ -1884,6 +1988,9 @@ sealed class Report
     public string Outcome { get; set; } = Outcomes.NotAttempted;
 
     public string Detail { get; set; } = string.Empty;
+
+    // Helm's own error for the revision this deployment created, or the guard's reason when Helm reported success.
+    public string FailureReason { get; set; } = string.Empty;
 
     public string Release { get; set; } = string.Empty;
 

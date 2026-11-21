@@ -71,6 +71,7 @@ flowchart TD
 | Record | before deploy | `helm list` + `helm history`: current revision and the last `deployed` revision, the rollback target. No release means first install. An unreadable release stops the job before anything is deployed. |
 | Recover | before deploy | A release in `pending-install`, `pending-upgrade`, or `pending-rollback` (a run was cancelled mid-operation) is rolled back to its last `deployed` revision, so a dead run cannot wedge later deploys. |
 | Bound the wait | during deploy | A `helm` shim, first on `PATH` for the deploy step only, appends `--timeout <rollout-timeout>` to `helm upgrade`. Everything else passes through. |
+| Chart wins over manual edits | during deploy and rollback | The shim appends `--force-conflicts` to `helm upgrade`, and the guard to `helm rollback`, when the release is applied server-side (`helm get metadata` reports `applyMethod: ssa`). A field changed by hand on the cluster (`kubectl edit`, `kubectl patch`) is overwritten by the chart instead of failing the deployment with `conflict occurred while applying object`. Client-side releases and first installs are left alone: Helm rejects the flag there. |
 | Verify | deploy succeeded | `kubectl rollout status` for every Deployment the release owns. A Deployment that is not rolled out turns the run into a failed deployment. |
 | Diagnose | deploy failed | `helm status` and `helm history`, `kubectl get deployments,replicasets,pods -o wide`, events sorted by time, `describe` of non-ready pods, current and previous logs of every container including init containers. Collected before the rollback. |
 | Roll back | deploy failed | `helm rollback <release> <revision> --wait --timeout <rollout-timeout>`. Skipped when Helm never created a revision, on a first install, or when `rollback-on-failure` is `false`. |
@@ -80,8 +81,8 @@ flowchart TD
 The job ends **failed** whenever the deployment failed, including when the rollback restored everything.
 The step summary, the workflow outputs, and `artifacts/deploy-report/deploy-report.json` in the deploy artifact carry:
 
-- Previous revision and its status.
-- New revision (the one this deployment created) and the current live revision.
+- Why it failed: Helm's own error for the failed revision, in full (`failure_reason` in the JSON). When Helm succeeded but a rollout did not, the Deployments that did not roll out.
+- Revision before this deployment, the revision this deployment created, and the revision live now. After a rollback the live row reads `9 (rolled back from 8 to 7: same content as revision 7)`, because Helm records a rollback as a new revision.
 - Outcome.
 - Failed resource names.
 - On success, the manual rollback command for the previous revision.

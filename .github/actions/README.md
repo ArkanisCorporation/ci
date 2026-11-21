@@ -351,7 +351,7 @@ Side effects:
 
 `helm-timeout-shim.sh` ships with the action.
 Copy it to a directory as `helm`, put that directory first on `PATH` for the deployment step only, and set `ARKANIS_REAL_HELM`, `ARKANIS_HELM_UPGRADE_TIMEOUT`, and `ARKANIS_HELM_SHIM_RECORD`.
-It appends `--timeout` to `helm upgrade` and records the release the deployment really targets, which the finalize phase reads through `shim-record-path`.
+It appends `--timeout` to `helm upgrade`, plus `--force-conflicts` when the release is applied server-side so the chart wins over manual cluster edits, and records the release the deployment really targets, which the finalize phase reads through `shim-record-path`.
 
 Example:
 

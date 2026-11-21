@@ -2604,10 +2604,20 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
     if (File.Exists(shimPath))
     {
         var shimText = NormalizeLineEndings(File.ReadAllText(shimPath));
-        if (!shimText.Contains("exec \"$real_helm\" \"$@\" --timeout \"$timeout\"", StringComparison.Ordinal)
+        if (!shimText.Contains("extra+=(--timeout \"$timeout\")", StringComparison.Ordinal)
+            || !shimText.Contains("exec \"$real_helm\" \"$@\" \"${extra[@]}\"", StringComparison.Ordinal)
             || !shimText.Contains("if [[ \"$subcommand\" != \"upgrade\" ]]; then\n  exec \"$real_helm\" \"$@\"", StringComparison.Ordinal))
         {
             AddFailure($"{shimPath}: the helm shim must append --timeout to `helm upgrade` and pass every other invocation through untouched.");
+        }
+
+        // Helm rejects --force-conflicts on a client-side release and records a failed revision, so the flag
+        // may only ever follow the apply-method check.
+        var applyMethodCheck = shimText.IndexOf("\"applyMethod\":\"ssa\"", StringComparison.Ordinal);
+        var forceConflicts = shimText.IndexOf("extra+=(--force-conflicts)", StringComparison.Ordinal);
+        if (applyMethodCheck < 0 || forceConflicts < applyMethodCheck)
+        {
+            AddFailure($"{shimPath}: the helm shim must append --force-conflicts only after `helm get metadata` reported a server-side release.");
         }
 
         if (!shimText.Contains("Delete it", StringComparison.Ordinal) || !shimText.Contains("Aspire.Hosting.Kubernetes hardcodes", StringComparison.Ordinal))
@@ -2634,9 +2644,9 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
             AddFailure($"{guardScriptPath}: the guard must exit non-zero for every outcome except deployed and not-attempted, so a failed deployment cannot end green.");
         }
 
-        if (Regex.IsMatch(guardText, @"""(secret|secrets)""") || Regex.IsMatch(guardText, @"""helm"",\s*\[\s*""get""") || guardText.Contains("\"--output\", \"yaml\"", StringComparison.Ordinal))
+        if (Regex.IsMatch(guardText, @"""(secret|secrets)""") || Regex.IsMatch(guardText, @"""helm"",\s*\[\s*""get"",\s*""(?!metadata"")") || guardText.Contains("\"--output\", \"yaml\"", StringComparison.Ordinal))
         {
-            AddFailure($"{guardScriptPath}: the guard must never read Secrets, release values, or release manifests.");
+            AddFailure($"{guardScriptPath}: the guard must never read Secrets, release values, or release manifests (`helm get metadata` is the one allowed `helm get`).");
         }
 
         // The schema hook's only way to tell this attempt's schema changes from an earlier deploy's (docs/deployments.md).
