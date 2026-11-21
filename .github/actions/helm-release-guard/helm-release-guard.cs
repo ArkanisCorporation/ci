@@ -547,13 +547,20 @@ static class Guard
             // The new chart decides the replica counts; only a Deployment it left at the exclusive stop's 0 is put back.
             var restoreFailures = new List<string>();
             var restored = !stopped || RestoreExclusiveReplicas(settings, state.Exclusive, state.Namespace, onlyWhereZero: true, restoreFailures, "after the deployment");
-            var workloads = ReadWorkloads(release, ns);
+            var workloads = ReadWorkloads(release, ns, out var listed);
             var notRolledOut = VerifyRollouts(settings, workloads, ns, "after the deployment");
             notRolledOut.AddRange(restoreFailures.Where(name => !notRolledOut.Contains(name)));
             if (notRolledOut.Count == 0 && restored)
             {
+                // Helm's own --wait already vouched for the release, so an unverified rollout stays a
+                // successful deployment. The report must still not claim a check that never ran.
+                report.RolloutVerified = workloads.Any(workload => workload.Kind == "Deployment");
                 report.Outcome = Outcomes.Deployed;
-                report.Detail = "Helm reported success and every Deployment of the release is rolled out.";
+                report.Detail = report.RolloutVerified
+                    ? "Helm reported success and every Deployment of the release is rolled out."
+                    : listed
+                        ? "Helm reported success. The rollout was not verified independently: no Deployment carries this release's Helm ownership annotation."
+                        : "Helm reported success. The rollout was not verified independently: the workloads in the namespace could not be listed.";
                 return Publish(settings, report);
             }
 
@@ -803,7 +810,14 @@ static class Guard
         listed = result.ExitCode == 0 && TryParseItems(result.Stdout, out _);
         if (!listed || !TryParseItems(result.Stdout, out var items))
         {
-            Annotate("warning", "Could not list the workloads in the namespace; rollout verification has nothing to check.");
+            // Say why: this warning once fired on a healthy cluster and named no cause, which left the
+            // rollout unverified with nothing to act on. Standard output is only sized, never printed,
+            // because workload manifests can carry inline environment values.
+            var stderr = string.Join(' ', result.Stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            var cause = result.ExitCode != 0
+                ? $"kubectl exited with code {Text(result.ExitCode)}"
+                : "kubectl exited with code 0 but its output was not a JSON list";
+            Annotate("warning", $"Could not list the workloads in the namespace ({cause}; {Text(result.Stdout.Length)} characters on standard output; standard error: {(stderr.Length == 0 ? "empty" : stderr.Length > 600 ? stderr[..600] + "..." : stderr)}). Rollout verification has nothing to check.");
             return workloads;
         }
 
@@ -1359,6 +1373,11 @@ static class Guard
         Row("Current revision", report.CurrentRevision is null ? string.Empty : $"{Text(report.CurrentRevision)} ({report.CurrentStatus})");
         Row("Rolled back to", Text(report.RollbackTargetRevision));
         Row("Schema rollback", report.SchemaRollbackDetail.Length == 0 ? report.SchemaRollback : $"{report.SchemaRollback}: {report.SchemaRollbackDetail}");
+        if (report.Outcome == Outcomes.Deployed)
+        {
+            Row("Rollout verified by the guard", report.RolloutVerified ? "yes" : "no, Helm's wait only");
+        }
+
         Row("Failed resources", string.Join(", ", report.FailedResources));
         Row("Stuck release recovery", report.Recovery);
         Row("Rollout timeout", report.RolloutTimeout);
@@ -1404,6 +1423,7 @@ static class Guard
             ["stuck_release_recovery"] = report.Recovery,
             ["release_name_adopted_from_deploy"] = report.Adopted,
             ["verification_failed_after_helm_success"] = report.VerificationFailedAfterHelmSuccess,
+            ["rollout_verified"] = report.RolloutVerified,
             ["rollout_timeout"] = report.RolloutTimeout,
             ["failed_resources"] = new JsonArray([.. report.FailedResources.Select(name => (JsonNode?)JsonValue.Create(name))]),
             ["exclusive"] = report.Exclusive.ToJson(),
@@ -1883,6 +1903,10 @@ sealed class Report
     public bool Adopted { get; set; }
 
     public bool VerificationFailedAfterHelmSuccess { get; set; }
+
+    // True only when the guard itself watched at least one Deployment of the release roll out after a successful deploy.
+    // False does not mean failure: Helm's --wait may have been the only check (see the detail text for why).
+    public bool RolloutVerified { get; set; }
 
     // Exclusive only: a schema Job was due but could not run safely, so the outcome cannot be a clean rollback.
     public bool SchemaRollbackBlocked { get; set; }
