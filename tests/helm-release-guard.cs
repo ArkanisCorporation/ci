@@ -176,6 +176,11 @@ try
         Check(Directory.EnumerateFiles(s.ReportDir, "*", SearchOption.AllDirectories).All(file => !File.ReadAllText(file).Contains("schema-env-literal", StringComparison.Ordinal)),
             "the rendered Job pod spec must not reach the uploaded report");
         Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "schema-rollback", "job-logs.txt")), "schema Job logs must be captured");
+        Check(result.Summary.Contains("**What the schema rollback Job reported** (last lines of its log)\n\n    sql noise 2\n    sql noise 3\n    warn: Fixture.Migrator[1]\n          Rolled back release 2: reverted 7 migration(s).\n    info: Fixture.Migrator[5]\n          Release schema rollback completed: RolledBack.\n", StringComparison.Ordinal),
+            "the summary must repeat the closing lines of the schema Job's log, without kubectl's timestamps", result.Summary);
+        Check(JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!["schema_rollback_output"]!.GetValue<string>().EndsWith("Release schema rollback completed: RolledBack.", StringComparison.Ordinal),
+            "the report must carry what the schema Job said it did");
+        Check(result.Log.Contains("Rolled back release 2: reverted 7 migration(s).", StringComparison.Ordinal), "the schema Job's log must be echoed into the run log");
         Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "after-rollback", "helm-history.txt")), "post-rollback state must be captured");
         Check(!s.Called("kubectl scale"), "a rolling rollback must not scale anything", s.Calls);
     }
@@ -911,6 +916,10 @@ static class FakeCli
               "      Discord__Token:         <set to the key 'token' in secret 'bot'>" "    Mounts:" "      /tmp from tmp (rw)" "Events:  <none>" ;;
           "logs "*"--previous"*)
             case "$args" in *"--container web "*) echo "previous crash" ;; *) echo "Error: previous terminated container not found" >&2; exit 1 ;; esac ;;
+          "logs job/"*)
+            printf '%s\n' "2026-01-01T00:00:01.000000000Z sql noise 1" "2026-01-01T00:00:02.000000000Z sql noise 2" "2026-01-01T00:00:03.000000000Z sql noise 3" \
+              "2026-01-01T00:00:04.000000000Z warn: Fixture.Migrator[1]" "2026-01-01T00:00:05.000000000Z       Rolled back release 2: reverted 7 migration(s)." "" \
+              "2026-01-01T00:00:06.000000000Z info: Fixture.Migrator[5]" "2026-01-01T00:00:07.000000000Z       Release schema rollback completed: RolledBack." ;;
           "logs "*) echo "fixture log line" ;;
           "rollout status deployment/"*)
             name="${3#deployment/}"

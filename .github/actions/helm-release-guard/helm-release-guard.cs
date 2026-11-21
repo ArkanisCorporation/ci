@@ -65,6 +65,9 @@ static class Guard
     const int LogTailLines = 200;
     const int SchemaJobTtlSeconds = 86400;
 
+    /** How many closing lines of the schema rollback Job's log the summary and the report repeat. */
+    const int SchemaJobSummaryLines = 6;
+
     /*
      * Environment variable every container of the schema rollback Job receives: the RFC 3339 UTC second at which
      * this deployment attempt began (capture phase, before any image build or Helm call), e.g. 2026-11-19T10:15:30Z.
@@ -1311,7 +1314,11 @@ static class Guard
             var result = WaitForJob(settings, job.Name, ns);
             var directory = Path.Combine(settings.ReportDirectory, "diagnostics", "schema-rollback");
             Directory.CreateDirectory(directory);
-            Save(directory, "job-logs.txt", Run("kubectl", ["logs", $"job/{job.Name}", "--namespace", ns, "--all-containers", "--tail=1000", "--timestamps"], QueryTimeout));
+            // Echoed and summarised, not only saved: a completed Job is deleted below, so the artifact would otherwise
+            // be the only place that says what the hook did (reverted something, or found nothing to revert).
+            var logs = Run("kubectl", ["logs", $"job/{job.Name}", "--namespace", ns, "--all-containers", "--tail=1000", "--timestamps"], QueryTimeout, echoOutput: true);
+            Save(directory, "job-logs.txt", logs);
+            report.SchemaRollbackOutput = LastLogLines(logs.Stdout, SchemaJobSummaryLines);
             Save(directory, "job.txt", Run("kubectl", ["get", "job", job.Name, "--namespace", ns, "--output", "wide"], QueryTimeout));
 
             report.SchemaRollback = result;
@@ -1336,6 +1343,24 @@ static class Guard
                 Annotate("error", $"SCHEMA ROLLBACK FAILED: {report.SchemaRollbackDetail} Workloads are restored, the database schema is not.");
             }
         }
+    }
+
+    /**
+     * The last `count` non-empty lines of a `kubectl logs --timestamps` capture, without the timestamp kubectl put in
+     * front of each. A hook says what it did at the end of its log; everything before is usually SQL noise.
+     */
+    static string LastLogLines(string log, int count)
+    {
+        var lines = log.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line =>
+            {
+                var space = line.IndexOf(' ', StringComparison.Ordinal);
+                var isStamp = space > 0 && DateTimeOffset.TryParse(line[..space], CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
+                return (isStamp ? line[(space + 1)..] : line).TrimEnd();
+            })
+            .Where(line => line.Trim().Length > 0)
+            .ToList();
+        return string.Join('\n', lines.Skip(Math.Max(0, lines.Count - count)));
     }
 
     static string WaitForJob(Settings settings, string jobName, string ns)
@@ -1424,6 +1449,18 @@ static class Guard
             summary.Append('\n');
         }
 
+        if (report.SchemaRollbackOutput.Length > 0)
+        {
+            // Indented code block for the same reason as above: this is the consumer's own log text.
+            summary.Append("**What the schema rollback Job reported** (last lines of its log)\n\n");
+            foreach (var line in report.SchemaRollbackOutput.Split('\n'))
+            {
+                summary.Append("    ").Append(line).Append('\n');
+            }
+
+            summary.Append('\n');
+        }
+
         var downtime = DowntimeSentence(report.Exclusive);
         if (downtime.Length > 0)
         {
@@ -1487,6 +1524,7 @@ static class Guard
             ["schema_rollback"] = report.SchemaRollback,
             ["schema_rollback_detail"] = report.SchemaRollbackDetail,
             ["schema_rollback_job"] = report.SchemaRollbackJob,
+            ["schema_rollback_output"] = report.SchemaRollbackOutput,
             ["stuck_release_recovery"] = report.Recovery,
             ["release_name_adopted_from_deploy"] = report.Adopted,
             ["verification_failed_after_helm_success"] = report.VerificationFailedAfterHelmSuccess,
@@ -2017,6 +2055,9 @@ sealed class Report
     public string SchemaRollbackDetail { get; set; } = string.Empty;
 
     public string SchemaRollbackJob { get; set; } = string.Empty;
+
+    /** Closing lines of the schema rollback Job's log: what the consumer's hook said it did. Empty when it never ran. */
+    public string SchemaRollbackOutput { get; set; } = string.Empty;
 
     public string Recovery { get; set; } = "none";
 
