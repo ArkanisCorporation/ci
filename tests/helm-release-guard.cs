@@ -182,6 +182,13 @@ try
         Check(!report["rollout_verified"]!.GetValue<bool>(), "the report must record that the rollout was not verified");
     }
 
+    // ---- No kubectl call may carry --request-timeout: it disables in-cluster credentials on runner pods.
+    {
+        var source = File.ReadAllText(guardScript);
+        var offenders = source.Split('\n').Where(line => line.Contains("Run(\"kubectl\"", StringComparison.Ordinal) && line.Contains("--request-timeout", StringComparison.Ordinal)).ToList();
+        Check(offenders.Count == 0, "kubectl must be bounded by the process deadline only, never by --request-timeout", string.Join('\n', offenders));
+    }
+
     // ---- Exclusive success: the release is stopped before the deploy, Helm restores the replicas, downtime reported.
     {
         var s = NewScenario("exclusive-success");
