@@ -33,7 +33,7 @@ static async Task<int> RunAsync()
     var include = EnvironmentOrDefault("ACTION_INPUT_INCLUDE", string.Empty);
     var exclude = EnvironmentOrDefault("ACTION_INPUT_EXCLUDE", "**/*.razor;**/*.svg;**/*.md");
     var remediationMessage = EnvironmentOrDefault("ACTION_INPUT_REMEDIATION_MESSAGE", "Run `dotnet husky run --name dotnet-cleanupcode` locally and commit the resulting changes.");
-    var toolVersion = EnvironmentOrDefault("ACTION_INPUT_TOOL_VERSION", string.Empty);
+    var toolVersion = EnvironmentOrDefault("ACTION_INPUT_TOOL_VERSION", ToolDefaults.ReSharperGlobalTools);
     var noUpdates = ParseBoolean("ACTION_INPUT_NO_UPDATES", defaultValue: true);
     var restoreTools = ParseBoolean("ACTION_INPUT_RESTORE_TOOLS", defaultValue: true);
     var installTool = ParseBoolean("ACTION_INPUT_INSTALL_TOOL", defaultValue: false);
@@ -82,13 +82,29 @@ static async Task<int> RunAsync()
         installTool,
         jbExecutable);
 
-    var diffResult = await ReportDiffAsync(workingDirectory, artifactsPath, remediationMessage, diffPreviewLines, failOnDiff);
-    if (diffResult != 0)
+    // A CleanupCode run that did not finish says nothing about formatting: a crash before the
+    // tool touched any file leaves an empty diff, which used to be reported as "no Git diff".
+    // Stop here so the failure is the tool's exit code, not a misleading pass message (ARK-745).
+    if (cleanupResult.ExitCode != 0)
     {
-        return diffResult;
+        await ReportCleanupFailureAsync(cleanupResult.ExitCode, artifactsPath);
+        return cleanupResult.ExitCode;
     }
 
-    return cleanupResult.ExitCode;
+    return await ReportDiffAsync(workingDirectory, artifactsPath, remediationMessage, diffPreviewLines, failOnDiff);
+}
+
+static async Task ReportCleanupFailureAsync(int exitCode, string artifactsPath)
+{
+    var logPath = Path.Combine(artifactsPath, "cleanupcode.log");
+    Console.WriteLine($"::error title=JetBrains CleanupCode failed::jb cleanupcode exited with code {exitCode}. The Git diff check was skipped because the tool did not finish. See {logPath}.");
+    await AppendStepSummaryAsync($"""
+        ## JetBrains CleanupCode failed
+
+        `jb cleanupcode` exited with code {exitCode} before it finished, so the Git diff check was skipped.
+        This is a tool failure, not a formatting result. The full output is in `{logPath}`.
+
+        """);
 }
 
 static async Task<int> RestoreLocalToolsAsync(string workingDirectory)
@@ -116,6 +132,13 @@ static async Task<ToolInstallResult> InstallJetBrainsToolAsync(string toolVersio
 
     Directory.CreateDirectory(toolPath);
 
+    // No --allow-roll-forward (ARK-745). The flag rewrites the installed tool's runtimeconfig from the
+    // package's rollForward=LatestMajor to Major. JetBrains writes the framework version with four
+    // parts ("10.0.0.0"); under Major the host (hostfxr 10.0.15 and 11.0.0, seen in COREHOST_TRACE)
+    // does not honour that as a lower bound and selects the lowest installed runtime - 8.0.34 on
+    // ubuntu-latest - so the net10.0 tool (2026.3+) aborts with "Could not load file or assembly
+    // 'System.Runtime, Version=10.0.0.0'" (exit 134). The same runtimeconfig rewritten to "10.0.0"
+    // resolves 10.0.x correctly. The package's own LatestMajor picks the newest runtime and works.
     var installArguments = new List<string>
     {
         "tool",
@@ -123,14 +146,9 @@ static async Task<ToolInstallResult> InstallJetBrainsToolAsync(string toolVersio
         "JetBrains.ReSharper.GlobalTools",
         "--tool-path",
         toolPath,
-        "--allow-roll-forward"
+        "--version",
+        toolVersion
     };
-
-    if (!string.IsNullOrWhiteSpace(toolVersion))
-    {
-        installArguments.Add("--version");
-        installArguments.Add(toolVersion);
-    }
 
     var installResult = await RunCommandAsync("dotnet", installArguments, Directory.GetCurrentDirectory(), allowFailure: true);
     if (installResult.ExitCode != 0)
@@ -420,6 +438,19 @@ static async Task AppendStepSummaryAsync(string markdown)
     }
 
     await File.AppendAllTextAsync(summaryPath, markdown);
+}
+
+/// <summary>
+/// JetBrains.ReSharper.GlobalTools version installed when install-tool is true and tool-version is empty.
+/// </summary>
+/// <remarks>
+/// Pinned so a new ReSharper release cannot change CI behavior without a reviewed bump (ARK-745).
+/// Renovate updates it through the custom manager in renovate.jsonc, which keys on the renovate: marker comment directly above the constant.
+/// </remarks>
+static class ToolDefaults
+{
+    // renovate: datasource=nuget depName=JetBrains.ReSharper.GlobalTools
+    public const string ReSharperGlobalTools = "2026.3.0.1";
 }
 
 sealed record CommandRunResult(int ExitCode, string StandardOutput, string StandardError);

@@ -5,5 +5,22 @@
     ],
     "reviewers": [
         "team:devops"
+    ],
+    "customManagers": [
+        // Track tool versions pinned in composite-action .NET file scripts as a string constant
+        // directly below a `// renovate: datasource=<ds> depName=<name>` marker comment.
+        // First user: the JetBrains.ReSharper.GlobalTools default in
+        // .github/actions/dotnet-jetbrains-cleanupcode/run-cleanupcode.cs (ARK-745), pinned because an
+        // unpinned install picked up a ReSharper release that crashed every consumer's format job.
+        {
+            "customType": "regex",
+            "description": "Update tool versions pinned in composite-action .NET file scripts",
+            "managerFilePatterns": [
+                "/^\\.github/actions/.+\\.cs$/"
+            ],
+            "matchStrings": [
+                "//\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\n[^\\n]*?\"(?<currentValue>[^\"]+)\""
+            ]
+        }
     ]
 }
