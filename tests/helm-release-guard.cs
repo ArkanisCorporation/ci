@@ -54,6 +54,8 @@ try
         Check(result.Output("previous-revision") == "3" && result.Output("new-revision") == "4" && result.Output("current-revision") == "4",
             "success must report previous and new revision");
         Check(s.Called("kubectl rollout status deployment/web"), "success must still verify every Deployment rollout");
+        Check(JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!["rollout_verified"]!.GetValue<bool>(),
+            "a verified deployment must be recorded as verified");
         Check(!s.Called("helm rollback"), "success must not roll back");
         Check(result.Summary.Contains($"helm rollback {Release} 3 --namespace example-production --wait", StringComparison.Ordinal),
             "the summary must carry the manual rollback reference");
@@ -160,6 +162,24 @@ try
         Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "schema-rollback", "job-logs.txt")), "schema Job logs must be captured");
         Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "after-rollback", "helm-history.txt")), "post-rollback state must be captured");
         Check(!s.Called("kubectl scale"), "a rolling rollback must not scale anything", s.Calls);
+    }
+
+    // ---- Success, but the workloads cannot be listed: still green (Helm waited), with the cause named and no false claim.
+    {
+        var s = NewScenario("success-workloads-unlistable");
+        s.History((3, "deployed"));
+        s.Guard("capture");
+        s.History((3, "superseded"), (4, "deployed"));
+        File.Delete(Path.Combine(s.FakeDir, "workloads.json"));
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed", "an unlistable namespace must not fail a deployment Helm already waited for", result.Log);
+        Check(result.Log.Contains("Could not list the workloads in the namespace (kubectl exited with code", StringComparison.Ordinal)
+            && result.Log.Contains("workloads.json", StringComparison.Ordinal), "the warning must carry kubectl's exit code and standard error", result.Log);
+        Check(!result.Summary.Contains("every Deployment of the release is rolled out", StringComparison.Ordinal)
+            && result.Summary.Contains("The rollout was not verified independently: the workloads in the namespace could not be listed.", StringComparison.Ordinal),
+            "the summary must not claim a verification that never ran", result.Summary);
+        var report = JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!;
+        Check(!report["rollout_verified"]!.GetValue<bool>(), "the report must record that the rollout was not verified");
     }
 
     // ---- Exclusive success: the release is stopped before the deploy, Helm restores the replicas, downtime reported.

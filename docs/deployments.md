@@ -88,7 +88,7 @@ The step summary, the workflow outputs, and `artifacts/deploy-report/deploy-repo
 
 | Outcome | Meaning | Environment |
 |---|---|---|
-| `deployed` | Helm succeeded and every Deployment is rolled out. | new release |
+| `deployed` | Helm succeeded and every Deployment is rolled out. If the guard could not check the rollout itself, the outcome stays `deployed` on Helm's own wait, `rollout_verified` in the report is `false`, and the summary says why. | new release |
 | `rolled-back` | The deployment failed; release, schema hook, and rollouts are restored. | previous release |
 | `rollback-failed` | The Helm rollback failed, the workloads did not become ready after it, the schema hook failed or timed out, or a stuck release could not be recovered. | **needs attention** |
 | `failed-no-previous-release` | A first install failed. Nothing exists to return to; the failed release stays for inspection. | **needs attention** |
