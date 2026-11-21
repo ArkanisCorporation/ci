@@ -314,7 +314,7 @@ Preconditions:
 Side effects:
 
 - Sets up a .NET 10.0 SDK next to the caller's SDK as the `dotnet-setversion` tool runtime, so stamping keeps working when the caller moves to a newer .NET major.
-  Any installed 10.0 patch satisfies it; on daedalus (`DOTNET_CHECK_LATEST=false`) it is reused without a download.
+  Any 10.0 patch satisfies it, and setup-dotnet skips the download when that version is already installed.
 - Installs `dotnet-setversion` under `$RUNNER_TEMP/arkanis-dotnet-setversion`, without `--allow-roll-forward`.
 - Modifies matched `.csproj` files in the workspace.
 - Writes a short stamp summary to `$GITHUB_STEP_SUMMARY`.

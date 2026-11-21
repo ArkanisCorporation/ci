@@ -89,8 +89,8 @@ runs:
     # 10.0.x is the tool runtime, listed next to the caller's SDK so dotnet-setversion
     # (net8.0/net9.0/net10.0 builds, no rollForward) always finds a runtime it was built for, even
     # when the caller moves to a newer .NET major (ARK-745). setup-dotnet de-duplicates it when the
-    # caller is on 10.0 too, and with DOTNET_CHECK_LATEST=false (daedalus) any installed 10.0 SDK is
-    # reused offline. Bump the major only together with the tool's newest build target.
+    # caller is on 10.0 too and skips the download when that version is already installed. Bump the
+    # major only together with the tool's newest build target.
     - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }} + tool runtime 10.0.x
       uses: actions/setup-dotnet@v6
       with:

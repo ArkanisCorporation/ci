@@ -190,9 +190,9 @@ runs:
 
     # When stamping, 10.0.x is added as the dotnet-setversion tool runtime (net8.0/net9.0/net10.0
     # builds, no rollForward), so stamping still works after the caller moves to a newer .NET major
-    # (ARK-745). setup-dotnet de-duplicates it when the caller is on 10.0 too, and with
-    # DOTNET_CHECK_LATEST=false (daedalus) any installed 10.0 SDK is reused offline. Bump the major
-    # only together with the tool's newest build target.
+    # (ARK-745). setup-dotnet de-duplicates it when the caller is on 10.0 too and skips the download
+    # when that version is already installed. Bump the major only together with the tool's newest
+    # build target.
     - name: Setup .NET
       uses: actions/setup-dotnet@v6
       with:
