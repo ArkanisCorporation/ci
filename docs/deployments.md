@@ -176,7 +176,7 @@ Order on a failed deployment:
 1. Before the Helm rollback, the workflow renders a Job from the failed release's CronJob (`kubectl create job --from=cronjob/schema-rollback --dry-run=client`). For an ordinary chart resource this must happen first because the rollback reverts or deletes that CronJob; for a hook it changes nothing.
 2. `helm rollback` runs and waits. After it, no new-version pod uses the schema.
 3. The rendered Job is created, without its owner reference, with `ttlSecondsAfterFinished` and `ARKANIS_DEPLOY_STARTED_AT`, and awaited for at most `rollout-timeout`.
-4. Its logs go to the deploy artifact. A completed Job is deleted; a failed or still-running Job stays in the cluster.
+4. Its logs are printed in the run log and saved to the deploy artifact, and their last lines are repeated in the summary and in `deploy-report.json` (`schema_rollback_output`), so the hook should end its log with what it did. A completed Job is deleted; a failed or still-running Job stays in the cluster.
 
 The hook is skipped, with a log line, when the CronJob does not exist, and when this deployment did not replace it.
 "Replaced" means the uid or the generation differs from what was recorded before the deploy, or the CronJob did not exist before.
