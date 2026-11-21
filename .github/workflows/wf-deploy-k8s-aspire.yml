@@ -559,9 +559,9 @@ jobs:
             echo "| Namespace | \`${KUBERNETES_NAMESPACE}\` |"
             echo "| Outcome | \`${DEPLOY_OUTCOME}\` |"
             echo "| Helm release | \`${HELM_RELEASE:-n/a}\` |"
-            echo "| Previous revision | \`${PREVIOUS_REVISION:-none}\` |"
-            echo "| New revision | \`${NEW_REVISION:-none}\` |"
-            echo "| Current revision | \`${CURRENT_REVISION:-n/a}\` |"
+            echo "| Revision before this deployment | \`${PREVIOUS_REVISION:-none}\` |"
+            echo "| Revision this deployment created | \`${NEW_REVISION:-none}\` |"
+            echo "| Revision live now | \`${CURRENT_REVISION:-n/a}\` |"
             echo "| Failed resources | \`${FAILED_RESOURCES:-none}\` |"
             echo "| Deploy mode | \`${DEPLOY_MODE}\` |"
             if [[ -n "$DOWNTIME_STARTED_AT" ]]; then

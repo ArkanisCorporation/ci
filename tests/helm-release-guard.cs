@@ -119,13 +119,29 @@ try
         s.HistoryAfterRollback((2, "superseded"), (3, "superseded"), (4, "failed"), (5, "deployed"));
         s.CronJob(generation: 5);
         s.BreakDeployment("web", healedByRollback: true);
+        s.Write("apply-method", "ssa");
         var result = s.Guard("finalize", "failure");
         Check(result.ExitCode != 0, "the job must end red even though the rollback succeeded");
         Check(result.Output("outcome") == "rolled-back", "outcome must be rolled-back", result.Log);
         Check(result.Output("previous-revision") == "3" && result.Output("new-revision") == "4" && result.Output("current-revision") == "5",
             "rollback must report previous, failed, and live revision");
         Check(result.Output("schema-rollback") == "succeeded", "the schema hook must have run", result.Log);
-        Check(result.Summary.Contains("environment restored to revision 3", StringComparison.Ordinal), "the summary must say the environment was restored");
+        Check(result.Summary.Contains("**DEPLOYMENT FAILED - rolled back to revision 3, the previous release is live.**", StringComparison.Ordinal),
+            "the summary must say the environment was restored", result.Summary);
+        Check(!result.Summary.Contains("The deployment failed and", StringComparison.Ordinal), "the summary must not repeat its headline", result.Summary);
+        Check(result.Summary.Contains("**Why it failed**\n\n    Upgrade \"fixture\" failed: conflict occurred while applying object", StringComparison.Ordinal)
+            && result.Summary.Contains("\n    - .spec.replicas\n", StringComparison.Ordinal),
+            "the summary must carry Helm's exact error, every line of it", result.Summary);
+        Check(result.Summary.Contains("| Revision before this deployment | `3` |", StringComparison.Ordinal)
+            && result.Summary.Contains("| Revision this deployment created | `4 (failed)` |", StringComparison.Ordinal)
+            && result.Summary.Contains("| Revision live now | `5 (rolled back from 4 to 3: same content as revision 3)` |", StringComparison.Ordinal),
+            "the revision rows must say what each revision is in plain words", result.Summary);
+        Check(!result.Summary.Contains("(deployed)", StringComparison.Ordinal), "a bare Helm status must not appear next to a revision", result.Summary);
+        Check(JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!["failure_reason"]!.GetValue<string>().EndsWith("- .spec.replicas", StringComparison.Ordinal),
+            "the report must carry Helm's error");
+        Check(result.Log.Contains("::error::Cause: Upgrade \"fixture\" failed: conflict occurred", StringComparison.Ordinal), "the cause must be annotated on the run", result.Log);
+        Check(s.Called($"helm rollback {Release} 3 --namespace example-production --wait --timeout 15m --force-conflicts"),
+            "a server-side release must be rolled back over manual edits", s.Calls);
         Check(!result.Summary.Contains("ROLLBACK FAILED", StringComparison.Ordinal), "a clean rollback must not read as a failed one");
 
         var logs = s.IndexOfCall("kubectl logs web-new");
@@ -564,6 +580,27 @@ try
         File.Delete(Path.Combine(s.FakeDir, "calls.log"));
         Check(Shim(s, realHelm, "upgrade", "--install", Release, "chart", "--namespace", "example-production", "--timeout", "3m").ExitCode == 0, "explicit timeout passes");
         Check(s.Called("--timeout 3m") && !s.Called("--timeout 20m"), "the shim must not override a timeout Aspire sets itself", s.Calls);
+        Check(!s.Called("--force-conflicts"), "the shim must not force conflicts on a release whose apply method is unknown", s.Calls);
+
+        // Server-side release: the chart must win over a field someone changed by hand.
+        File.Delete(Path.Combine(s.FakeDir, "calls.log"));
+        s.Write("apply-method", "ssa");
+        Check(Shim(s, realHelm, "upgrade", "--install", Release, "chart", "--namespace", "example-production", "--wait").ExitCode == 0, "server-side upgrade passes");
+        Check(s.Called($"helm upgrade --install {Release} chart --namespace example-production --wait --force-conflicts --timeout 20m"),
+            "the shim must append --force-conflicts for a server-side release", s.Calls);
+
+        // Client-side release: Helm rejects the flag there and records a failed revision.
+        File.Delete(Path.Combine(s.FakeDir, "calls.log"));
+        s.Write("apply-method", "csa");
+        Check(Shim(s, realHelm, "upgrade", "--install", Release, "chart", "--namespace", "example-production", "--wait").ExitCode == 0, "client-side upgrade passes");
+        Check(!s.Called("--force-conflicts"), "the shim must not force conflicts on a client-side release", s.Calls);
+
+        // An explicit apply option from the caller is left alone.
+        File.Delete(Path.Combine(s.FakeDir, "calls.log"));
+        s.Write("apply-method", "ssa");
+        Check(Shim(s, realHelm, "upgrade", "--install", Release, "chart", "--namespace", "example-production", "--server-side=false").ExitCode == 0, "explicit apply option passes");
+        Check(!s.Called("--force-conflicts"), "the shim must not add --force-conflicts next to an explicit apply option", s.Calls);
+        File.Delete(Path.Combine(s.FakeDir, "apply-method"));
 
         File.Delete(Path.Combine(s.FakeDir, "calls.log"));
         Check(Shim(s, realHelm, "version", "--short").ExitCode == 0 && Shim(s, realHelm, "rollback", Release, "3", "--namespace", "example-production").ExitCode == 0,
@@ -764,7 +801,10 @@ sealed class Scenario(string root, string guardScript)
     }
 
     static string Json((int Revision, string Status)[] entries) =>
-        "[" + string.Join(",", entries.Select(entry => $$"""{"revision":{{entry.Revision}},"updated":"2026-11-19T10:00:00Z","status":"{{entry.Status}}","chart":"app-1.0.0","app_version":"1.0.0","description":"fixture"}""")) + "]";
+        "[" + string.Join(",", entries.Select(entry => $$"""{"revision":{{entry.Revision}},"updated":"2026-11-19T10:00:00Z","status":"{{entry.Status}}","chart":"app-1.0.0","app_version":"1.0.0","description":"{{(entry.Status == "failed" ? FailedDescription : "fixture")}}"}""")) + "]";
+
+    // JSON-escaped description of a failed revision, shaped like real Helm 4.3.1 output for a field conflict.
+    const string FailedDescription = """Upgrade \"fixture\" failed: conflict occurred while applying object example-production/web apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with \"kubectl-edit\" using apps/v1:\n- .spec.replicas""";
 }
 
 sealed record GuardResult(int ExitCode, string Log, string[] Outputs, string Summary)
@@ -826,6 +866,9 @@ static class FakeCli
               cat "$dir/history.json" ;;
             "history "*) echo "REVISION STATUS (fixture table)" ;;
             "status "*) echo "STATUS: fixture" ;;
+            "get metadata "*)
+              if [[ ! -f "$dir/apply-method" ]]; then echo "Error: release: not found" >&2; exit 1; fi
+              echo "{\"name\":\"fixture\",\"revision\":3,\"status\":\"deployed\",\"applyMethod\":\"$(cat "$dir/apply-method")\"}" ;;
             "rollback "*)
               code="$(exit_code rollback-exit)"
               if [[ "$code" == "0" ]]; then

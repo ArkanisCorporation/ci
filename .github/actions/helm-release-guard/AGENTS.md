@@ -11,7 +11,9 @@ Release recording, rollback, diagnostics, and the schema rollback hook around a 
 - Render the schema rollback Job before the Helm rollback and create it only after the rollback succeeded.
 - Never run a schema rollback CronJob this deployment did not replace: it still belongs to the release being restored.
 - "Replaced" is uid OR generation differing from the captured value. Both CronJob shapes are supported: a Helm hook (`pre-install,pre-upgrade` + `before-hook-creation`, recommended) gets a new uid at generation 1 on every upgrade; an ordinary chart resource keeps its uid and bumps its generation. Never compare the generation alone.
-- Never read Secret objects, `helm get values`, `helm get manifest`, or `helm status --output json`. Never store pod environment values.
+- Never read Secret objects, `helm get values`, `helm get manifest`, or `helm status --output json`. Never store pod environment values. `helm get metadata` is allowed: it carries names, revision and apply method only.
+- The chart wins over manual cluster edits: `--force-conflicts` goes on `helm upgrade` (shim) and `helm rollback` (guard), but only when `helm get metadata` reports `"applyMethod":"ssa"`. Helm 4.3.1 rejects the flag on a client-side release and records a failed revision, so never add it unconditionally.
+- The summary must explain a failure without the log: Helm's error comes from the failed revision's `description` in `helm history` (`failure_reason`), and revision rows are worded in plain language, never as a bare Helm status such as `(deployed)`.
 - Record the deployment start first in the capture phase and inject it as `ARKANIS_DEPLOY_STARTED_AT` (constant `DeployStartedAtVariable`, RFC 3339 UTC, second precision) into every container and init container of the schema Job, replacing a chart entry of that name. Consumers rely on it to leave earlier deploys' schema changes alone; never run the Job without it.
 - Keep the rendered Job manifest under `RUNNER_TEMP`, out of the uploaded report.
 - No NuGet package references in `helm-release-guard.cs`: a rollback must not wait on a package restore.
