@@ -146,6 +146,7 @@ Preconditions:
 - The repository has already been checked out.
 - The project supports `dotnet restore --locked-mode` and `dotnet pack`.
 - Network access to NuGet is available for restore and optional `dotnet-setversion` install.
+- With `dotnet-setversion: true`, a .NET 10.0 SDK is set up next to the caller's SDK as the tool runtime.
 
 Side effects:
 
@@ -312,7 +313,9 @@ Preconditions:
 
 Side effects:
 
-- Installs `dotnet-setversion` under `$RUNNER_TEMP/arkanis-dotnet-setversion`.
+- Sets up a .NET 10.0 SDK next to the caller's SDK as the `dotnet-setversion` tool runtime, so stamping keeps working when the caller moves to a newer .NET major.
+  Any 10.0 patch satisfies it, and setup-dotnet skips the download when that version is already installed.
+- Installs `dotnet-setversion` under `$RUNNER_TEMP/arkanis-dotnet-setversion`, without `--allow-roll-forward`.
 - Modifies matched `.csproj` files in the workspace.
 - Writes a short stamp summary to `$GITHUB_STEP_SUMMARY`.
 
