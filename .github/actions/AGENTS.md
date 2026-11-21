@@ -43,7 +43,8 @@ Use reusable workflow instead for:
 - Keep outputs small; write large data to files/artifacts.
 - Install .NET tools with a pinned `--version` and without `--allow-roll-forward`.
   The flag rewrites the tool's own `rollForward` policy at install time; that broke ReportGenerator and JetBrains CleanupCode (ARK-745).
-  If a tool has no build for the runtime the action sets up, set up a matching runtime instead.
+  Instead, list the tool's runtime as a major-only channel (`10.0.x`) next to the caller's SDK in the same `setup-dotnet` step,
+  so the tool keeps working when the caller moves to a newer .NET major. Never pin a patch for a tool runtime.
   `scripts/validate-workflows.cs` rejects the flag in actions and workflows.
 
 ## Versioning

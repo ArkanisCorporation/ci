@@ -70,6 +70,7 @@ absent variable means the portable default, never a failure.
 |---|---|---|
 | `BUILDKIT_HOST` | daedalus workers (`ArkanisCorporation/ci-runners`, ARK-529) | A shared bounded BuildKit is reachable; the container workflows use it when `buildkit-endpoint` is empty. See *Remote BuildKit* below. |
 | `ARKANIS_PERSISTENT_NUGET_PACKAGES=true` | daedalus workers (`ArkanisCorporation/ci-runners`, ARK-528) | NuGet's default global-packages folder (`~/.nuget/packages`) lives on disk that persists across jobs, so `setup-dotnet`, `dotnet-pack-nuget`, `wf-setup-dotnet-generated-code.yml` and the Aspire deploy workflows skip the NuGet `runs-on/cache` step. Ignored when `NUGET_PACKAGES` points elsewhere. |
+| `DOTNET_INSTALL_DIR`, `DOTNET_CHECK_LATEST=false` | daedalus workers (`ArkanisCorporation/ci-runners`, ARK-745) | `actions/setup-dotnet` installs SDKs into a per-worker folder on host disk that survives container recreates, and reuses any installed SDK matching the requested channel (`10.0.x`) without a network call or the LTS runtime pre-pass. A new SDK is downloaded only when nothing installed matches, for example a caller's first `global.json` on a new major or feature band. Workflows need no change; an explicit `check-latest: true` input still forces an online check. |
 
 Rules for reading one:
 

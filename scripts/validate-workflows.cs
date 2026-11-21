@@ -814,6 +814,22 @@ void ValidateDotNetToolRollForwardContract()
             }
         }
     }
+
+    // dotnet-setversion ships no build newer than net10.0 and sets no rollForward, so its actions
+    // must set up a 10.0 tool runtime next to the caller's SDK. Without it, a caller on a newer
+    // major gets "You must install or update .NET" on a runner with no preinstalled 10.0 (ARK-745).
+    foreach (var (relativePath, token) in new[]
+             {
+                 (".github/actions/dotnet-setversion/action.yml", "          10.0.x\n          ${{ inputs.dotnet-version }}"),
+                 (".github/actions/dotnet-pack-nuget/action.yml", "          ${{ inputs.dotnet-setversion == 'true' && '10.0.x' || '' }}\n          ${{ inputs.dotnet-version }}")
+             })
+    {
+        var actionPath = Path.Combine(repoRoot, relativePath);
+        if (File.Exists(actionPath) && !File.ReadAllText(actionPath).ReplaceLineEndings("\n").Contains(token, StringComparison.Ordinal))
+        {
+            AddFailure($"{actionPath}: setup-dotnet must list the 10.0.x dotnet-setversion tool runtime next to the caller's dotnet-version (ARK-745).");
+        }
+    }
 }
 
 void ValidateDotNetActionFileScriptBuildIsolation()

@@ -86,10 +86,17 @@ runs:
         RECURSIVE: ${{ inputs.recursive }}
         PROJECT: ${{ inputs.project }}
 
-    - name: Setup .NET
+    # 10.0.x is the tool runtime, listed next to the caller's SDK so dotnet-setversion
+    # (net8.0/net9.0/net10.0 builds, no rollForward) always finds a runtime it was built for, even
+    # when the caller moves to a newer .NET major (ARK-745). setup-dotnet de-duplicates it when the
+    # caller is on 10.0 too, and with DOTNET_CHECK_LATEST=false (daedalus) any installed 10.0 SDK is
+    # reused offline. Bump the major only together with the tool's newest build target.
+    - name: Setup .NET @ ${{ inputs.global-json-file || inputs.dotnet-version }} + tool runtime 10.0.x
       uses: actions/setup-dotnet@v6
       with:
-        dotnet-version: ${{ inputs.dotnet-version }}
+        dotnet-version: |
+          10.0.x
+          ${{ inputs.dotnet-version }}
         global-json-file: ${{ inputs.global-json-file }}
 
     - name: Install dotnet-setversion
@@ -100,8 +107,8 @@ runs:
         mkdir -p "$tool_path"
 
         # No --allow-roll-forward: it rewrites the tool's own runtimeconfig rollForward policy at
-        # install time, which crashed JetBrains CleanupCode (ARK-745). dotnet-setversion ships
-        # net8.0/net9.0/net10.0 builds, so the SDK this action sets up already has a matching runtime.
+        # install time, which crashed JetBrains CleanupCode (ARK-745). The tool runtime set up
+        # above (10.0.x) matches dotnet-setversion's newest build, so no roll-forward is needed.
         dotnet tool install dotnet-setversion \
           --tool-path "$tool_path" \
           --version "$TOOL_VERSION"
