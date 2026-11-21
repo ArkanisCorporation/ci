@@ -32,7 +32,7 @@ Repositories that want exact repeatability should prefer local tool manifests or
 
 Installed-tool mode now pins a default `JetBrains.ReSharper.GlobalTools` version in `run-cleanupcode.cs`, tracked by a Renovate custom manager in `renovate.jsonc`.
 An unpinned install had picked up ReSharper 2026.3, the first build targeting net10.0.
-The action also stops passing `--allow-roll-forward`: it rewrote the tool's `rollForward` from `LatestMajor` to `Major`, and with `Major` the host started the tool on the image's 8.0 runtime, which aborted with exit 134.
+The action also stops passing `--allow-roll-forward`: it rewrote the tool's `rollForward` from `LatestMajor` to `Major`. JetBrains writes the framework version with four parts (`10.0.0.0`), and under `Major` the host did not treat that as a lower bound and started the net10.0 tool on the image's 8.0 runtime, which aborted with exit 134. The same file with `10.0.0` resolves correctly.
 A non-zero `jb cleanupcode` exit now fails the action before the Git diff check, so a crash can no longer be reported as "no Git diff".
 
 ## Migration

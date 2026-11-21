@@ -133,11 +133,12 @@ static async Task<ToolInstallResult> InstallJetBrainsToolAsync(string toolVersio
     Directory.CreateDirectory(toolPath);
 
     // No --allow-roll-forward (ARK-745). The flag rewrites the installed tool's runtimeconfig from the
-    // package's rollForward=LatestMajor to Major. From 2026.3 the tool targets net10.0, and with Major
-    // the host was observed (COREHOST_TRACE, hostfxr 10.0.15 and 11.0.0) to select an installed 8.0
-    // runtime for a 10.0.0.0 request whenever one exists - as on ubuntu-latest - and the tool then aborts
-    // with "Could not load file or assembly 'System.Runtime, Version=10.0.0.0'" (exit 134). The
-    // package's own LatestMajor resolves the newest runtime and already rolls onto later majors.
+    // package's rollForward=LatestMajor to Major. JetBrains writes the framework version with four
+    // parts ("10.0.0.0"); under Major the host (hostfxr 10.0.15 and 11.0.0, seen in COREHOST_TRACE)
+    // does not honour that as a lower bound and selects the lowest installed runtime - 8.0.34 on
+    // ubuntu-latest - so the net10.0 tool (2026.3+) aborts with "Could not load file or assembly
+    // 'System.Runtime, Version=10.0.0.0'" (exit 134). The same runtimeconfig rewritten to "10.0.0"
+    // resolves 10.0.x correctly. The package's own LatestMajor picks the newest runtime and works.
     var installArguments = new List<string>
     {
         "tool",
