@@ -41,6 +41,10 @@ Use reusable workflow instead for:
 - Fail with actionable error messages.
 - Mask derived sensitive values.
 - Keep outputs small; write large data to files/artifacts.
+- Install .NET tools with a pinned `--version` and without `--allow-roll-forward`.
+  The flag rewrites the tool's own `rollForward` policy at install time; that broke ReportGenerator and JetBrains CleanupCode (ARK-745).
+  If a tool has no build for the runtime the action sets up, set up a matching runtime instead.
+  `scripts/validate-workflows.cs` rejects the flag in actions and workflows.
 
 ## Versioning
 

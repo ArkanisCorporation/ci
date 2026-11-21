@@ -312,7 +312,7 @@ Preconditions:
 
 Side effects:
 
-- Installs `dotnet-setversion` under `$RUNNER_TEMP/arkanis-dotnet-setversion`.
+- Installs `dotnet-setversion` under `$RUNNER_TEMP/arkanis-dotnet-setversion`, without `--allow-roll-forward`, on the runtime of the SDK the action sets up.
 - Modifies matched `.csproj` files in the workspace.
 - Writes a short stamp summary to `$GITHUB_STEP_SUMMARY`.
 

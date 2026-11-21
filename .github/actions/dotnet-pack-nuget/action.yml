@@ -332,10 +332,12 @@ runs:
         rm -rf "$tool_path"
         mkdir -p "$tool_path"
 
+        # No --allow-roll-forward: it rewrites the tool's own runtimeconfig rollForward policy at
+        # install time, which crashed JetBrains CleanupCode (ARK-745). dotnet-setversion ships
+        # net8.0/net9.0/net10.0 builds, so the SDK this action sets up already has a matching runtime.
         dotnet tool install dotnet-setversion \
           --tool-path "$tool_path" \
-          --version "$TOOL_VERSION" \
-          --allow-roll-forward
+          --version "$TOOL_VERSION"
 
         tool_executable="${tool_path}/setversion"
         if [[ ! -x "$tool_executable" && -x "${tool_executable}.exe" ]]; then
