@@ -49,6 +49,10 @@ static class Guard
     const string PhaseFinalize = "finalize";
 
     // Per-command ceiling for read-only cluster queries. Generous for a slow API server, small next to a deploy.
+    // This process deadline is the only bound on a kubectl call, on purpose. Never pass kubectl's
+    // --request-timeout: that flag makes kubectl skip the in-cluster ServiceAccount credentials and
+    // dial localhost:8080, so on a runner pod without a kubeconfig every such call fails while Helm
+    // and plain kubectl keep working. That left the first real deployments unverified (ARK-744).
     static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(90);
 
     // Helm's --timeout bounds each Kubernetes operation, not the whole command, so the process gets its own cap.
@@ -297,7 +301,7 @@ static class Guard
         {
             foreach (var target in targets)
             {
-                var scale = Run("kubectl", ["scale", $"deployment/{target.Name}", "--namespace", ns, "--replicas=0", "--request-timeout=60s"], QueryTimeout, echoOutput: true);
+                var scale = Run("kubectl", ["scale", $"deployment/{target.Name}", "--namespace", ns, "--replicas=0"], QueryTimeout, echoOutput: true);
                 if (scale.ExitCode != 0)
                 {
                     Annotate("error", $"Scaling deployment/{target.Name} to 0 failed: {FirstLine(scale.Stderr, "kubectl scale failed.")}");
@@ -356,7 +360,7 @@ static class Guard
         Console.WriteLine($"::group::Restore replica counts {when}");
         foreach (var target in exclusive.Workloads)
         {
-            var read = Run("kubectl", ["get", "deployment", target.Name, "--namespace", ns, "--ignore-not-found", "--output", "jsonpath={.spec.replicas}", "--request-timeout=60s"], QueryTimeout);
+            var read = Run("kubectl", ["get", "deployment", target.Name, "--namespace", ns, "--ignore-not-found", "--output", "jsonpath={.spec.replicas}"], QueryTimeout);
             if (read.ExitCode != 0)
             {
                 Annotate("error", $"Could not read deployment/{target.Name}: {FirstLine(read.Stderr, "kubectl get failed.")}");
@@ -379,7 +383,7 @@ static class Guard
                 continue;
             }
 
-            var scale = Run("kubectl", ["scale", $"deployment/{target.Name}", "--namespace", ns, $"--replicas={Text(target.Replicas)}", "--request-timeout=60s"], QueryTimeout, echoOutput: true);
+            var scale = Run("kubectl", ["scale", $"deployment/{target.Name}", "--namespace", ns, $"--replicas={Text(target.Replicas)}"], QueryTimeout, echoOutput: true);
             if (scale.ExitCode != 0)
             {
                 Annotate("error", $"Restoring deployment/{target.Name} to {Text(target.Replicas)} replicas failed: {FirstLine(scale.Stderr, "kubectl scale failed.")}");
@@ -805,7 +809,7 @@ static class Guard
     // `listed` tells "the release has no workloads" from "the workloads could not be read"; the exclusive stop must not confuse them.
     static List<Workload> ReadWorkloads(string release, string ns, out bool listed)
     {
-        var result = Run("kubectl", ["get", "deployments,statefulsets,daemonsets,jobs", "--namespace", ns, "--output", "json", "--request-timeout=60s"], QueryTimeout);
+        var result = Run("kubectl", ["get", "deployments,statefulsets,daemonsets,jobs", "--namespace", ns, "--output", "json"], QueryTimeout);
         var workloads = new List<Workload>();
         listed = result.ExitCode == 0 && TryParseItems(result.Stdout, out _);
         if (!listed || !TryParseItems(result.Stdout, out var items))
@@ -909,8 +913,8 @@ static class Guard
             // Table output only: `helm status --output json` embeds the release's values.
             Save(directory, "helm-status.txt", Run("helm", ["status", release, "--namespace", ns], QueryTimeout));
             Save(directory, "helm-history.txt", Run("helm", ["history", release, "--namespace", ns, "--max", "20"], QueryTimeout));
-            Save(directory, "workloads.txt", Run("kubectl", ["get", "deployments,replicasets,pods", "--namespace", ns, "--output", "wide", "--request-timeout=60s"], QueryTimeout));
-            Save(directory, "events.txt", Run("kubectl", ["get", "events", "--namespace", ns, "--sort-by=.lastTimestamp", "--request-timeout=60s"], QueryTimeout));
+            Save(directory, "workloads.txt", Run("kubectl", ["get", "deployments,replicasets,pods", "--namespace", ns, "--output", "wide"], QueryTimeout));
+            Save(directory, "events.txt", Run("kubectl", ["get", "events", "--namespace", ns, "--sort-by=.lastTimestamp"], QueryTimeout));
             if (!full)
             {
                 return;
@@ -934,7 +938,7 @@ static class Guard
             foreach (var pod in owned.Where(pod => !pod.Ready))
             {
                 AddFailedResource(report, $"pod/{pod.Name}");
-                var describe = Run("kubectl", ["describe", "pod", pod.Name, "--namespace", ns, "--request-timeout=60s"], QueryTimeout);
+                var describe = Run("kubectl", ["describe", "pod", pod.Name, "--namespace", ns], QueryTimeout);
                 File.WriteAllText(Path.Combine(directory, $"describe-{pod.Name}.txt"), RedactDescribe(describe.Stdout) + describe.Stderr);
             }
 
@@ -949,7 +953,7 @@ static class Guard
             {
                 foreach (var container in pod.Containers)
                 {
-                    string[] logArgs = ["logs", pod.Name, "--namespace", ns, "--container", container, $"--tail={Text(LogTailLines)}", "--timestamps", "--request-timeout=60s"];
+                    string[] logArgs = ["logs", pod.Name, "--namespace", ns, "--container", container, $"--tail={Text(LogTailLines)}", "--timestamps"];
                     var current = Run("kubectl", logArgs, QueryTimeout);
                     File.WriteAllText(Path.Combine(logDirectory, $"{pod.Name}__{container}.log"), current.Stdout + current.Stderr);
 
@@ -984,7 +988,7 @@ static class Guard
 
         // Parsed in memory and never written out: a pod object carries its literal environment values.
         // Terminating pods are listed too (they carry a deletionTimestamp), which the exclusive stop relies on.
-        var result = Run("kubectl", ["get", "pods", "--namespace", ns, "--output", "json", "--request-timeout=60s"], QueryTimeout, quiet: quiet);
+        var result = Run("kubectl", ["get", "pods", "--namespace", ns, "--output", "json"], QueryTimeout, quiet: quiet);
         listed = result.ExitCode == 0 && TryParseItems(result.Stdout, out _);
         if (!listed || !TryParseItems(result.Stdout, out var items))
         {
@@ -1076,8 +1080,17 @@ static class Guard
             return string.Empty;
         }
 
-        var result = Run("kubectl", ["get", "cronjob", settings.SchemaRollbackCronJob, "--namespace", ns, "--ignore-not-found", "--output", "json", "--request-timeout=60s"], QueryTimeout);
-        if (result.ExitCode != 0 || result.Stdout.Trim().Length == 0)
+        var result = Run("kubectl", ["get", "cronjob", settings.SchemaRollbackCronJob, "--namespace", ns, "--ignore-not-found", "--output", "json"], QueryTimeout);
+        if (result.ExitCode != 0)
+        {
+            // --ignore-not-found makes an absent CronJob exit 0, so a non-zero exit is a failed read, not absence.
+            // It used to pass silently and looked exactly like "no schema hook".
+            var stderr = string.Join(' ', result.Stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            Annotate("warning", $"Could not read the schema rollback CronJob (kubectl exited with code {Text(result.ExitCode)}; standard error: {(stderr.Length == 0 ? "empty" : stderr.Length > 600 ? stderr[..600] + "..." : stderr)}). It is treated as absent.");
+            return string.Empty;
+        }
+
+        if (result.Stdout.Trim().Length == 0)
         {
             return string.Empty;
         }
@@ -1256,8 +1269,8 @@ static class Guard
             var result = WaitForJob(settings, job.Name, ns);
             var directory = Path.Combine(settings.ReportDirectory, "diagnostics", "schema-rollback");
             Directory.CreateDirectory(directory);
-            Save(directory, "job-logs.txt", Run("kubectl", ["logs", $"job/{job.Name}", "--namespace", ns, "--all-containers", "--tail=1000", "--timestamps", "--request-timeout=60s"], QueryTimeout));
-            Save(directory, "job.txt", Run("kubectl", ["get", "job", job.Name, "--namespace", ns, "--output", "wide", "--request-timeout=60s"], QueryTimeout));
+            Save(directory, "job-logs.txt", Run("kubectl", ["logs", $"job/{job.Name}", "--namespace", ns, "--all-containers", "--tail=1000", "--timestamps"], QueryTimeout));
+            Save(directory, "job.txt", Run("kubectl", ["get", "job", job.Name, "--namespace", ns, "--output", "wide"], QueryTimeout));
 
             report.SchemaRollback = result;
             if (result == SchemaOutcomes.Succeeded)
@@ -1288,7 +1301,7 @@ static class Guard
         var elapsed = Stopwatch.StartNew();
         while (true)
         {
-            var result = Run("kubectl", ["get", "job", jobName, "--namespace", ns, "--output", "json", "--request-timeout=60s"], QueryTimeout, quiet: true);
+            var result = Run("kubectl", ["get", "job", jobName, "--namespace", ns, "--output", "json"], QueryTimeout, quiet: true);
             if (result.ExitCode == 0)
             {
                 try
