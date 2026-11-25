@@ -406,6 +406,8 @@ try
         Check(!s.Called("helm rollback") && !s.Called("helm uninstall"), "the guard must not guess a destructive recovery");
         var result = s.Guard("finalize", "skipped");
         Check(result.ExitCode != 0 && result.Output("outcome") == "rollback-failed", "an unrecoverable stuck release must be reported as needing attention", result.Log);
+        Check(result.Summary.Contains("**DEPLOYMENT NOT STARTED - the Helm release was already stuck", StringComparison.Ordinal) && !result.Summary.Contains("ROLLBACK FAILED", StringComparison.Ordinal),
+            "a release stuck before the deployment must not be reported as a failed rollback", result.Summary);
     }
 
     // ---- Failed recovery stops the job before deploying.
@@ -422,7 +424,17 @@ try
     {
         var s = NewScenario("unreadable");
         s.Write("helm-list-exit", "1");
-        Check(s.Guard("capture").ExitCode != 0, "capture must fail closed when the release cannot be read");
+        var capture = s.Guard("capture");
+        Check(capture.ExitCode != 0, "capture must fail closed when the release cannot be read");
+        var result = s.Guard("finalize", "skipped");
+        Check(result.Output("outcome") == "not-attempted", "an unreadable release means the deployment did not start, not a failed rollback", result.Log);
+        Check(result.Summary.Contains("**Deployment did not start - environment untouched.**", StringComparison.Ordinal)
+            && !result.Summary.Contains("ROLLBACK FAILED", StringComparison.Ordinal) && !result.Log.Contains("ROLLBACK FAILED", StringComparison.Ordinal),
+            "nothing was touched, so nothing may claim a failed rollback or an environment needing attention", result.Summary);
+        Check(result.Summary.Contains("**Why it failed**\n\n    Error: Kubernetes cluster unreachable", StringComparison.Ordinal), "the summary must repeat why the release could not be read", result.Summary);
+        Check(result.Summary.Contains("| Revision before this deployment | `unknown (the release could not be read)` |", StringComparison.Ordinal),
+            "an unreadable release must not be reported as a first install", result.Summary);
+        Check(!s.Called("helm rollback") && !s.Called("helm upgrade"), "an unreadable release must not be changed");
     }
 
     // ---- Schema CronJob absent: skipped silently, rollback still clean.
