@@ -214,8 +214,11 @@ flowchart TD
   exists -->|yes| inspect{Namespace inspected?}
   inspect -->|"no: RBAC, API error, no release images"| blocked
   inspect -->|yes| traces{Trace of an older release?}
-  traces -->|yes| blocked
-  traces -->|no| job[[Create Job from CronJob, wait up to min of rollout-timeout and 10m]]
+  traces -->|"yes, one not draining"| blocked
+  traces -->|"yes, all draining"| settle[[Re-check every poll, up to min of rollout-timeout and 3m]]
+  settle -->|"clean"| job
+  settle -->|"still draining at the bound, or a non-draining trace"| blocked
+  traces -->|no| job[[Create Job from CronJob, wait up to the rest of rollout-timeout, at most 10m]]
   job -->|Complete| succeeded(("succeeded, Job deleted"))
   job -->|Failed| failed(("failed: error, job red, still deployed"))
   job -->|no result in time| timedOut(("timed-out: error, job red, still deployed"))
@@ -239,6 +242,12 @@ flowchart TD
 3. Every **paused** Deployment of the release is a trace too, whatever its images: resuming or scaling it can bring its previous ReplicaSet back.
 
 Not traces: ReplicaSets at 0 replicas (revision history, `revisionHistoryLimit`), completed and failed pods, finished Jobs, and images from repositories the release does not use.
+
+**Settle period for draining traces.** A Deployment rollout is complete as soon as the old ReplicaSet is scaled to 0, while its pods still terminate for up to their grace period (30 seconds by default): phase `Running` with `metadata.deletionTimestamp` set, and the ReplicaSet briefly at `spec.replicas` 0 with `status.replicas` above 0.
+Those are traces, old code still runs, but deciding at once would block nearly every rolling deploy.
+When **every** trace is draining (terminating pods, and ReplicaSets at `spec.replicas` 0 with `status.replicas` above 0), the guard re-runs the check every few seconds until the namespace is clean, a non-draining trace appears, or `min(rollout-timeout, 3m)` has passed; it logs one line when the wait starts and one when it ends.
+Clean runs the Job; anything else is `blocked`, naming what was still draining. A trace that is not draining blocks immediately, without waiting.
+Three minutes is six default grace periods. Settle and Job wait share `rollout-timeout`: the Job waits for what the settle period left, at most ten minutes, with a floor of 30 seconds (or `rollout-timeout` when that is smaller). With the default `15m` that is at most 3 + 10 minutes, inside the rollout-timeout share the success path never spends on a rollback.
 Refinement: the comparison is per repository against the **set** of references the release uses, not one tag. A chart that runs the same third-party image at two tags in two workloads (say `redis:7` and `redis:6`) has no older release in it.
 Repositories are normalised the way the runtime resolves them (`redis` is `docker.io/library/redis`); a missing tag means `:latest`. Tag and digest are compared as written, so the same build named once by tag and once by digest blocks the confirm: a false block is cheap, a false confirm is not.
 
@@ -246,14 +255,14 @@ Repositories are normalised the way the runtime resolves them (`redis` is `docke
 The guard never confirms on missing evidence.
 It emits one `::warning::` with the reason and one per offending object (kind/name, image, why), lists them in the summary and in `deploy-report.json` (`schema_confirm_traces`), and the job **stays green**: the release is healthy, its contract migrations just stay deferred until a later deployment confirms. Nothing is rolled back.
 
-**The Job.** Rendered with `kubectl create job <cronjob>-<run id>-<attempt> --from=cronjob/schema-confirm --dry-run=client`, labelled `arkanis.dev/deploy-guard=schema-confirm`, given `ttlSecondsAfterFinished` as a backstop, created, and awaited for at most `min(rollout-timeout, 10m)`.
+**The Job.** Rendered with `kubectl create job <cronjob>-<run id>-<attempt> --from=cronjob/schema-confirm --dry-run=client`, labelled `arkanis.dev/deploy-guard=schema-confirm`, given `ttlSecondsAfterFinished` as a backstop, created, and awaited for what remains of `rollout-timeout` after the settle period, at most 10 minutes.
 Ten minutes is twice a 300 second `activeDeadlineSeconds` (which covers the Job's retries too) and leaves room for an image pull; the success path never spends the `rollout-timeout` the job budget reserves for a rollback, so the wait cannot push a good deploy into `timeout-minutes`.
 Unlike the rollback Job it keeps the owner reference kubectl gives it and does **not** receive `ARKANIS_DEPLOY_STARTED_AT`.
 Its log goes into the run log and `diagnostics/schema-confirm`, and its last lines into the summary and `schema_confirm_output`. A completed Job is deleted; a failed or still-running one stays in the cluster.
 
 **Failed or timed out** (`failed`, `timed-out`): an `::error::` annotation and a red job, but the outcome stays `deployed` and nothing is rolled back: the release is serving and healthy. Red only so that a broken confirm is noticed instead of silently deferring contracts forever. Outputs, summary, report and the artifact upload are written as usual; the guard exits non-zero only after publishing them.
 
-The confirm checks a moment in time. A stray object created between the check and the Job, or one in another namespace, is not seen.
+The decision rests on the last check. A stray object created between that check and the Job, or one in another namespace, is not seen.
 
 ### Failure modes
 

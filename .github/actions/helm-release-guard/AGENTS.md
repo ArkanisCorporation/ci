@@ -23,6 +23,7 @@ Release recording, rollback, diagnostics, and the schema rollback hook around a 
 - The schema confirm (ARK-746) runs only in the `deployed` branch of finalize, after the guard verified the rollout itself. Never after a rollback, a failure, a cancel, or `not-attempted`.
 - Never confirm on missing evidence: a CronJob read that fails, a namespace that cannot be listed, no release images, or any trace of an older release is `blocked` (warning, green). A failed or timed-out confirm Job is red, but the outcome stays `deployed` and nothing is rolled back.
 - The trace rule compares per repository against the set of references the release's own workloads use; keep it in `FindOlderReleaseTraces` and documented in `docs/deployments.md#schema-confirm-hook`.
+- Draining traces (terminating pods, ReplicaSets at `spec.replicas` 0 with `status.replicas` above 0) get a settle period of `min(rollout-timeout, 3m)`, re-checked every poll; a non-draining trace blocks immediately. Settle plus the confirm Job wait stay within `rollout-timeout`.
 - Never inject `ARKANIS_DEPLOY_STARTED_AT` into the schema confirm Job.
 - Bound every Helm and kubectl call and every wait.
 - No destructive recovery by guesswork: a stuck first install stops the job, it is not uninstalled.

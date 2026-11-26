@@ -710,6 +710,48 @@ try
         Check(traces.Count == 1 && $"{traces[0]!["kind"]}/{traces[0]!["name"]}" == culprit, $"{name}: the report must carry exactly that trace", traces.ToJsonString());
     }
 
+    // ---- The ordinary tail of a rolling update: old pods still terminating, their ReplicaSet at 0. Waited out, then confirmed.
+    {
+        var s = ConfirmScenario("schema-confirm-drains-then-clean");
+        s.Inventory([.. Scenario.CleanInventory(),
+            Scenario.Item("Pod", "web-1-b", "ghcr.io/example/web:1", status: "{\"phase\":\"Running\"}", terminating: true),
+            Scenario.Item("ReplicaSet", "web-1-old", "ghcr.io/example/web:1", spec: "\"replicas\":0", status: "{\"replicas\":1}")]);
+        s.InventoryAfter(2, Scenario.CleanInventory());
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("schema-confirm") == "succeeded", "draining objects that go away must not block the confirm", result.Log);
+        Check(s.InventoryCalls == 3, "the check must be repeated until the namespace is clean", s.InventoryCalls.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Check(result.Log.Contains("Waiting up to 180s for 2 terminating object(s) of an older release to go: Pod/web-1-b, ReplicaSet/web-1-old", StringComparison.Ordinal)
+            && result.Log.Contains("The older release's objects are gone after", StringComparison.Ordinal),
+            "the start and end of the settle wait must be logged, bounded by three minutes", result.Log);
+        Check(!result.Log.Contains("::warning::", StringComparison.Ordinal), "a settled namespace must not warn", result.Log);
+    }
+
+    // ---- A terminating pod that never goes: blocked once the settle bound expires, naming the pod.
+    {
+        var s = ConfirmScenario("schema-confirm-drain-never-ends", timeout: "1s");
+        s.Inventory([.. Scenario.CleanInventory(), Scenario.Item("Pod", "web-1-stuck", "ghcr.io/example/web:1", status: "{\"phase\":\"Running\"}", terminating: true)]);
+        var result = s.Guard("finalize", "success", timeout: "1s");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "blocked", "a pod that never finishes terminating must block", result.Log);
+        Check(s.InventoryCalls > 1, "the check must have been repeated during the settle period", s.InventoryCalls.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Check(result.Log.Contains("were still terminating after 1s", StringComparison.Ordinal)
+            && result.Log.Contains("::warning::Schema confirm blocked by Pod/web-1-stuck (ghcr.io/example/web:1): a terminating pod still runs an older image", StringComparison.Ordinal),
+            "the block must name what was still draining", result.Log);
+        Check(!s.Called("kubectl create --filename"), "no Job may run while old pods remain", s.Calls);
+    }
+
+    // ---- A draining pod next to a real stray: blocked at once, no settle wait.
+    {
+        var s = ConfirmScenario("schema-confirm-drain-and-stray");
+        s.Inventory([.. Scenario.CleanInventory(),
+            Scenario.Item("Pod", "web-1-c", "ghcr.io/example/web:1", status: "{\"phase\":\"Running\"}", terminating: true),
+            Scenario.Item("Deployment", "web-copy", "ghcr.io/example/web:1", spec: "\"replicas\":0")]);
+        s.InventoryAfter(1, Scenario.CleanInventory()); // A wait would find it clean: only an immediate decision blocks.
+        var result = s.Guard("finalize", "success");
+        Check(result.Output("schema-confirm") == "blocked" && s.InventoryCalls == 1 && !result.Log.Contains("Waiting up to", StringComparison.Ordinal),
+            "a non-draining trace must block immediately without waiting", result.Log);
+        Check(result.Log.Contains("Schema confirm blocked by Deployment/web-copy", StringComparison.Ordinal), "the stray must be named", result.Log);
+    }
+
     // ---- The namespace cannot be inspected (RBAC forbids a kind): blocked, never confirmed on missing evidence.
     {
         var s = ConfirmScenario("schema-confirm-inventory-forbidden");
@@ -915,13 +957,23 @@ sealed class Scenario(string root, string guardScript)
     // What the schema confirm's trace check sees: one `kubectl get deployments,...,pods -o json` list.
     public void Inventory(params string[] items) => Write("inventory.json", "{\"kind\":\"List\",\"items\":[" + string.Join(",", items) + "]}");
 
+    // The inventory once the draining objects are gone, answered from the poll after the first `polls` ones.
+    public void InventoryAfter(int polls, params string[] items)
+    {
+        Write("inventory-settled.json", "{\"kind\":\"List\",\"items\":[" + string.Join(",", items) + "]}");
+        Write("inventory-drain-polls", polls.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public int InventoryCalls => File.Exists(Path.Combine(FakeDir, "inventory-calls")) ? int.Parse(File.ReadAllText(Path.Combine(FakeDir, "inventory-calls")).Trim(), System.Globalization.CultureInfo.InvariantCulture) : 0;
+
     /*
      * One namespace object for the inventory. Every container carries a literal environment value, which must never
      * leave the guard. CronJobs nest their pod spec under jobTemplate, Pods carry it directly, the rest under template.
      */
-    public static string Item(string kind, string name, string image, bool owned = false, string spec = "", string status = "{}", string initImage = "")
+    public static string Item(string kind, string name, string image, bool owned = false, string spec = "", string status = "{}", string initImage = "", bool terminating = false)
     {
-        var annotations = owned ? ",\"annotations\":{\"meta.helm.sh/release-name\":\"kubernetes-production\"}" : string.Empty;
+        var annotations = (owned ? ",\"annotations\":{\"meta.helm.sh/release-name\":\"kubernetes-production\"}" : string.Empty)
+            + (terminating ? ",\"deletionTimestamp\":\"2026-11-26T10:00:00Z\"" : string.Empty);
         var init = initImage.Length == 0 ? string.Empty : "\"initContainers\":[{\"name\":\"migrator\",\"image\":\"" + initImage + "\"}],";
         var podSpec = "{" + init + "\"containers\":[{\"name\":\"main\",\"image\":\"" + image + "\",\"env\":[{\"name\":\"ConnectionStrings__Db\",\"value\":\"" + SecretLiteral + "\"}]}]}";
         var specBody = kind switch
@@ -1080,7 +1132,9 @@ static class FakeCli
      * A rollback re-applies the chart's replica counts (deletes replicas-*) unless rollback-keeps-scale exists, which
      * is how real Helm 4.3.1 behaves after `kubectl scale` (tests/live/helm-release-guard-kind.sh).
      * The schema confirm reads confirm-cronjob.json (absent = no CronJob) and inventory.json (the one multi-kind list
-     * the trace check makes); confirm-cronjob-exit and inventory-exit answer like a forbidden RBAC read.
+     * the trace check makes); confirm-cronjob-exit and inventory-exit answer like a forbidden RBAC read. With
+     * inventory-settled.json present, calls after the first inventory-drain-polls answer from it instead: pods that
+     * finished terminating between two polls. inventory-calls counts the polls.
      */
     public const string Script = """
         #!/usr/bin/env bash
@@ -1130,7 +1184,9 @@ static class FakeCli
           "get cronjob "*) if [[ -f "$dir/cronjob.json" ]]; then cat "$dir/cronjob.json"; fi ;;
           "get deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods "*)
             if [[ -f "$dir/inventory-exit" ]]; then echo 'Error from server (Forbidden): replicasets.apps is forbidden: User "deployer" cannot list resource "replicasets"' >&2; exit 1; fi
-            if [[ -f "$dir/inventory.json" ]]; then cat "$dir/inventory.json"; else echo '{"items":[]}'; fi ;;
+            calls=$(( $(cat "$dir/inventory-calls" 2> /dev/null || echo 0) + 1 )); echo "$calls" > "$dir/inventory-calls"
+            if [[ -f "$dir/inventory-settled.json" && "$calls" -gt "$(cat "$dir/inventory-drain-polls")" ]]; then cat "$dir/inventory-settled.json"
+            elif [[ -f "$dir/inventory.json" ]]; then cat "$dir/inventory.json"; else echo '{"items":[]}'; fi ;;
           "get deployments,statefulsets,daemonsets,jobs "*)
             if rolled_back && [[ -f "$dir/workloads-after-rollback.json" ]]; then cat "$dir/workloads-after-rollback.json"; else cat "$dir/workloads.json"; fi ;;
           "get pods "*)

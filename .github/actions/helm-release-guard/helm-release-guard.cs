@@ -1472,9 +1472,23 @@ static class Guard
      * bounds its own Job (PatchWatch: activeDeadlineSeconds 300, which covers its one retry as well), so ten minutes is
      * twice that and leaves room for a slow image pull. The confirm runs only on the success path, which never spends
      * the rollout-timeout the job budget reserves for a rollback (timeout-minutes >= 2 x rollout-timeout + 10m), so
-     * min(rollout-timeout, 10m) cannot push a successful deployment into the job timeout.
+     * min(rollout-timeout, 10m) cannot push a successful deployment into the job timeout. The settle period below
+     * comes out of the same rollout-timeout: settle plus Job wait never exceed it (see RunSchemaConfirm).
      */
     static readonly TimeSpan MaxSchemaConfirmWait = TimeSpan.FromMinutes(10);
+
+    /*
+     * Upper bound of the settle period, further capped at rollout-timeout. A Deployment's rollout counts as complete
+     * once its old ReplicaSet is scaled to 0, while that ReplicaSet's pods are still terminating for up to their
+     * terminationGracePeriodSeconds (30 s by default). Those are traces (old code still runs), but deciding at once
+     * would block nearly every ordinary rolling deploy. Three minutes is six default grace periods; with the default
+     * 15m rollout-timeout, settle (3m) plus Job wait (10m) stay inside the rollout-timeout share the success path never
+     * spends on a rollback.
+     */
+    static readonly TimeSpan MaxSchemaConfirmSettle = TimeSpan.FromMinutes(3);
+
+    // Floor for the Job wait when the settle period used up most of a small rollout-timeout.
+    static readonly TimeSpan MinSchemaConfirmWait = TimeSpan.FromSeconds(30);
 
     const string ReleaseNameAnnotation = "meta.helm.sh/release-name";
 
@@ -1527,9 +1541,39 @@ static class Guard
             return;
         }
 
+        // Only draining traces (terminating pods, ReplicaSets at 0 whose pods are still going): the ordinary tail of a
+        // rolling update. Re-check until clean, until a non-draining trace appears (decided at once), or until the
+        // settle bound expires. Any non-draining trace blocks immediately, without waiting.
+        var settle = settings.RolloutTimeout < MaxSchemaConfirmSettle ? settings.RolloutTimeout : MaxSchemaConfirmSettle;
+        var settling = Stopwatch.StartNew();
+        if (traces.Count > 0 && traces.All(trace => trace.Draining))
+        {
+            Console.WriteLine($"Waiting up to {Text((int)Math.Ceiling(settle.TotalSeconds))}s for {Text(traces.Count)} terminating object(s) of an older release to go: {string.Join(", ", traces.Select(trace => $"{trace.Kind}/{trace.Name}"))}");
+            do
+            {
+                Thread.Sleep(settings.PollInterval);
+                traces = FindOlderReleaseTraces(release, ns, out checkError, quiet: true);
+                if (checkError is not null)
+                {
+                    BlockSchemaConfirm(report, checkError, []);
+                    return;
+                }
+            }
+            while (traces.Count > 0 && traces.All(trace => trace.Draining) && settling.Elapsed < settle);
+
+            Console.WriteLine(traces.Count == 0
+                ? $"The older release's objects are gone after {Text((int)settling.Elapsed.TotalSeconds)}s."
+                : traces.All(trace => trace.Draining)
+                    ? $"Still terminating after {Text((int)settling.Elapsed.TotalSeconds)}s: {string.Join(", ", traces.Select(trace => $"{trace.Kind}/{trace.Name}"))}."
+                    : $"Stopped waiting after {Text((int)settling.Elapsed.TotalSeconds)}s: a trace that is not terminating appeared.");
+        }
+
+        settling.Stop();
         if (traces.Count > 0)
         {
-            BlockSchemaConfirm(report, $"{Text(traces.Count)} object(s) in namespace '{ns}' still carry an older release's images.", traces);
+            BlockSchemaConfirm(report, traces.All(trace => trace.Draining)
+                ? $"{Text(traces.Count)} object(s) in namespace '{ns}' of an older release were still terminating after {Text((int)Math.Ceiling(settle.TotalSeconds))}s."
+                : $"{Text(traces.Count)} object(s) in namespace '{ns}' still carry an older release's images.", traces);
             return;
         }
 
@@ -1561,7 +1605,10 @@ static class Guard
         var manifestPath = Path.Combine(manifestDirectory, "schema-confirm-job.json");
         File.WriteAllText(manifestPath, job.ToJsonString());
         report.SchemaConfirmJob = jobName;
-        var wait = settings.RolloutTimeout < MaxSchemaConfirmWait ? settings.RolloutTimeout : MaxSchemaConfirmWait;
+        // Settle plus wait stay within rollout-timeout, except for a small floor when settling used nearly all of it.
+        var remaining = settings.RolloutTimeout - settling.Elapsed;
+        var floor = settings.RolloutTimeout < MinSchemaConfirmWait ? settings.RolloutTimeout : MinSchemaConfirmWait;
+        var wait = remaining < floor ? floor : remaining < MaxSchemaConfirmWait ? remaining : MaxSchemaConfirmWait;
         Console.WriteLine($"::group::Schema confirm Job {jobName}");
         try
         {
@@ -1618,6 +1665,8 @@ static class Guard
      *   - ReplicaSets with spec.replicas or status.replicas above 0. Those at 0 are revision history.
      *   - Jobs that have not finished (no Complete or Failed condition): running, pending or suspended.
      *   - Pods not in phase Succeeded or Failed, terminating ones included.
+     * Terminating pods (metadata.deletionTimestamp set) and ReplicaSets at spec.replicas 0 with status.replicas above 0
+     * are marked Draining: they are going away by themselves, so the caller waits a bounded time for them.
      * Plus every paused Deployment of the release, whatever its images: resuming or scaling it can bring its previous
      * ReplicaSet back.
      *
@@ -1626,14 +1675,14 @@ static class Guard
      * not use are not looked at. Returns an error instead when the namespace cannot be inspected or the release owns
      * no image: never confirm on missing evidence.
      */
-    static List<ReleaseTrace> FindOlderReleaseTraces(string release, string ns, out string? error)
+    static List<ReleaseTrace> FindOlderReleaseTraces(string release, string ns, out string? error, bool quiet = false)
     {
         error = null;
         var traces = new List<ReleaseTrace>();
 
         // One call, so the picture is one moment. Parsed in memory and never written out: pod templates carry literal
         // environment values. Only kinds, names and image references leave this method.
-        var result = Run("kubectl", ["get", "deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods", "--namespace", ns, "--output", "json"], QueryTimeout);
+        var result = Run("kubectl", ["get", "deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods", "--namespace", ns, "--output", "json"], QueryTimeout, quiet: quiet);
         if (result.ExitCode != 0 || !TryParseItems(result.Stdout, out var items))
         {
             error = result.ExitCode != 0
@@ -1681,13 +1730,18 @@ static class Guard
             }
 
             var phase = item?["status"]?["phase"]?.GetValue<string>() ?? string.Empty;
+            var desired = Number(item?["spec"]?["replicas"]) ?? 0;
+            var actual = Number(item?["status"]?["replicas"]) ?? 0;
+            var terminating = item?["metadata"]?["deletionTimestamp"] is JsonValue;
+            var draining = (kind == "Pod" && terminating) || (kind == "ReplicaSet" && desired == 0 && actual > 0);
             var why = kind switch
             {
                 "Deployment" or "StatefulSet" or "DaemonSet" => "its pod template names an older image; a stray copy counts whatever its replica count",
                 "CronJob" => "its job template names an older image; a suspended CronJob counts too",
-                "ReplicaSet" when (Number(item?["spec"]?["replicas"]) ?? 0) > 0 || (Number(item?["status"]?["replicas"]) ?? 0) > 0 =>
-                    "a ReplicaSet that still has replicas runs an older image",
+                "ReplicaSet" when desired == 0 && actual > 0 => "a ReplicaSet scaled to 0 whose pods are still terminating runs an older image",
+                "ReplicaSet" when desired > 0 || actual > 0 => "a ReplicaSet that still has replicas runs an older image",
                 "Job" when !JobFinished(item) => "a Job that has not finished runs an older image",
+                "Pod" when phase is not ("Succeeded" or "Failed") && terminating => "a terminating pod still runs an older image",
                 "Pod" when phase is not ("Succeeded" or "Failed") => $"a pod in phase '{(phase.Length == 0 ? "unknown" : phase)}' runs an older image",
                 _ => null,
             };
@@ -1701,7 +1755,7 @@ static class Guard
                 var (repository, reference) = SplitImage(image);
                 if (current.TryGetValue(repository, out var references) && !references.Contains(reference))
                 {
-                    traces.Add(new ReleaseTrace(kind, name, image, $"{why}; this release runs {repository} at {string.Join(", ", references)}."));
+                    traces.Add(new ReleaseTrace(kind, name, image, $"{why}; this release runs {repository} at {string.Join(", ", references)}.", draining));
                 }
             }
         }
@@ -1958,6 +2012,7 @@ static class Guard
                 ["name"] = trace.Name,
                 ["image"] = trace.Image,
                 ["reason"] = trace.Reason,
+                ["draining"] = trace.Draining,
             })]),
             ["stuck_release_recovery"] = report.Recovery,
             ["release_name_adopted_from_deploy"] = report.Adopted,
@@ -2298,8 +2353,9 @@ static class SchemaConfirmOutcomes
 /*
  * One object that keeps the schema confirm from running: kind and name, the image reference that gave it away (empty
  * when the reason is not an image, e.g. a paused Deployment or a check that could not run), and why it counts.
+ * Draining: a terminating pod, or a ReplicaSet at 0 whose pods are still terminating; it goes away by itself.
  */
-sealed record ReleaseTrace(string Kind, string Name, string Image, string Reason);
+sealed record ReleaseTrace(string Kind, string Name, string Image, string Reason, bool Draining = false);
 
 sealed class GuardInputException(string message) : Exception(message);
 
