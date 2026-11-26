@@ -85,6 +85,10 @@ jobs:
       - name: Verify Helm release guard @ tests/helm-release-guard.cs
         run: dotnet run --file tests/helm-release-guard.cs --no-launch-profile
 
+      # No cluster either: a fake kubectl on PATH records the calls.
+      - name: Verify runner pod protection @ tests/protect-runner-pod.sh
+        run: bash tests/protect-runner-pod.sh
+
       - name: Publish summary @ ${{ github.run_id }}
         if: always()
         env:

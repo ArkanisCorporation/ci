@@ -341,6 +341,7 @@ Preconditions:
 
 Side effects:
 
+- Capture, on a runner that is a Kubernetes pod: labels that pod `arkanis.dev/deploy-in-progress=true` through its own service account, and fails before anything is deployed when its node is cordoned ([runner contract](../../docs/runner-contract.md#node-drains)).
 - Capture: may run `helm rollback` to recover a release stuck in a `pending-*` state, and fails when the release cannot be read.
 - Capture with `exclusive: "true"`: records and then scales every Deployment of the release to 0, waits until their pods are gone, and outputs `exclusive=true`. When that fails it restores the replica counts and fails; the finalize phase then reports `failed-exclusive-stop`. Export `ARKANIS_DEPLOY_EXCLUSIVE=true` into the deployment step only when `steps.<capture>.outputs.exclusive == 'true'`. StatefulSets are not stopped.
 - Finalize after an exclusive capture: on success puts back a Deployment the chart left at 0; on failure stops the failed release, runs the schema Job, rolls back, restores the recorded replica counts, and verifies. Outputs `downtime-started-at` and `downtime-ended-at`; the summary states the window.
