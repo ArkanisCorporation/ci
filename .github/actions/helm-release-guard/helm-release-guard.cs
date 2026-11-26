@@ -146,6 +146,7 @@ static class Guard
         {
             Annotate("error", $"Cannot read Helm release '{state.Release}' in namespace '{state.Namespace}': {readError} Nothing was deployed.");
             state.Recovery = "unreadable";
+            state.CaptureError = readError;
             SaveState(settings, state);
             return 1;
         }
@@ -182,6 +183,7 @@ static class Guard
             {
                 Annotate("error", $"Cannot re-read Helm release '{state.Release}' after recovering it: {readError} Nothing was deployed.");
                 state.Recovery = "unreadable";
+                state.CaptureError = readError;
                 SaveState(settings, state);
                 return 1;
             }
@@ -464,10 +466,25 @@ static class Guard
         if (!state.Captured)
         {
             SetRevisions(report, baseline, null);
+            report.FailureReason = state.CaptureError;
+
+            // The guard could not even read the release (cluster or Helm unreachable) and changed nothing: that is a
+            // deployment that did not start, not a rollback that failed. Reporting it as "rollback failed, environment
+            // needs attention" sent people looking for damage that cannot exist. The capture step already failed the job.
+            if (state.Recovery == "unreadable" && state.RecoveredFromStatus.Length == 0)
+            {
+                report.Outcome = Outcomes.NotAttempted;
+                report.Detail = "The Helm release could not be read, so the deployment did not start. Nothing was deployed and nothing was changed.";
+                return Publish(settings, report);
+            }
+
+            // Everything else here is a release stuck in a pending state: no rollback of this deployment failed either,
+            // but the environment does need a human, so it keeps the needs-attention outcome under an honest headline.
             report.Outcome = Outcomes.RollbackFailed;
+            report.StuckBeforeDeploy = true;
             report.Detail = state.Recovery switch
             {
-                "unreadable" => "The Helm release could not be read before deploying. Nothing was deployed.",
+                "unreadable" => "The stuck release was rolled back to its last deployed revision, but could not be read afterwards. Nothing was deployed.",
                 "impossible" => "The release is stuck in a pending state with no deployed revision to return to. Nothing was deployed.",
                 _ => "Recovering the stuck release failed before deploying. Nothing was deployed.",
             };
@@ -1424,6 +1441,7 @@ static class Guard
             Outcomes.RolledBack => $"DEPLOYMENT FAILED - rolled back to revision {Text(report.RollbackTargetRevision)}, the previous release is live.",
             Outcomes.RollbackFailed when report.HelmRollbackSucceeded && report.SchemaRollback is SchemaOutcomes.Failed or SchemaOutcomes.TimedOut =>
                 $"ROLLBACK FAILED, environment needs attention - workloads restored to revision {Text(report.RollbackTargetRevision)}, SCHEMA ROLLBACK FAILED.",
+            Outcomes.RollbackFailed when report.StuckBeforeDeploy => "DEPLOYMENT NOT STARTED - the Helm release was already stuck and could not be recovered. Environment needs attention.",
             Outcomes.RollbackFailed => "ROLLBACK FAILED, environment needs attention.",
             Outcomes.FailedNoPreviousRelease => "DEPLOYMENT FAILED - first install, no previous release to restore. Environment needs attention.",
             Outcomes.FailedRollbackDisabled => "DEPLOYMENT FAILED - rollback-on-failure is false, nothing was restored. Environment needs attention.",
@@ -1561,7 +1579,7 @@ static class Guard
      * revision is the one Helm currently counts as installed.
      */
     static string RevisionBefore(Report report) => report.PreviousRevision is null
-        ? "none (first install)"
+        ? report.Recovery == "unreadable" ? "unknown (the release could not be read)" : "none (first install)"
         : report.PreviousStatus is "deployed" or ""
             ? Text(report.PreviousRevision)
             : $"{Text(report.PreviousRevision)} (was already in Helm status '{report.PreviousStatus}')";
@@ -1644,6 +1662,7 @@ static class Guard
             ["captured"] = state.Captured,
             ["recovery"] = state.Recovery,
             ["recovered_from_status"] = state.RecoveredFromStatus,
+            ["capture_error"] = state.CaptureError,
             ["schema_cronjob_identity"] = state.SchemaCronJobIdentity,
             ["deploy_started_at"] = state.DeployStartedAt,
             ["exclusive"] = state.Exclusive.ToJson(),
@@ -1669,6 +1688,7 @@ static class Guard
                 Captured = json?["captured"]?.GetValue<bool>() ?? false,
                 Recovery = json?["recovery"]?.GetValue<string>() ?? "none",
                 RecoveredFromStatus = json?["recovered_from_status"]?.GetValue<string>() ?? string.Empty,
+                CaptureError = json?["capture_error"]?.GetValue<string>() ?? string.Empty,
                 SchemaCronJobIdentity = json?["schema_cronjob_identity"]?.GetValue<string>() ?? string.Empty,
                 DeployStartedAt = json?["deploy_started_at"]?.GetValue<string>() ?? string.Empty,
                 Exclusive = ExclusiveState.FromJson(json?["exclusive"]),
@@ -2010,6 +2030,9 @@ sealed class GuardState
 
     public string RecoveredFromStatus { get; set; } = string.Empty;
 
+    // Helm's error text when the capture phase could not read the release; finalize repeats it as the failure reason.
+    public string CaptureError { get; set; } = string.Empty;
+
     // "<uid>/<generation>" of the schema-rollback CronJob before the deploy; empty when it did not exist.
     public string SchemaCronJobIdentity { get; set; } = string.Empty;
 
@@ -2029,6 +2052,9 @@ sealed class Report
 
     // Helm's own error for the revision this deployment created, or the guard's reason when Helm reported success.
     public string FailureReason { get; set; } = string.Empty;
+
+    /** The release was stuck in a pending state before this deployment and could not be recovered: nothing was deployed. */
+    public bool StuckBeforeDeploy { get; set; }
 
     public string Release { get; set; } = string.Empty;
 

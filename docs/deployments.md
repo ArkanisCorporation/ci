@@ -91,13 +91,13 @@ The step summary, the workflow outputs, and `artifacts/deploy-report/deploy-repo
 |---|---|---|
 | `deployed` | Helm succeeded and every Deployment is rolled out. If the guard could not check the rollout itself, the outcome stays `deployed` on Helm's own wait, `rollout_verified` in the report is `false`, and the summary says why. | new release |
 | `rolled-back` | The deployment failed; release, schema hook, and rollouts are restored. | previous release |
-| `rollback-failed` | The Helm rollback failed, the workloads did not become ready after it, the schema hook failed or timed out, or a stuck release could not be recovered. | **needs attention** |
+| `rollback-failed` | The Helm rollback failed, the workloads did not become ready after it, the schema hook failed or timed out, or a release already stuck in a pending state could not be recovered before the deploy (headline `DEPLOYMENT NOT STARTED`). | **needs attention** |
 | `failed-no-previous-release` | A first install failed. Nothing exists to return to; the failed release stays for inspection. | **needs attention** |
 | `failed-release-unchanged` | The deployment failed before Helm created a revision (build, push, render). | untouched |
 | `failed-rollback-disabled` | The deployment failed and `rollback-on-failure` is `false`. | **needs attention** |
 | `failed-exclusive-stop` | `exclusive: true`, and the release could not be stopped before the deploy. Nothing was deployed; the recorded replica counts are restored and rolled out. When that restore fails too, the outcome is `rollback-failed`. | previous release |
 | `cancelled` | The run was cancelled or hit the job timeout. No rollback is attempted; the next run recovers a pending release first. | unverified |
-| `not-attempted` | An earlier step failed. | untouched |
+| `not-attempted` | An earlier step failed, or the release could not be read before the deploy (cluster or Helm unreachable). The summary repeats Helm's error. | untouched |
 
 The `schema-rollback` output separates a failed Helm rollback from a failed schema hook: `succeeded`, `failed`, `timed-out`, `skipped`, `not-found`, `not-configured`, or `not-run`.
 
