@@ -123,6 +123,7 @@ Schema: `schemas/workflow-inputs/wf-deploy-k8s-aspire.schema.json`.
 | `rollback-on-failure` | boolean | no | `true` | Rolls the release back to its last deployed revision when the deployment fails. The job fails either way. |
 | `exclusive` | boolean | no | `false` | Stops every workload of the release before deploying, causing downtime. For releases whose schema change the previous version cannot tolerate; the deploy step then receives ARKANIS_DEPLOY_EXCLUSIVE=true. |
 | `schema-rollback-cronjob` | string | no | `"schema-rollback"` | Suspended CronJob in the chart, as a Helm pre-install,pre-upgrade hook or an ordinary resource, whose Job undoes the failed release's schema changes after a rollback. Skipped when absent; empty disables it. |
+| `schema-confirm-cronjob` | string | no | `"schema-confirm"` | Suspended CronJob in the chart whose Job records that this release's rollout was verified, run only after a verified deployment once no object in the namespace carries an older release's images. Skipped when absent; empty disables it. |
 | `timeout-minutes` | integer | no | `60` | Deployment job timeout. Keep it above twice rollout-timeout plus build time so a rollback is never cancelled.<br>Minimum: 1 |
 | `artifact-retention-days` | integer | no | `30` | Minimum: 1<br>Maximum: 90 |
 | `upload-diagnostics` | boolean | no | `true` | Uploads the deploy report artifact, including failure diagnostics, when true. The upload is best-effort and never fails the job. |
@@ -2347,10 +2348,11 @@ A failed deployment does not leave the environment broken ([ADR-0010](adr/0010-d
 - Before the deploy it records the release's revisions and rolls back a release a cancelled run left in a `pending-*` state.
 - During the deploy a `helm` shim, on `PATH` for that step only, appends `--timeout <rollout-timeout>` to `helm upgrade`. Helm's default is 5 minutes. For a server-side release it also appends `--force-conflicts`, so a field changed by hand on the cluster is overwritten by the chart instead of failing the deployment.
 - After a successful deploy it verifies every Deployment rollout. A Deployment that is not rolled out counts as a failed deployment.
+- After a verified deploy, and only then, it runs the chart's suspended `schema-confirm` CronJob as a Job, once no object in the namespace still carries an older release's images ([schema confirm hook](deployments.md#schema-confirm-hook)). The consumer's migrator may then apply its deferred contract migrations. A trace of an older release, or a check that cannot run, blocks it with a warning and the job stays green; a failed or timed-out Job fails the job but leaves the outcome `deployed` and rolls nothing back. A chart without the CronJob sees only `schema-confirm: not-found`.
 - After a failed deploy it collects diagnostics, rolls the release back to the last deployed revision, runs the failed release's `schema-rollback` Job, and verifies again. The CronJob behind that Job may be a Helm `pre-install,pre-upgrade` hook (recommended) or an ordinary chart resource. The Job's containers receive `ARKANIS_DEPLOY_STARTED_AT`, and the hook must leave schema changes recorded before that instant alone ([contract](deployments.md#arkanis_deploy_started_at)).
 
 The job fails whenever the deployment failed, including when the rollback restored the environment.
-All of this is the default: callers that pass none of `helm-release-name`, `rollout-timeout`, `rollback-on-failure`, and `schema-rollback-cronjob` get it.
+All of this is the default: callers that pass none of `helm-release-name`, `rollout-timeout`, `rollback-on-failure`, `schema-rollback-cronjob`, and `schema-confirm-cronjob` get it.
 
 `exclusive: true` (default `false`) is for the release whose schema change the previous version cannot tolerate, and causes downtime ([Rolling versus exclusive](deployments.md#rolling-versus-exclusive)):
 
@@ -2378,7 +2380,9 @@ flowchart TD
   exclusive -->|no| aspire[[aspire deploy with helm timeout shim]]
   aspire --> result{deploy succeeded?}
   result -->|yes| verify{Deployments rolled out?}
-  verify -->|yes| manifest[/artifact-manifest.json/]
+  verify -->|yes| confirm{Trace of an older release?}
+  confirm -->|"no: schema-confirm Job"| manifest[/artifact-manifest.json/]
+  confirm -->|"yes: blocked, warning"| manifest
   verify -->|no| diag
   result -->|no| diag[[Collect diagnostics]]
   diag --> rollback[[helm rollback, schema rollback Job, verify]]
@@ -2386,7 +2390,7 @@ flowchart TD
   failJob --> manifest
   manifest --> summary>Step summary]
   summary --> deployArtifact[/Deploy output, deploy report, diagnostics/]
-  manifest --> outputs(("outcome, revisions, failed-resources, artifact-manifest"))
+  manifest --> outputs(("outcome, revisions, schema hooks, failed-resources, artifact-manifest"))
   classDef repo fill:#e0f2fe,stroke:#0369a1,color:#0f172a
   classDef action fill:#dcfce7,stroke:#15803d,color:#0f172a
   classDef decision fill:#fff7ed,stroke:#c2410c,color:#0f172a
@@ -2395,7 +2399,7 @@ flowchart TD
   classDef external fill:#f8fafc,stroke:#475569,stroke-dasharray: 4 3,color:#0f172a
   class caller repo
   class login,checkout,tools,validate,context,inputs,namespace,record,aspire,diag,rollback action
-  class kube,result,verify,exclusive decision
+  class kube,result,verify,exclusive,confirm decision
   class manifest,summary,deployArtifact,failJob artifact
   class outputs output
   class tempKube external
@@ -2411,12 +2415,13 @@ Outputs:
 | `new-revision` | Revision this deployment created. Empty when Helm created none. |
 | `current-revision` | Revision that is live when the job ends. Differs from `new-revision` after a rollback. |
 | `schema-rollback` | `not-run`, `not-configured`, `not-found`, `skipped`, `succeeded`, `failed`, or `timed-out`. |
+| `schema-confirm` | `not-run`, `not-configured`, `not-found`, `blocked`, `succeeded`, `failed`, or `timed-out`. Meanings in [deployments.md](deployments.md#schema-confirm-hook). |
 | `failed-resources` | Comma-separated `deployment/<name>` and `pod/<name>` that were not ready when the deployment failed. |
 | `artifact-manifest` | Path to the generated artifact manifest. |
 
-Read them from a job that runs with `if: always()`: the deploy job is failed for every outcome except `deployed`.
+Read them from a job that runs with `if: always()`: the deploy job is failed for every outcome except `deployed`, and for `deployed` with `schema-confirm` `failed` or `timed-out`.
 
-Artifacts: the deploy artifact holds the Aspire output under `output-path/environment-name` and `artifacts/deploy-report/`: `deploy-report.json`, `deploy-report.md`, `release-state.json`, and, after a failed deployment, `diagnostics/before-rollback`, `diagnostics/after-rollback`, and `diagnostics/schema-rollback`.
+Artifacts: the deploy artifact holds the Aspire output under `output-path/environment-name` and `artifacts/deploy-report/`: `deploy-report.json`, `deploy-report.md`, `release-state.json`, after a failed deployment, `diagnostics/before-rollback`, `diagnostics/after-rollback`, and `diagnostics/schema-rollback`, and after a confirm Job ran, `diagnostics/schema-confirm`.
 
 Runner requirements: Linux or macOS with Bash (the helm shim is a Bash script), the .NET 10 SDK, and network access to the Kubernetes API.
 
@@ -2429,8 +2434,8 @@ Preconditions:
 - The target namespace is a valid Kubernetes namespace.
 - Production deployment binds the deploy job to `environment-name`.
 - The Helm release is named after the lowercased `aspire-environment`, or `helm-release-name` names it.
-- The chart follows the [consumer contract](deployments.md#consumer-contract): `maxUnavailable: 0`, a startup or readiness probe, migrations compatible with the previous release, and optionally the suspended `schema-rollback` CronJob, preferably as a Helm hook.
-- The kube identity can read workloads, pods, pod logs, events, and CronJobs, and can create and delete Jobs, in the target namespace. With `exclusive: true` it can also scale Deployments.
+- The chart follows the [consumer contract](deployments.md#consumer-contract): `maxUnavailable: 0`, a startup or readiness probe, migrations compatible with the previous release, and optionally the suspended `schema-rollback` CronJob, preferably as a Helm hook, and the suspended `schema-confirm` CronJob as an ordinary resource.
+- The kube identity can read workloads, pods, pod logs, events, and CronJobs, and can create and delete Jobs, in the target namespace. With `exclusive: true` it can also scale Deployments. The schema confirm's trace check lists Deployments, StatefulSets, DaemonSets, ReplicaSets, CronJobs, Jobs, and Pods ([Auth](deployments.md#auth)); without that it is blocked, never confirmed.
 - `timeout-minutes` exceeds twice `rollout-timeout` plus build time. The workflow warns when it does not.
 
 Side effects:
@@ -2441,6 +2446,7 @@ Side effects:
 - Rolls back a release found in a `pending-*` state before deploying.
 - Applies deployment changes.
 - On a failed deployment: rolls the Helm release back, creates and deletes one `schema-rollback` Job, and fails the job.
+- After a verified deployment with no trace of an older release: creates, awaits, and deletes one `schema-confirm` Job. A failed one stays in the cluster and fails the job.
 - With `exclusive: true`: scales every Deployment of the release to 0 before deploying (downtime) and restores the recorded replica counts afterwards when Helm did not.
 - Writes deploy output under `output-path/environment-name` and the deploy report under `artifacts/deploy-report`.
 

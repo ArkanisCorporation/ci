@@ -76,3 +76,28 @@ spec:
                   value: {{ .Values.marker | quote }}
               command: ["sh", "-c", "echo schema-rollback marker=$MARKER started_at=$ARKANIS_DEPLOY_STARTED_AT; exit {{ .Values.schemaExit }}"]
 {{- end }}
+{{- if .Values.schemaConfirm }}
+---
+# Ordinary chart resource (never a hook), like the consumer's: the guard runs it after a verified rollout only.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: schema-confirm
+spec:
+  suspend: true
+  schedule: "0 0 1 1 *"
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: migrator
+              image: {{ .Values.image }}
+              env:
+                - name: MARKER
+                  value: {{ .Values.marker | quote }}
+              command: ["sh", "-c", "echo schema-confirm marker=$MARKER started_at=${ARKANIS_DEPLOY_STARTED_AT:-unset}"]
+{{- end }}

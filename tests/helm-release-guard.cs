@@ -63,6 +63,14 @@ try
         Check(!s.Called("kubectl scale"), "a rolling deployment must never scale a Deployment", s.Calls);
         Check(!result.Summary.Contains("exclusive", StringComparison.Ordinal) && result.Output("downtime-started-at").Length == 0,
             "a rolling deployment must report no downtime", result.Summary);
+
+        // Backwards compatible: a chart without the schema-confirm CronJob costs one read and changes nothing else.
+        Check(result.Output("schema-confirm") == "not-found" && result.Summary.Contains("| Schema confirm | `not-found` |", StringComparison.Ordinal),
+            "a release without the schema confirm CronJob must report not-found", result.Summary);
+        Check(s.Called("kubectl get cronjob schema-confirm --namespace example-production --ignore-not-found --output json")
+            && !s.Called("replicasets,cronjobs,jobs,pods") && !s.Called("kubectl create --filename"),
+            "without the CronJob the guard must neither inspect the namespace nor create a Job", s.Calls);
+        Check(!result.Log.Contains("SCHEMA CONFIRM", StringComparison.Ordinal), "a missing confirm CronJob must not warn", result.Log);
     }
 
     // ---- First install fails: nothing to restore, diagnostics still collected, no secret material stored.
@@ -628,6 +636,160 @@ try
         Check(Shim(s, realHelm, "upgrade", "--install", Release, "chart", "--namespace", "example-production").ExitCode == 1, "the shim must return Helm's exit code");
     }
 
+    // ---- Schema confirm disabled (empty input): not even the CronJob is read.
+    {
+        var s = ConfirmScenario("schema-confirm-not-configured");
+        var result = s.Guard("finalize", "success", confirmCronJob: "");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "not-configured",
+            "an empty schema-confirm-cronjob must disable the confirm", result.Log);
+        Check(!s.Called("get cronjob schema-confirm") && !s.Called("replicasets,cronjobs,jobs,pods"), "a disabled confirm must not touch the cluster", s.Calls);
+    }
+
+    // ---- Schema confirm on a clean namespace: the Job runs after the rollout is verified, without the deploy start.
+    {
+        var s = ConfirmScenario("schema-confirm-succeeds");
+        var startedAt = JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "release-state.json")))!["deploy_started_at"]!.GetValue<string>();
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "succeeded",
+            "a clean namespace must be confirmed and the job must stay green", result.Log);
+        var verify = s.LastIndexOfCall("kubectl rollout status deployment/web");
+        var inspect = s.IndexOfCall("kubectl get deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods --namespace example-production --output json");
+        var render = s.IndexOfCall("kubectl create job schema-confirm-4242-1 --from=cronjob/schema-confirm --namespace example-production --dry-run=client");
+        var create = s.IndexOfCall("kubectl create --filename");
+        Check(verify >= 0 && verify < inspect && inspect < render && render < create, "order: verify the rollout, look for traces, render, create", s.Calls);
+        Check(!s.Called("helm rollback") && s.Called("kubectl delete job schema-confirm-4242-1"), "a completed confirm Job is deleted and nothing is rolled back", s.Calls);
+        Check(!result.Log.Contains("::warning::", StringComparison.Ordinal), "zero-replica ReplicaSets, finished pods and Jobs, and a shared third-party image at two tags are not traces", result.Log);
+
+        var job = JsonNode.Parse(File.ReadAllText(Path.Combine(s.FakeDir, "created-job.json")))!;
+        Check(job["metadata"]!["labels"]!["arkanis.dev/deploy-guard"]!.GetValue<string>() == "schema-confirm", "the confirm Job must be labelled");
+        Check(job["spec"]!["ttlSecondsAfterFinished"]!.GetValue<int>() == 86400, "the confirm Job must carry a ttl backstop");
+        Check(job["metadata"]!["ownerReferences"] is not null, "the confirm Job keeps the owner reference kubectl gives it");
+        Check(!job.ToJsonString().Contains(startedAt, StringComparison.Ordinal)
+            && job.ToJsonString().Contains("1999-01-01T00:00:00Z", StringComparison.Ordinal),
+            "the confirm Job must not receive ARKANIS_DEPLOY_STARTED_AT, and the chart's own env stays untouched", job.ToJsonString());
+        Check(!File.Exists(Path.Combine(s.RunnerTemp, "deploy-guard", "schema-confirm-job.json")), "the rendered pod spec must not be left behind");
+        Check(File.Exists(Path.Combine(s.ReportDir, "diagnostics", "schema-confirm", "job-logs.txt")), "the confirm Job's logs must be captured");
+        Check(result.Summary.Contains("**What the schema confirm Job reported** (last lines of its log)\n\n    checking release\n    info: Fixture.Migrator[7]\n          Release 4 rollout confirmed.\n", StringComparison.Ordinal)
+            && result.Summary.Contains("| Schema confirm | `succeeded` |", StringComparison.Ordinal),
+            "the summary must carry the confirm result and its Job's closing log lines", result.Summary);
+        var report = JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!;
+        Check(report["schema_confirm"]!.GetValue<string>() == "succeeded" && report["schema_confirm_job"]!.GetValue<string>() == "schema-confirm-4242-1"
+            && report["schema_confirm_output"]!.GetValue<string>().EndsWith("Release 4 rollout confirmed.", StringComparison.Ordinal),
+            "the report must carry the confirm result", report.ToJsonString());
+        foreach (var file in Directory.EnumerateFiles(s.ReportDir, "*", SearchOption.AllDirectories))
+        {
+            Check(!File.ReadAllText(file).Contains(SecretLiteral, StringComparison.Ordinal), $"the inventory's environment values must never be stored: {file}");
+        }
+
+        Check(!result.Log.Contains(SecretLiteral, StringComparison.Ordinal), "the inventory's environment values must never be printed");
+    }
+
+    // ---- Each kind of trace of an older release blocks the confirm: warning, report section, green job, no Job.
+    foreach (var (name, items, culprit) in new (string, string[], string)[]
+             {
+                 ("old-deployment-at-zero", [Scenario.Item("Deployment", "web-stray", "ghcr.io/example/web:1", spec: "\"replicas\":0")], "Deployment/web-stray"),
+                 ("paused-release-deployment", [Scenario.Item("Deployment", "web", "ghcr.io/example/web:2", owned: true, spec: "\"replicas\":2,\"paused\":true")], "Deployment/web"),
+                 ("old-replicaset-with-replicas", [Scenario.Item("ReplicaSet", "web-1-live", "ghcr.io/example/web:1", spec: "\"replicas\":0", status: "{\"replicas\":1}")], "ReplicaSet/web-1-live"),
+                 ("running-old-pod", [Scenario.Item("Pod", "web-1-a", "ghcr.io/example/web:1", status: "{\"phase\":\"Running\"}")], "Pod/web-1-a"),
+                 ("old-init-container-pod", [Scenario.Item("Pod", "web-mixed", "ghcr.io/example/web:2", status: "{\"phase\":\"Pending\"}", initImage: "ghcr.io/example/migrator:1")], "Pod/web-mixed"),
+                 ("suspended-stray-cronjob", [Scenario.Item("CronJob", "schema-confirm-v1", "ghcr.io/example/migrator:1", spec: "\"suspend\":true")], "CronJob/schema-confirm-v1"),
+                 ("unfinished-old-job", [Scenario.Item("Job", "schema-rollback-old", "ghcr.io/example/migrator:1", spec: "\"suspend\":true")], "Job/schema-rollback-old"),
+             })
+    {
+        var s = ConfirmScenario($"schema-confirm-blocked-{name}");
+        s.Inventory([.. Scenario.CleanInventory().Where(item => name != "paused-release-deployment" || !item.Contains("\"name\":\"web\"", StringComparison.Ordinal)), .. items]);
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "blocked",
+            $"{name}: a trace of an older release must block the confirm and keep the job green", result.Log);
+        Check(!s.Called("kubectl create job schema-confirm") && !s.Called("kubectl create --filename") && !s.Called("helm rollback"),
+            $"{name}: a blocked confirm must create no Job and roll nothing back", s.Calls);
+        Check(result.Log.Contains($"::warning::Schema confirm blocked by {culprit}", StringComparison.Ordinal), $"{name}: the warning must name the object", result.Log);
+        Check(result.Summary.Contains("**Schema confirm blocked**", StringComparison.Ordinal) && result.Summary.Contains($"- `{culprit}`", StringComparison.Ordinal),
+            $"{name}: the summary must list the object", result.Summary);
+        var traces = JsonNode.Parse(File.ReadAllText(Path.Combine(s.ReportDir, "deploy-report.json")))!["schema_confirm_traces"]!.AsArray();
+        Check(traces.Count == 1 && $"{traces[0]!["kind"]}/{traces[0]!["name"]}" == culprit, $"{name}: the report must carry exactly that trace", traces.ToJsonString());
+    }
+
+    // ---- The namespace cannot be inspected (RBAC forbids a kind): blocked, never confirmed on missing evidence.
+    {
+        var s = ConfirmScenario("schema-confirm-inventory-forbidden");
+        s.Write("inventory-exit", "1");
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "blocked", "an unreadable namespace must block the confirm", result.Log);
+        Check(result.Log.Contains("::warning::SCHEMA CONFIRM BLOCKED: The namespace could not be inspected for an older release (kubectl exited with code 1; standard error: Error from server (Forbidden)", StringComparison.Ordinal),
+            "the warning must carry kubectl's error", result.Log);
+        Check(!s.Called("kubectl create --filename"), "no Job may run on missing evidence", s.Calls);
+    }
+
+    // ---- The confirm CronJob itself cannot be read: blocked, not mistaken for an absent CronJob.
+    {
+        var s = ConfirmScenario("schema-confirm-cronjob-forbidden");
+        s.Write("confirm-cronjob-exit", "1");
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("schema-confirm") == "blocked", "a failed CronJob read must block, not skip", result.Log);
+        Check(!s.Called("replicasets,cronjobs,jobs,pods") && !s.Called("kubectl create --filename"), "nothing else may run after a failed CronJob read", s.Calls);
+    }
+
+    // ---- The guard could not verify the rollout itself: blocked even though the deployment stays green.
+    {
+        var s = ConfirmScenario("schema-confirm-rollout-unverified");
+        File.Delete(Path.Combine(s.FakeDir, "workloads.json"));
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode == 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "blocked", "an unverified rollout must block the confirm", result.Log);
+        Check(!s.Called("kubectl create --filename"), "no Job may run without a verified rollout", s.Calls);
+    }
+
+    // ---- The confirm Job fails: the job goes red, the outcome stays deployed, nothing is rolled back.
+    {
+        var s = ConfirmScenario("schema-confirm-fails");
+        s.Write("confirm-job-status.json", """{"status":{"conditions":[{"type":"Failed","status":"True"}]}}""");
+        var result = s.Guard("finalize", "success");
+        Check(result.ExitCode != 0, "a failed confirm must turn the job red so it is noticed", result.Log);
+        Check(result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "failed" && result.Output("current-revision") == "4",
+            "a failed confirm must leave the outcome deployed", result.Log);
+        Check(!s.Called("helm rollback") && !s.Called("kubectl delete job"), "a failed confirm must roll nothing back and keep its Job as evidence", s.Calls);
+        Check(result.Log.Contains("::error::SCHEMA CONFIRM FAILED: Job schema-confirm-4242-1 failed", StringComparison.Ordinal), "a failed confirm must be an error annotation", result.Log);
+        Check(result.Summary.Contains("**Deployed revision 4, but the SCHEMA CONFIRM FAILED", StringComparison.Ordinal), "the headline must say both", result.Summary);
+        Check(File.Exists(Path.Combine(s.ReportDir, "deploy-report.json")) && File.Exists(Path.Combine(s.ReportDir, "diagnostics", "schema-confirm", "job-logs.txt")),
+            "the report and the Job's logs must still be written", s.ReportDir);
+    }
+
+    // ---- The confirm Job never finishes: bounded wait, timed-out, red, still deployed.
+    {
+        var s = ConfirmScenario("schema-confirm-times-out", timeout: "1s");
+        s.Write("confirm-job-status.json", """{"status":{}}""");
+        var result = s.Guard("finalize", "success", timeout: "1s");
+        Check(result.ExitCode != 0 && result.Output("outcome") == "deployed" && result.Output("schema-confirm") == "timed-out", "the confirm Job wait must be bounded", result.Log);
+        Check(!s.Called("helm rollback") && !s.Called("kubectl delete job"), "a still-running confirm Job must not be killed or rolled back", s.Calls);
+    }
+
+    // ---- Never after anything but a verified deployment: rollback, failure before Helm, cancel, skip.
+    foreach (var (name, outcome, expected) in new[]
+             {
+                 ("rolled-back", "failure", "rolled-back"),
+                 ("verification-failed", "success", "rolled-back"),
+                 ("release-unchanged", "failure", "failed-release-unchanged"),
+                 ("cancelled", "cancelled", "cancelled"),
+                 ("skipped", "skipped", "not-attempted"),
+             })
+    {
+        var s = NewScenario($"schema-confirm-never-{name}");
+        s.History((3, "deployed"));
+        Check(s.Guard("capture").ExitCode == 0, "capture must succeed");
+        s.ConfirmCronJob();
+        s.Inventory(Scenario.CleanInventory());
+        if (name is "rolled-back" or "verification-failed")
+        {
+            s.History(name == "rolled-back" ? [(3, "deployed"), (4, "failed")] : [(3, "superseded"), (4, "deployed")]);
+            s.BreakDeployment("web", healedByRollback: true);
+        }
+
+        var result = s.Guard("finalize", outcome);
+        Check(result.Output("outcome") == expected && result.Output("schema-confirm") == "not-run", $"{name}: the confirm must not run", result.Log);
+        Check(!s.Called("get cronjob schema-confirm") && !s.Called("replicasets,cronjobs,jobs,pods") && !s.Called("schema-confirm-4242"),
+            $"{name}: the confirm must not even be looked up", s.Calls);
+    }
+
     Console.WriteLine("Helm release guard behavior passed.");
     return 0;
 }
@@ -651,6 +813,18 @@ Scenario NewScenario(string name)
     }
 
     scenario.Workloads(Release, healthy: true);
+    return scenario;
+}
+
+// A release at revision 3 captured, then deployed as revision 4 with the confirm CronJob and a clean namespace.
+Scenario ConfirmScenario(string name, string timeout = "15m")
+{
+    var scenario = NewScenario(name);
+    scenario.History((3, "deployed"));
+    Check(scenario.Guard("capture", timeout: timeout).ExitCode == 0, "capture must succeed");
+    scenario.History((3, "superseded"), (4, "deployed"));
+    scenario.ConfirmCronJob();
+    scenario.Inventory(Scenario.CleanInventory());
     return scenario;
 }
 
@@ -735,6 +909,49 @@ sealed class Scenario(string root, string guardScript)
             .Replace("@UID@", uid, StringComparison.Ordinal)
             .Replace("@GENERATION@", generation.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
 
+    public void ConfirmCronJob() =>
+        Write("confirm-cronjob.json", """{"kind":"CronJob","metadata":{"name":"schema-confirm","uid":"uid-confirm","generation":1},"spec":{"suspend":true}}""");
+
+    // What the schema confirm's trace check sees: one `kubectl get deployments,...,pods -o json` list.
+    public void Inventory(params string[] items) => Write("inventory.json", "{\"kind\":\"List\",\"items\":[" + string.Join(",", items) + "]}");
+
+    /*
+     * One namespace object for the inventory. Every container carries a literal environment value, which must never
+     * leave the guard. CronJobs nest their pod spec under jobTemplate, Pods carry it directly, the rest under template.
+     */
+    public static string Item(string kind, string name, string image, bool owned = false, string spec = "", string status = "{}", string initImage = "")
+    {
+        var annotations = owned ? ",\"annotations\":{\"meta.helm.sh/release-name\":\"kubernetes-production\"}" : string.Empty;
+        var init = initImage.Length == 0 ? string.Empty : "\"initContainers\":[{\"name\":\"migrator\",\"image\":\"" + initImage + "\"}],";
+        var podSpec = "{" + init + "\"containers\":[{\"name\":\"main\",\"image\":\"" + image + "\",\"env\":[{\"name\":\"ConnectionStrings__Db\",\"value\":\"" + SecretLiteral + "\"}]}]}";
+        var specBody = kind switch
+        {
+            "Pod" => podSpec[1..^1],
+            "CronJob" => "\"jobTemplate\":{\"spec\":{\"template\":{\"spec\":" + podSpec + "}}}",
+            _ => "\"template\":{\"spec\":" + podSpec + "}",
+        };
+        return "{\"kind\":\"" + kind + "\",\"metadata\":{\"name\":\"" + name + "\"" + annotations + "},\"spec\":{" + (spec.Length == 0 ? string.Empty : spec + ",") + specBody + "},\"status\":" + status + "}";
+    }
+
+    // A healthy, current namespace: nothing in it is a trace, including the revision history and finished work it keeps.
+    public static string[] CleanInventory() =>
+    [
+        Item("Deployment", "web", "ghcr.io/example/web:2", owned: true, spec: "\"replicas\":2", initImage: "ghcr.io/example/migrator:2"),
+        Item("CronJob", "schema-confirm", "ghcr.io/example/migrator:2", owned: true, spec: "\"suspend\":true"),
+        // The same third-party image at two tags inside the release is not an older release.
+        Item("Deployment", "cache-a", "redis:7", owned: true, spec: "\"replicas\":1"),
+        Item("StatefulSet", "cache-b", "docker.io/library/redis:6", owned: true, spec: "\"replicas\":1"),
+        Item("ReplicaSet", "web-2", "ghcr.io/example/web:2", spec: "\"replicas\":2", status: "{\"replicas\":2}"),
+        Item("ReplicaSet", "web-1", "ghcr.io/example/web:1", spec: "\"replicas\":0", status: "{\"replicas\":0}"),
+        Item("Pod", "web-2-a", "ghcr.io/example/web:2", status: "{\"phase\":\"Running\"}"),
+        Item("Pod", "web-1-done", "ghcr.io/example/web:1", status: "{\"phase\":\"Succeeded\"}"),
+        Item("Pod", "web-1-crashed", "ghcr.io/example/web:1", status: "{\"phase\":\"Failed\"}"),
+        Item("Pod", "redis-client", "index.docker.io/library/redis:7", status: "{\"phase\":\"Running\"}"),
+        Item("Pod", "unrelated-1", "nginx:1", status: "{\"phase\":\"Running\"}"),
+        Item("Job", "schema-confirm-old", "ghcr.io/example/migrator:1", status: "{\"conditions\":[{\"type\":\"Complete\",\"status\":\"True\"}]}"),
+        Item("Job", "migrate-failed-old", "ghcr.io/example/migrator:1", status: "{\"conditions\":[{\"type\":\"Failed\",\"status\":\"True\"}]}"),
+    ];
+
     // One healthy Deployment owned by the release, plus an unrelated one that must be ignored.
     public void Workloads(string release, bool healthy, bool afterRollback = false)
     {
@@ -778,7 +995,7 @@ sealed class Scenario(string root, string guardScript)
             """.Replace("@SECRET@", SecretLiteral, StringComparison.Ordinal));
     }
 
-    public GuardResult Guard(string phase, string deployOutcome = "", string timeout = "15m", string rollbackOnFailure = "true", string release = "", bool exclusive = false)
+    public GuardResult Guard(string phase, string deployOutcome = "", string timeout = "15m", string rollbackOnFailure = "true", string release = "", bool exclusive = false, string confirmCronJob = "schema-confirm")
     {
         var outputFile = Path.Combine(root, $"output-{Guid.NewGuid():N}.txt");
         var summaryFile = Path.Combine(root, $"summary-{Guid.NewGuid():N}.md");
@@ -798,6 +1015,7 @@ sealed class Scenario(string root, string guardScript)
         start.Environment["DEPLOY_GUARD_ROLLBACK_ON_FAILURE"] = rollbackOnFailure;
         start.Environment["DEPLOY_GUARD_EXCLUSIVE"] = exclusive ? "true" : "false";
         start.Environment["DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB"] = "schema-rollback";
+        start.Environment["DEPLOY_GUARD_SCHEMA_CONFIRM_CRONJOB"] = confirmCronJob;
         start.Environment["DEPLOY_GUARD_REPORT_DIR"] = "artifacts/deploy-report";
         start.Environment["DEPLOY_GUARD_DEPLOY_OUTCOME"] = deployOutcome;
         start.Environment["DEPLOY_GUARD_SHIM_RECORD"] = ShimRecord;
@@ -861,6 +1079,8 @@ static class FakeCli
      * `kubectl scale` writes replicas-<name>; while a Deployment is at 0 its pods are gone unless pods-stuck exists.
      * A rollback re-applies the chart's replica counts (deletes replicas-*) unless rollback-keeps-scale exists, which
      * is how real Helm 4.3.1 behaves after `kubectl scale` (tests/live/helm-release-guard-kind.sh).
+     * The schema confirm reads confirm-cronjob.json (absent = no CronJob) and inventory.json (the one multi-kind list
+     * the trace check makes); confirm-cronjob-exit and inventory-exit answer like a forbidden RBAC read.
      */
     public const string Script = """
         #!/usr/bin/env bash
@@ -904,7 +1124,13 @@ static class FakeCli
         fi
 
         case "$args" in
+          "get cronjob schema-confirm "*)
+            if [[ -f "$dir/confirm-cronjob-exit" ]]; then echo 'Error from server (Forbidden): cronjobs.batch "schema-confirm" is forbidden' >&2; exit 1; fi
+            if [[ -f "$dir/confirm-cronjob.json" ]]; then cat "$dir/confirm-cronjob.json"; fi ;;
           "get cronjob "*) if [[ -f "$dir/cronjob.json" ]]; then cat "$dir/cronjob.json"; fi ;;
+          "get deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods "*)
+            if [[ -f "$dir/inventory-exit" ]]; then echo 'Error from server (Forbidden): replicasets.apps is forbidden: User "deployer" cannot list resource "replicasets"' >&2; exit 1; fi
+            if [[ -f "$dir/inventory.json" ]]; then cat "$dir/inventory.json"; else echo '{"items":[]}'; fi ;;
           "get deployments,statefulsets,daemonsets,jobs "*)
             if rolled_back && [[ -f "$dir/workloads-after-rollback.json" ]]; then cat "$dir/workloads-after-rollback.json"; else cat "$dir/workloads.json"; fi ;;
           "get pods "*)
@@ -919,6 +1145,8 @@ static class FakeCli
             if [[ "$replicas" == "0" && -f "$dir/scale-zero-exit" ]]; then echo "error: fixture scale failure" >&2; exit 1; fi
             printf '%s\n' "$replicas" > "$dir/replicas-$name"
             echo "deployment.apps/$name scaled" ;;
+          "get job schema-confirm-"*"--output json"*)
+            if [[ -f "$dir/confirm-job-status.json" ]]; then cat "$dir/confirm-job-status.json"; else echo '{"status":{"conditions":[{"type":"Complete","status":"True"}]}}'; fi ;;
           "get job "*"--output json"*)
             if [[ -f "$dir/job-status.json" ]]; then cat "$dir/job-status.json"; else echo '{"status":{"conditions":[{"type":"Complete","status":"True"}]}}'; fi ;;
           "get "*) echo "fixture table" ;;
@@ -928,6 +1156,8 @@ static class FakeCli
               "      Discord__Token:         <set to the key 'token' in secret 'bot'>" "    Mounts:" "      /tmp from tmp (rw)" "Events:  <none>" ;;
           "logs "*"--previous"*)
             case "$args" in *"--container web "*) echo "previous crash" ;; *) echo "Error: previous terminated container not found" >&2; exit 1 ;; esac ;;
+          "logs job/schema-confirm-"*)
+            printf '%s\n' "2026-01-01T00:00:01.000000000Z checking release" "2026-01-01T00:00:02.000000000Z info: Fixture.Migrator[7]" "2026-01-01T00:00:03.000000000Z       Release 4 rollout confirmed." ;;
           "logs job/"*)
             printf '%s\n' "2026-01-01T00:00:01.000000000Z sql noise 1" "2026-01-01T00:00:02.000000000Z sql noise 2" "2026-01-01T00:00:03.000000000Z sql noise 3" \
               "2026-01-01T00:00:04.000000000Z warn: Fixture.Migrator[1]" "2026-01-01T00:00:05.000000000Z       Rolled back release 2: reverted 7 migration(s)." "" \

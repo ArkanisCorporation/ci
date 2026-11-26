@@ -12,6 +12,9 @@
 #   A failed deploy always fails the job, whether or not the rollback restored the environment.
 #   exclusive: true stops every Deployment of the release before the deploy (downtime) and exports
 #   ARKANIS_DEPLOY_EXCLUSIVE=true into the deploy step alone, so the AppHost may allow a breaking migration.
+#   After a verified deployment, and only then, the guard runs the chart's schema-confirm CronJob as a Job once no
+#   object in the namespace still carries an older release's images (ARK-746): the consumer's migrator may then apply
+#   contract migrations. A blocked confirm is a warning; a failed one fails the job but rolls nothing back.
 #   Use wf-verify-deploy-k8s-aspire.yml for deployment input verification without cluster mutation.
 #   It calls runs-on/cache for NuGet only when enable-cache is true and the runner does not advertise a
 #   persistent NuGet folder (ARKANIS_PERSISTENT_NUGET_PACKAGES=true, ARK-528).
@@ -127,6 +130,11 @@ on:
         type: string
         required: false
         default: schema-rollback
+      schema-confirm-cronjob:
+        description: Suspended CronJob in the chart whose Job records that this release's rollout was verified, run only after a verified deployment once no object in the namespace carries an older release's images. Skipped when absent; empty disables it.
+        type: string
+        required: false
+        default: schema-confirm
       timeout-minutes:
         description: Deployment job timeout. Keep it above twice rollout-timeout plus build time so a rollback is never cancelled.
         type: number
@@ -174,6 +182,9 @@ on:
       schema-rollback:
         description: Schema rollback hook result - not-run, not-configured, not-found, skipped, succeeded, failed, or timed-out.
         value: ${{ jobs.deploy.outputs.schema-rollback }}
+      schema-confirm:
+        description: Schema confirm hook result - not-run, not-configured, not-found, blocked, succeeded, failed, or timed-out.
+        value: ${{ jobs.deploy.outputs.schema-confirm }}
       failed-resources:
         description: Comma-separated Deployments and pods that were not ready when the deployment failed.
         value: ${{ jobs.deploy.outputs.failed-resources }}
@@ -200,6 +211,7 @@ jobs:
       new-revision: ${{ steps.guard.outputs.new-revision }}
       current-revision: ${{ steps.guard.outputs.current-revision }}
       schema-rollback: ${{ steps.guard.outputs.schema-rollback }}
+      schema-confirm: ${{ steps.guard.outputs.schema-confirm || 'not-run' }}
       failed-resources: ${{ steps.guard.outputs.failed-resources }}
     defaults:
       run:
@@ -465,9 +477,10 @@ jobs:
             --include-exception-details \
             --debug
 
-      # Runs whatever the deploy step did. Success: verify every Deployment rollout. Failure: collect diagnostics,
-      # then roll back to the recorded revision, run the schema-rollback hook, and verify again. It exits non-zero
-      # for every outcome but `deployed` and `not-attempted`, and must stay ahead of the kubeconfig removal below.
+      # Runs whatever the deploy step did. Success: verify every Deployment rollout, then run the schema-confirm hook
+      # unless a trace of an older release is left. Failure: collect diagnostics, then roll back to the recorded
+      # revision, run the schema-rollback hook, and verify again. It exits non-zero for every outcome but `deployed`
+      # and `not-attempted`, and for a failed schema confirm, and must stay ahead of the kubeconfig removal below.
       - name: Verify or roll back release @ ${{ steps.release-state.outputs.helm-release || inputs.kubernetes-namespace }}
         id: guard
         if: ${{ always() && steps.release-state.outcome != 'skipped' }}
@@ -482,6 +495,7 @@ jobs:
           rollback-on-failure: ${{ inputs.rollback-on-failure }}
           exclusive: ${{ inputs.exclusive }}
           schema-rollback-cronjob: ${{ inputs.schema-rollback-cronjob }}
+          schema-confirm-cronjob: ${{ inputs.schema-confirm-cronjob }}
           report-directory: artifacts/deploy-report
           shim-record-path: ${{ runner.temp }}/helm-shim/upgrade-record
 
@@ -543,6 +557,7 @@ jobs:
           NEW_REVISION: ${{ steps.guard.outputs.new-revision }}
           CURRENT_REVISION: ${{ steps.guard.outputs.current-revision }}
           FAILED_RESOURCES: ${{ steps.guard.outputs.failed-resources }}
+          SCHEMA_CONFIRM: ${{ steps.guard.outputs.schema-confirm || 'not-run' }}
           DEPLOY_MODE: ${{ inputs.exclusive && 'exclusive' || 'rolling' }}
           DOWNTIME_STARTED_AT: ${{ steps.guard.outputs.downtime-started-at }}
           DOWNTIME_ENDED_AT: ${{ steps.guard.outputs.downtime-ended-at }}
@@ -563,6 +578,7 @@ jobs:
             echo "| Revision this deployment created | \`${NEW_REVISION:-none}\` |"
             echo "| Revision live now | \`${CURRENT_REVISION:-n/a}\` |"
             echo "| Failed resources | \`${FAILED_RESOURCES:-none}\` |"
+            echo "| Schema confirm | \`${SCHEMA_CONFIRM}\` |"
             echo "| Deploy mode | \`${DEPLOY_MODE}\` |"
             if [[ -n "$DOWNTIME_STARTED_AT" ]]; then
               echo "| Downtime | \`${DOWNTIME_STARTED_AT} to ${DOWNTIME_ENDED_AT:-not restored}\` |"

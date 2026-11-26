@@ -3,7 +3,7 @@
 Status: accepted
 
 Audience: platform maintainers, release managers, and consumers of `wf-deploy-k8s-aspire.yml`.
-Last verified: 2026-11-20.
+Last verified: 2026-11-26.
 
 ## Context
 
@@ -30,6 +30,7 @@ Keep `aspire deploy` and guard it from outside with a composite action, `helm-re
 - **Safe by default.** `rollback-on-failure` defaults to `true`, `rollout-timeout` to `15m`, `timeout-minutes` rises from 45 to 60.
 - **Exclusive mode for breaking migrations, opt-in.** Rolling deploys keep the previous version serving while the new migrator runs, which is only safe for backwards-compatible migrations, so consumers mark breaking migrations and their migrator refuses them. `exclusive: true` (default `false`) is the deliberate, downtime-taking way to ship one: after capture and recovery the guard records the `spec.replicas` of every Deployment the release owns, scales them to 0, and waits, bounded by `rollout-timeout`, until none of their pods exists (terminating pods count). Only then does the deploy step run, with `ARKANIS_DEPLOY_EXCLUSIVE=true` exported into it alone, the consumer's permission to apply the breaking migration. A failed stop deploys nothing, restores the recorded counts, verifies, and reports `failed-exclusive-stop`.
 - **Exclusive failure path reverts the schema before the Helm rollback.** The previous version cannot run on the failed release's schema, so `helm rollback --wait` would wait forever and the schema Job would never run. The guard stops the failed release instead, runs the schema Job, rolls back, then checks every recorded Deployment and scales the ones Helm did not restore. Helm 4.3.1 re-applies the replica counts on upgrade and rollback after `kubectl scale` (verified live), but that is checked, not assumed. The summary states the downtime window, or that the service is still down.
+- **Schema confirm after a verified deployment (ARK-746).** A suspended `schema-confirm` CronJob, an ordinary chart resource, whose Job records that the release's rollout was verified, so the consumer may apply contract migrations the previous release could not tolerate. It runs only on the `deployed` outcome and only when no object in the namespace still carries an older release's images (per repository, against the set of references the release's own workloads use). A trace or an impossible check blocks it with a warning and a green job; a failed Job fails the job without a rollback, because the release is serving.
 - **StatefulSets are not stopped.** In an Aspire chart they are the data tier the migrator needs; the code whose schema expectations break runs in Deployments.
 
 Rejected:
@@ -39,6 +40,8 @@ Rejected:
 - Uninstalling a stuck first install automatically. It can delete data-bearing resources on a wrong guess.
 - Exclusive by default, or exclusive whenever a migration is pending. Every exclusive deploy is an outage; the downtime has to be a decision. Expand/contract across releases stays the preferred way (ARK-746).
 - Exclusive mode keeping the rolling order (rollback, then schema Job). See above: the rollback's wait cannot succeed before the schema is reverted.
+- Failing the job when the schema confirm is blocked. The release is healthy; a stray object only delays the contract migrations, and a red deploy would invite a rollback nobody needs.
+- Comparing the schema confirm's images against one tag per repository. Charts run third-party images at several tags, which would block every confirm.
 - Recording the replica counts in a Deployment annotation. It would survive a runner that dies mid-stop, but writes to consumer objects the chart owns; the state file is enough for every case the job itself survives.
 
 ## Consequences

@@ -63,6 +63,8 @@ Last verified: 2026-10-31.
 - Helm rollback (verified 2026-11-19): https://helm.sh/docs/helm/helm_rollback/
 - Helm history, status, list (verified 2026-11-19): https://helm.sh/docs/helm/helm_history/ , https://helm.sh/docs/helm/helm_status/ , https://helm.sh/docs/helm/helm_list/
 - kubectl create job: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_job/
+- Kubernetes Jobs (verified 2026-11-26, terminal conditions, `activeDeadlineSeconds`, suspend; schema confirm): https://kubernetes.io/docs/concepts/workloads/controllers/job/
+- Pod lifecycle (verified 2026-11-26, `Succeeded` and `Failed` phases; schema confirm trace check): https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
 - kubectl rollout status: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/
 - actions-rust-lang/setup-rust-toolchain: https://github.com/actions-rust-lang/setup-rust-toolchain
 - Swatinem/rust-cache: https://github.com/Swatinem/rust-cache
