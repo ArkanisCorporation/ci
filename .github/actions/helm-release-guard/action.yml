@@ -6,6 +6,8 @@
 #   The finalize phase exits non-zero for every outcome except `deployed` and `not-attempted`.
 #   It expects Bash, the .NET 10 SDK, helm, and kubectl on PATH, and a kube context that can reach the cluster.
 #   Linux and macOS runners only: helm-timeout-shim.sh, which ships with this action, is a Bash script.
+#   In the capture phase, on an in-cluster runner, it first labels its own runner pod
+#   `arkanis.dev/deploy-in-progress=true` (protect-runner-pod.sh), which the cluster uses to hold off node drains.
 #   It never reads Secret objects and redacts pod environment values from the diagnostics it writes.
 #   exclusive: "true" (opt-in) stops the release's Deployments before the deployment; the finalize phase reads that
 #   from the state file, restores the recorded replica counts, and reports the downtime window.
@@ -101,6 +103,13 @@ outputs:
 runs:
   using: composite
   steps:
+    # Before the release is read or touched: mark this runner pod busy so a node drain waits for the job, and stop
+    # when the node is already being drained (ARK-784). Does nothing on a runner that is not a Kubernetes pod.
+    - name: Protect runner pod from node drains
+      if: inputs.phase == 'capture'
+      run: bash "$GITHUB_ACTION_PATH/protect-runner-pod.sh"
+      shell: bash
+
     - name: Guard Helm release
       id: guard
       run: dotnet run --file "$GITHUB_ACTION_PATH/helm-release-guard.cs" --no-launch-profile

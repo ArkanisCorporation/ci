@@ -108,6 +108,22 @@ This supports cluster-hosted runners where kube access is provided by the runner
 Either way the identity must be able to roll the release back and run the schema rollback Job, not only apply it ([deployments.md](deployments.md#auth)).
 The job needs Bash on Linux or macOS: the `helm` shim that bounds Aspire's Helm wait is a Bash script.
 
+### Node drains
+
+A deploy job on an in-cluster runner is a pod, and a node drain would evict it in the middle of `helm upgrade`.
+The deploy job therefore labels its own runner pod `arkanis.dev/deploy-in-progress=true` before it reads the release, using the pod's service account.
+The label is the whole contract: the cluster decides what honours it.
+
+| Cluster side | What it must do |
+|---|---|
+| Runner service account | May `patch` and `get` its own pod and `get` nodes. Without it the job warns and deploys unprotected. |
+| Node reboots (kured) | `--blocking-pod-selector=arkanis.dev/deploy-in-progress=true`: no cordon while such a pod runs on the node. |
+| Every other eviction | A PodDisruptionBudget with `maxUnavailable: 0` selecting that label in the runner namespace. |
+| Runner pods | Ephemeral, one job each. The label is never removed; it goes away with the pod. |
+
+Only the busy runner is labelled, so an idle warm runner never blocks a reboot.
+When the node is already cordoned at job start, the job stops before deploying and asks for a rerun.
+
 ## Required Hygiene
 
 - Write temp data under `$RUNNER_TEMP` or the repository `artifacts/` directory.
