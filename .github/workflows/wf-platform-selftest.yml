@@ -32,7 +32,8 @@ jobs:
   validate:
     name: contracts @ ${{ github.head_ref || github.ref_name }}
     runs-on: ${{ fromJSON(inputs.runs-on-json || format('[{0}]', toJSON(inputs.runs-on || 'ubuntu-latest'))) }}
-    timeout-minutes: 10
+    # The guard suite starts the guard once per scenario and alone runs about seven minutes on a hosted runner.
+    timeout-minutes: 20
     permissions:
       contents: read
     defaults:
