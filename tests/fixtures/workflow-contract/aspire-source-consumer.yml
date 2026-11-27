@@ -28,11 +28,15 @@ jobs:
       kubernetes-namespace: example-production
       image-tag: v1.2.3
       environment-name: production
-      # Optional. Omitting all four keeps the same behaviour: a failed deployment is rolled back and fails the job.
+      # Optional. Omitting all five keeps the same behaviour: a failed deployment is rolled back and fails the job, and a
+      # chart without a schema-confirm CronJob only sees schema-confirm=not-found.
       helm-release-name: kubernetes-production
       rollout-timeout: 15m
       rollback-on-failure: true
       schema-rollback-cronjob: schema-rollback
+      # After a verified deployment with no trace of an older release, runs the chart's schema-confirm Job so the
+      # consumer's migrator may apply contract migrations. Blocked stays green; a failed confirm fails the job.
+      schema-confirm-cronjob: schema-confirm
       # Opt-in downtime for a release with a breaking migration: stops the previous version before deploying and
       # exports ARKANIS_DEPLOY_EXCLUSIVE=true to the AppHost. Leave false for every backwards-compatible release.
       exclusive: false
@@ -49,4 +53,5 @@ jobs:
           PREVIOUS_REVISION: ${{ needs.deploy.outputs.previous-revision }}
           NEW_REVISION: ${{ needs.deploy.outputs.new-revision }}
           FAILED_RESOURCES: ${{ needs.deploy.outputs.failed-resources }}
-        run: echo "outcome=${OUTCOME} previous=${PREVIOUS_REVISION} new=${NEW_REVISION} failed=${FAILED_RESOURCES}"
+          SCHEMA_CONFIRM: ${{ needs.deploy.outputs.schema-confirm }}
+        run: echo "outcome=${OUTCOME} previous=${PREVIOUS_REVISION} new=${NEW_REVISION} failed=${FAILED_RESOURCES} schema-confirm=${SCHEMA_CONFIRM}"

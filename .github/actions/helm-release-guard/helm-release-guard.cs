@@ -32,13 +32,17 @@ using System.Text.RegularExpressions;
  *               previous version cannot tolerate never runs under it. Downtime is the price, by design.
  *     finalize  After the deploy, always. Verifies rollouts on success. On failure it collects diagnostics,
  *               rolls the release back, runs the schema-rollback hook, verifies again, and reports.
+ *               After a verified deployment, and only then, it runs the schema-confirm hook (ARK-746): a Job from
+ *               the suspended CronJob DEPLOY_GUARD_SCHEMA_CONFIRM_CRONJOB names, once no object in the namespace
+ *               still carries an older release's images. A blocked confirm is a warning; a failed one turns the
+ *               exit code red but leaves the outcome deployed and rolls nothing back.
  *
  *   It deliberately references no NuGet package: the capture phase compiles it before anything is deployed, so a
  *   runner that cannot build it fails closed, and the finalize phase then reuses that build instead of depending
  *   on a package restore at the moment a rollback is needed.
  *
  *   Never reads Secret objects, never stores pod environment values (see RedactDescribe), and keeps the rendered
- *   schema-rollback Job manifest (a pod spec) under RUNNER_TEMP instead of the uploaded report.
+ *   schema-rollback and schema-confirm Job manifests (pod specs) under RUNNER_TEMP instead of the uploaded report.
  */
 
 return Guard.Execute();
@@ -592,6 +596,11 @@ static class Guard
                     : listed
                         ? "Helm reported success. The rollout was not verified independently: no Deployment carries this release's Helm ownership annotation."
                         : "Helm reported success. The rollout was not verified independently: the workloads in the namespace could not be listed.";
+
+                // Only here, on a verified deployment: never after a rollback, a failure, a cancel, or a deploy that
+                // did not start. The outcome stays deployed whatever the confirm does; a failed confirm only turns the
+                // exit code red (Publish), so diagnostics, outputs, the summary, and the upload all still happen.
+                RunSchemaConfirm(settings, report, release, ns);
                 return Publish(settings, report);
             }
 
@@ -1211,25 +1220,10 @@ static class Guard
             return null;
         }
 
-        var suffix = $"-{settings.RunId}-{settings.RunAttempt}";
-        var jobName = cronJob[..Math.Min(cronJob.Length, 63 - suffix.Length)].TrimEnd('-', '.') + suffix;
-        var rendered = Run("kubectl", ["create", "job", jobName, $"--from=cronjob/{cronJob}", "--namespace", ns, "--dry-run=client", "--output", "json"], QueryTimeout);
-        JsonNode? job = null;
-        if (rendered.ExitCode == 0)
+        var (jobName, jobObject, renderError) = RenderJobFromCronJob(settings, cronJob, ns);
+        if (jobObject is null || jobObject["metadata"] is not JsonObject metadata || jobObject["spec"] is not JsonObject spec)
         {
-            try
-            {
-                job = JsonNode.Parse(rendered.Stdout);
-            }
-            catch (JsonException)
-            {
-                job = null;
-            }
-        }
-
-        if (job is not JsonObject jobObject || jobObject["metadata"] is not JsonObject metadata || jobObject["spec"] is not JsonObject spec)
-        {
-            Annotate("error", $"SCHEMA ROLLBACK FAILED: could not render a Job from CronJob '{cronJob}'. {FirstLine(rendered.Stderr, string.Empty)}");
+            Annotate("error", $"SCHEMA ROLLBACK FAILED: could not render a Job from CronJob '{cronJob}'. {renderError}");
             report.SchemaRollback = SchemaOutcomes.Failed;
             report.SchemaRollbackDetail = "The Job could not be rendered from the CronJob.";
             return null;
@@ -1270,6 +1264,68 @@ static class Guard
         Console.WriteLine($"Rendered schema rollback Job '{jobName}' from CronJob '{cronJob}' (uid/generation {(state.SchemaCronJobIdentity.Length == 0 ? "absent" : state.SchemaCronJobIdentity)} -> {identity}).");
         report.SchemaRollbackJob = jobName;
         return new SchemaJob(jobName, manifestPath);
+    }
+
+    /*
+     * Renders, without creating it, the Job `kubectl create job --from=cronjob/<name>` would create, named after the
+     * CronJob plus this run's id and attempt (unique per run, at most 63 characters). Null when it cannot be rendered
+     * or the result has no metadata or spec; the error is kubectl's first line of standard error.
+     */
+    static (string Name, JsonObject? Job, string Error) RenderJobFromCronJob(Settings settings, string cronJob, string ns)
+    {
+        var suffix = $"-{settings.RunId}-{settings.RunAttempt}";
+        var jobName = cronJob[..Math.Min(cronJob.Length, 63 - suffix.Length)].TrimEnd('-', '.') + suffix;
+        var rendered = Run("kubectl", ["create", "job", jobName, $"--from=cronjob/{cronJob}", "--namespace", ns, "--dry-run=client", "--output", "json"], QueryTimeout);
+        JsonNode? job = null;
+        if (rendered.ExitCode == 0)
+        {
+            try
+            {
+                job = JsonNode.Parse(rendered.Stdout);
+            }
+            catch (JsonException)
+            {
+                job = null;
+            }
+        }
+
+        return job is JsonObject { } jobObject && jobObject["metadata"] is JsonObject && jobObject["spec"] is JsonObject
+            ? (jobName, jobObject, string.Empty)
+            : (jobName, null, FirstLine(rendered.Stderr, string.Empty));
+    }
+
+    /*
+     * Creates a rendered Job, waits for it at most `wait`, captures its log into diagnostics/<stage> (echoed into the
+     * run log too) and returns its closing lines in `output`. A completed Job is deleted; a failed or still-running one
+     * stays as evidence, and must not be killed mid-migration (its ttlSecondsAfterFinished removes it later).
+     * Returns SchemaOutcomes.Succeeded, .Failed or .TimedOut; `created` is false when the create call itself failed.
+     */
+    static string ExecuteJob(Settings settings, string jobName, string manifestPath, string ns, TimeSpan wait, string stage, out bool created, out string output)
+    {
+        output = string.Empty;
+        var create = Run("kubectl", ["create", "--filename", manifestPath, "--namespace", ns], QueryTimeout, echoOutput: true);
+        created = create.ExitCode == 0;
+        if (!created)
+        {
+            return SchemaOutcomes.Failed;
+        }
+
+        var result = WaitForJob(settings, jobName, ns, wait);
+        var directory = Path.Combine(settings.ReportDirectory, "diagnostics", stage);
+        Directory.CreateDirectory(directory);
+
+        // Echoed and summarised, not only saved: a completed Job is deleted below, so the artifact would otherwise
+        // be the only place that says what the hook did.
+        var logs = Run("kubectl", ["logs", $"job/{jobName}", "--namespace", ns, "--all-containers", "--tail=1000", "--timestamps"], QueryTimeout, echoOutput: true);
+        Save(directory, "job-logs.txt", logs);
+        output = LastLogLines(logs.Stdout, SchemaJobSummaryLines);
+        Save(directory, "job.txt", Run("kubectl", ["get", "job", jobName, "--namespace", ns, "--output", "wide"], QueryTimeout));
+        if (result == SchemaOutcomes.Succeeded)
+        {
+            Run("kubectl", ["delete", "job", jobName, "--namespace", ns, "--ignore-not-found", "--wait=false"], QueryTimeout, echoOutput: true);
+        }
+
+        return result;
     }
 
     /*
@@ -1320,34 +1376,22 @@ static class Guard
         Console.WriteLine($"::group::Schema rollback Job {job.Name}");
         try
         {
-            var create = Run("kubectl", ["create", "--filename", job.ManifestPath, "--namespace", ns], QueryTimeout, echoOutput: true);
-            if (create.ExitCode != 0)
+            // The log says what the hook did (reverted something, or found nothing to revert).
+            var result = ExecuteJob(settings, job.Name, job.ManifestPath, ns, settings.RolloutTimeout, "schema-rollback", out var created, out var output);
+            report.SchemaRollback = result;
+            report.SchemaRollbackOutput = output;
+            if (!created)
             {
-                report.SchemaRollback = SchemaOutcomes.Failed;
                 report.SchemaRollbackDetail = "The Job could not be created.";
                 return;
             }
 
-            var result = WaitForJob(settings, job.Name, ns);
-            var directory = Path.Combine(settings.ReportDirectory, "diagnostics", "schema-rollback");
-            Directory.CreateDirectory(directory);
-            // Echoed and summarised, not only saved: a completed Job is deleted below, so the artifact would otherwise
-            // be the only place that says what the hook did (reverted something, or found nothing to revert).
-            var logs = Run("kubectl", ["logs", $"job/{job.Name}", "--namespace", ns, "--all-containers", "--tail=1000", "--timestamps"], QueryTimeout, echoOutput: true);
-            Save(directory, "job-logs.txt", logs);
-            report.SchemaRollbackOutput = LastLogLines(logs.Stdout, SchemaJobSummaryLines);
-            Save(directory, "job.txt", Run("kubectl", ["get", "job", job.Name, "--namespace", ns, "--output", "wide"], QueryTimeout));
-
-            report.SchemaRollback = result;
             if (result == SchemaOutcomes.Succeeded)
             {
                 Console.WriteLine("Schema rollback Job completed.");
-                Run("kubectl", ["delete", "job", job.Name, "--namespace", ns, "--ignore-not-found", "--wait=false"], QueryTimeout, echoOutput: true);
                 return;
             }
 
-            // Left in place on purpose: a Job still running must not be killed mid-migration, and a failed one is
-            // evidence. Its ttlSecondsAfterFinished removes it later.
             report.SchemaRollbackDetail = result == SchemaOutcomes.TimedOut
                 ? $"Job {job.Name} did not finish within {settings.RolloutTimeoutText} and is still in the cluster."
                 : $"Job {job.Name} failed and is left in the cluster for inspection.";
@@ -1380,7 +1424,8 @@ static class Guard
         return string.Join('\n', lines.Skip(Math.Max(0, lines.Count - count)));
     }
 
-    static string WaitForJob(Settings settings, string jobName, string ns)
+    // Returns SchemaOutcomes.Succeeded, .Failed or .TimedOut; SchemaConfirmOutcomes uses the same three words.
+    static string WaitForJob(Settings settings, string jobName, string ns, TimeSpan timeout)
     {
         var elapsed = Stopwatch.StartNew();
         while (true)
@@ -1411,13 +1456,393 @@ static class Guard
                 }
             }
 
-            if (elapsed.Elapsed >= settings.RolloutTimeout)
+            if (elapsed.Elapsed >= timeout)
             {
                 return SchemaOutcomes.TimedOut;
             }
 
             Thread.Sleep(settings.PollInterval);
         }
+    }
+
+    // ---------------------------------------------------------------- schema confirm hook
+
+    /*
+     * Upper bound of the wait for the schema confirm Job, further capped at rollout-timeout. The consumer's CronJob
+     * bounds its own Job (PatchWatch: activeDeadlineSeconds 300, which covers its one retry as well), so ten minutes is
+     * twice that and leaves room for a slow image pull. The confirm runs only on the success path, which never spends
+     * the rollout-timeout the job budget reserves for a rollback (timeout-minutes >= 2 x rollout-timeout + 10m), so
+     * min(rollout-timeout, 10m) cannot push a successful deployment into the job timeout. The settle period below
+     * comes out of the same rollout-timeout: settle plus Job wait never exceed it (see RunSchemaConfirm).
+     */
+    static readonly TimeSpan MaxSchemaConfirmWait = TimeSpan.FromMinutes(10);
+
+    /*
+     * Upper bound of the settle period, further capped at rollout-timeout. A Deployment's rollout counts as complete
+     * once its old ReplicaSet is scaled to 0, while that ReplicaSet's pods are still terminating for up to their
+     * terminationGracePeriodSeconds (30 s by default). Those are traces (old code still runs), but deciding at once
+     * would block nearly every ordinary rolling deploy. Three minutes is six default grace periods; with the default
+     * 15m rollout-timeout, settle (3m) plus Job wait (10m) stay inside the rollout-timeout share the success path never
+     * spends on a rollback.
+     */
+    static readonly TimeSpan MaxSchemaConfirmSettle = TimeSpan.FromMinutes(3);
+
+    // Floor for the Job wait when the settle period used up most of a small rollout-timeout.
+    static readonly TimeSpan MinSchemaConfirmWait = TimeSpan.FromSeconds(30);
+
+    const string ReleaseNameAnnotation = "meta.helm.sh/release-name";
+
+    /*
+     * Runs the consumer's schema confirm hook after a verified deployment, and only then (the caller guarantees the
+     * outcome is deployed). The Job records "this release's rollout was verified", which lets the consumer's migrator
+     * apply contract migrations the previous release could not tolerate. So it runs only when nothing of an older
+     * release is left that could still use the schema (FindOlderReleaseTraces); anything less, including a check that
+     * cannot run, blocks it. Blocked is a warning, not a failure: the release is healthy, its contracts just wait for
+     * the next deploy. A failed or timed-out Job is an error and turns the exit code red, but leaves the outcome
+     * deployed and triggers no rollback: the release is serving.
+     * Unlike the schema rollback Job, this one never receives ARKANIS_DEPLOY_STARTED_AT and keeps the CronJob owner
+     * reference `kubectl create job --from` gives it, since the CronJob is not about to be reverted.
+     */
+    static void RunSchemaConfirm(Settings settings, Report report, string release, string ns)
+    {
+        var cronJob = settings.SchemaConfirmCronJob;
+        if (cronJob.Length == 0)
+        {
+            report.SchemaConfirm = SchemaConfirmOutcomes.NotConfigured;
+            return;
+        }
+
+        // Existence first: a chart without the CronJob pays one read and nothing else.
+        var existing = Run("kubectl", ["get", "cronjob", cronJob, "--namespace", ns, "--ignore-not-found", "--output", "json"], QueryTimeout);
+        if (existing.ExitCode != 0)
+        {
+            // --ignore-not-found makes an absent CronJob exit 0, so this is a failed read and proves nothing.
+            BlockSchemaConfirm(report, $"CronJob '{cronJob}' could not be read (kubectl exited with code {Text(existing.ExitCode)}; standard error: {OneLine(existing.Stderr)}).", []);
+            return;
+        }
+
+        if (existing.Stdout.Trim().Length == 0)
+        {
+            Console.WriteLine($"No CronJob '{cronJob}' in namespace '{ns}': the release ships no schema confirm hook, skipping.");
+            report.SchemaConfirm = SchemaConfirmOutcomes.NotFound;
+            return;
+        }
+
+        if (!report.RolloutVerified)
+        {
+            BlockSchemaConfirm(report, "The guard did not verify the rollout itself (see the detail above), so the release is not known to be the only one running.", []);
+            return;
+        }
+
+        var traces = FindOlderReleaseTraces(release, ns, out var checkError);
+        if (checkError is not null)
+        {
+            BlockSchemaConfirm(report, checkError, []);
+            return;
+        }
+
+        // Only draining traces (terminating pods, ReplicaSets at 0 whose pods are still going): the ordinary tail of a
+        // rolling update. Re-check until clean, until a non-draining trace appears (decided at once), or until the
+        // settle bound expires. Any non-draining trace blocks immediately, without waiting.
+        var settle = settings.RolloutTimeout < MaxSchemaConfirmSettle ? settings.RolloutTimeout : MaxSchemaConfirmSettle;
+        var settling = Stopwatch.StartNew();
+        if (traces.Count > 0 && traces.All(trace => trace.Draining))
+        {
+            Console.WriteLine($"Waiting up to {Text((int)Math.Ceiling(settle.TotalSeconds))}s for {Text(traces.Count)} terminating object(s) of an older release to go: {string.Join(", ", traces.Select(trace => $"{trace.Kind}/{trace.Name}"))}");
+            do
+            {
+                Thread.Sleep(settings.PollInterval);
+                traces = FindOlderReleaseTraces(release, ns, out checkError, quiet: true);
+                if (checkError is not null)
+                {
+                    BlockSchemaConfirm(report, checkError, []);
+                    return;
+                }
+            }
+            while (traces.Count > 0 && traces.All(trace => trace.Draining) && settling.Elapsed < settle);
+
+            Console.WriteLine(traces.Count == 0
+                ? $"The older release's objects are gone after {Text((int)settling.Elapsed.TotalSeconds)}s."
+                : traces.All(trace => trace.Draining)
+                    ? $"Still terminating after {Text((int)settling.Elapsed.TotalSeconds)}s: {string.Join(", ", traces.Select(trace => $"{trace.Kind}/{trace.Name}"))}."
+                    : $"Stopped waiting after {Text((int)settling.Elapsed.TotalSeconds)}s: a trace that is not terminating appeared.");
+        }
+
+        settling.Stop();
+        if (traces.Count > 0)
+        {
+            BlockSchemaConfirm(report, traces.All(trace => trace.Draining)
+                ? $"{Text(traces.Count)} object(s) in namespace '{ns}' of an older release were still terminating after {Text((int)Math.Ceiling(settle.TotalSeconds))}s."
+                : $"{Text(traces.Count)} object(s) in namespace '{ns}' still carry an older release's images.", traces);
+            return;
+        }
+
+        Console.WriteLine($"No trace of an older release in namespace '{ns}'; running the schema confirm Job from CronJob '{cronJob}'.");
+        var (jobName, job, renderError) = RenderJobFromCronJob(settings, cronJob, ns);
+        if (job is null || job["metadata"] is not JsonObject metadata || job["spec"] is not JsonObject spec)
+        {
+            report.SchemaConfirm = SchemaConfirmOutcomes.Failed;
+            report.SchemaConfirmDetail = $"The Job could not be rendered from CronJob '{cronJob}'. {renderError}".TrimEnd();
+            Annotate("error", $"SCHEMA CONFIRM FAILED: {report.SchemaConfirmDetail} The release is deployed; its contract migrations stay deferred.");
+            return;
+        }
+
+        metadata.Remove("uid");
+        metadata.Remove("resourceVersion");
+        metadata.Remove("creationTimestamp");
+        metadata["namespace"] = ns;
+        if (metadata["labels"] is not JsonObject labels)
+        {
+            labels = new JsonObject();
+            metadata["labels"] = labels;
+        }
+
+        labels["arkanis.dev/deploy-guard"] = "schema-confirm";
+        spec["ttlSecondsAfterFinished"] ??= SchemaJobTtlSeconds;
+
+        var manifestDirectory = Path.Combine(settings.RunnerTemp, "deploy-guard");
+        Directory.CreateDirectory(manifestDirectory);
+        var manifestPath = Path.Combine(manifestDirectory, "schema-confirm-job.json");
+        File.WriteAllText(manifestPath, job.ToJsonString());
+        report.SchemaConfirmJob = jobName;
+        // Settle plus wait stay within rollout-timeout, except for a small floor when settling used nearly all of it.
+        var remaining = settings.RolloutTimeout - settling.Elapsed;
+        var floor = settings.RolloutTimeout < MinSchemaConfirmWait ? settings.RolloutTimeout : MinSchemaConfirmWait;
+        var wait = remaining < floor ? floor : remaining < MaxSchemaConfirmWait ? remaining : MaxSchemaConfirmWait;
+        Console.WriteLine($"::group::Schema confirm Job {jobName}");
+        try
+        {
+            var result = ExecuteJob(settings, jobName, manifestPath, ns, wait, "schema-confirm", out var created, out var output);
+            report.SchemaConfirm = result;
+            report.SchemaConfirmOutput = output;
+            report.SchemaConfirmDetail = !created
+                ? "The Job could not be created."
+                : result switch
+                {
+                    SchemaOutcomes.Succeeded => string.Empty,
+                    SchemaOutcomes.TimedOut => $"Job {jobName} did not finish within {Text((int)wait.TotalSeconds)}s and is still in the cluster.",
+                    _ => $"Job {jobName} failed and is left in the cluster for inspection.",
+                };
+            if (result == SchemaOutcomes.Succeeded)
+            {
+                Console.WriteLine("Schema confirm Job completed.");
+            }
+        }
+        finally
+        {
+            Console.WriteLine("::endgroup::");
+            File.Delete(manifestPath);
+            if (report.SchemaConfirm is SchemaConfirmOutcomes.Failed or SchemaConfirmOutcomes.TimedOut)
+            {
+                Annotate("error", $"SCHEMA CONFIRM FAILED: {report.SchemaConfirmDetail} The release is deployed and serving, nothing was rolled back; its contract migrations stay deferred until a confirm succeeds.");
+            }
+        }
+    }
+
+    static void BlockSchemaConfirm(Report report, string detail, List<ReleaseTrace> traces)
+    {
+        report.SchemaConfirm = SchemaConfirmOutcomes.Blocked;
+        report.SchemaConfirmDetail = detail;
+        report.SchemaConfirmTraces.AddRange(traces);
+        Annotate("warning", $"SCHEMA CONFIRM BLOCKED: {detail} The release is deployed and healthy; its contract migrations stay deferred until a later deployment confirms.");
+        foreach (var trace in traces)
+        {
+            Annotate("warning", $"Schema confirm blocked by {trace.Kind}/{trace.Name}{(trace.Image.Length > 0 ? $" ({trace.Image})" : string.Empty)}: {trace.Reason}");
+        }
+    }
+
+    /*
+     * Looks for anything in the namespace that could still run an older release's code against the schema.
+     *
+     * The release's images: every container, init container and ephemeral container image of every workload carrying
+     * the release's Helm ownership annotation (Deployments, StatefulSets, DaemonSets, CronJobs, Jobs), grouped by
+     * repository. Read from the live objects, not `helm get manifest`, which the guard never reads; after a verified
+     * rollout the live objects are the current revision.
+     *
+     * A trace is an object that names one of those repositories at a reference the release itself does not use:
+     *   - Deployments, StatefulSets, DaemonSets, CronJobs: always, whatever their replica count or suspension. A
+     *     zero-scaled or suspended stray copy is one `kubectl scale` or schedule away from running old code.
+     *   - ReplicaSets with spec.replicas or status.replicas above 0. Those at 0 are revision history.
+     *   - Jobs that have not finished (no Complete or Failed condition): running, pending or suspended.
+     *   - Pods not in phase Succeeded or Failed, terminating ones included.
+     * Terminating pods (metadata.deletionTimestamp set) and ReplicaSets at spec.replicas 0 with status.replicas above 0
+     * are marked Draining: they are going away by themselves, so the caller waits a bounded time for them.
+     * Plus every paused Deployment of the release, whatever its images: resuming or scaling it can bring its previous
+     * ReplicaSet back.
+     *
+     * Compared per repository against the set of references the release uses, not one tag: a chart may run the same
+     * third-party image at two tags in two workloads, and neither is an older release. Repositories the release does
+     * not use are not looked at. Returns an error instead when the namespace cannot be inspected or the release owns
+     * no image: never confirm on missing evidence.
+     */
+    static List<ReleaseTrace> FindOlderReleaseTraces(string release, string ns, out string? error, bool quiet = false)
+    {
+        error = null;
+        var traces = new List<ReleaseTrace>();
+
+        // One call, so the picture is one moment. Parsed in memory and never written out: pod templates carry literal
+        // environment values. Only kinds, names and image references leave this method.
+        var result = Run("kubectl", ["get", "deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods", "--namespace", ns, "--output", "json"], QueryTimeout, quiet: quiet);
+        if (result.ExitCode != 0 || !TryParseItems(result.Stdout, out var items))
+        {
+            error = result.ExitCode != 0
+                ? $"The namespace could not be inspected for an older release (kubectl exited with code {Text(result.ExitCode)}; standard error: {OneLine(result.Stderr)})."
+                : "The namespace could not be inspected for an older release (kubectl's output was not a JSON list).";
+            return traces;
+        }
+
+        var current = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        foreach (var item in items)
+        {
+            if (item?["kind"]?.GetValue<string>() is not ("Deployment" or "StatefulSet" or "DaemonSet" or "CronJob" or "Job")
+                || !OwnedByRelease(item, release) || PodSpecOf(item) is not JsonObject podSpec)
+            {
+                continue;
+            }
+
+            foreach (var image in ImagesOf(podSpec))
+            {
+                var (repository, reference) = SplitImage(image);
+                if (!current.TryGetValue(repository, out var references))
+                {
+                    references = new SortedSet<string>(StringComparer.Ordinal);
+                    current[repository] = references;
+                }
+
+                references.Add(reference);
+            }
+        }
+
+        if (current.Count == 0)
+        {
+            error = $"No workload in namespace '{ns}' carries release '{release}''s Helm ownership annotation, so the release's images are unknown.";
+            return traces;
+        }
+
+        foreach (var item in items)
+        {
+            var kind = item?["kind"]?.GetValue<string>() ?? string.Empty;
+            var name = item?["metadata"]?["name"]?.GetValue<string>() ?? string.Empty;
+            if (kind == "Deployment" && OwnedByRelease(item, release) && item?["spec"]?["paused"] is JsonValue pausedValue
+                && pausedValue.TryGetValue<bool>(out var paused) && paused)
+            {
+                traces.Add(new ReleaseTrace(kind, name, string.Empty, "a paused Deployment of the release: resuming or scaling it can bring its previous ReplicaSet back."));
+            }
+
+            var phase = item?["status"]?["phase"]?.GetValue<string>() ?? string.Empty;
+            var desired = Number(item?["spec"]?["replicas"]) ?? 0;
+            var actual = Number(item?["status"]?["replicas"]) ?? 0;
+            var terminating = item?["metadata"]?["deletionTimestamp"] is JsonValue;
+            var draining = (kind == "Pod" && terminating) || (kind == "ReplicaSet" && desired == 0 && actual > 0);
+            var why = kind switch
+            {
+                "Deployment" or "StatefulSet" or "DaemonSet" => "its pod template names an older image; a stray copy counts whatever its replica count",
+                "CronJob" => "its job template names an older image; a suspended CronJob counts too",
+                "ReplicaSet" when desired == 0 && actual > 0 => "a ReplicaSet scaled to 0 whose pods are still terminating runs an older image",
+                "ReplicaSet" when desired > 0 || actual > 0 => "a ReplicaSet that still has replicas runs an older image",
+                "Job" when !JobFinished(item) => "a Job that has not finished runs an older image",
+                "Pod" when phase is not ("Succeeded" or "Failed") && terminating => "a terminating pod still runs an older image",
+                "Pod" when phase is not ("Succeeded" or "Failed") => $"a pod in phase '{(phase.Length == 0 ? "unknown" : phase)}' runs an older image",
+                _ => null,
+            };
+            if (why is null || PodSpecOf(item) is not JsonObject podSpec)
+            {
+                continue;
+            }
+
+            foreach (var image in ImagesOf(podSpec).Distinct(StringComparer.Ordinal))
+            {
+                var (repository, reference) = SplitImage(image);
+                if (current.TryGetValue(repository, out var references) && !references.Contains(reference))
+                {
+                    traces.Add(new ReleaseTrace(kind, name, image, $"{why}; this release runs {repository} at {string.Join(", ", references)}.", draining));
+                }
+            }
+        }
+
+        return traces;
+    }
+
+    static bool OwnedByRelease(JsonNode? item, string release) =>
+        item?["metadata"]?["annotations"]?[ReleaseNameAnnotation] is JsonValue value && value.TryGetValue<string>(out var text) && text == release;
+
+    // The pod spec an object runs or would run: a Pod's own, a CronJob's job template's, every other workload's template.
+    static JsonObject? PodSpecOf(JsonNode? item) => (item?["kind"]?.GetValue<string>() switch
+    {
+        "Pod" => item?["spec"],
+        "CronJob" => item["spec"]?["jobTemplate"]?["spec"]?["template"]?["spec"],
+        _ => item?["spec"]?["template"]?["spec"],
+    }) as JsonObject;
+
+    static IEnumerable<string> ImagesOf(JsonObject podSpec)
+    {
+        foreach (var group in new[] { "initContainers", "containers", "ephemeralContainers" })
+        {
+            foreach (var container in podSpec[group] as JsonArray ?? [])
+            {
+                if (container?["image"] is JsonValue value && value.TryGetValue<string>(out var image) && image.Trim().Length > 0)
+                {
+                    yield return image.Trim();
+                }
+            }
+        }
+    }
+
+    // A Job is finished once its Complete or Failed condition is True; anything else may still start pods.
+    static bool JobFinished(JsonNode? job) =>
+        (job?["status"]?["conditions"] as JsonArray ?? []).Any(condition =>
+            condition?["type"]?.GetValue<string>() is "Complete" or "Failed" && condition["status"]?.GetValue<string>() == "True");
+
+    /*
+     * Splits an image reference into its repository and the reference that selects a version, e.g.
+     * "ghcr.io/arkanis/bot:1.2@sha256:ab" -> ("ghcr.io/arkanis/bot", ":1.2@sha256:ab"). The repository is normalised the
+     * way the container runtime resolves it ("nginx" -> "docker.io/library/nginx"), and a reference with neither tag nor
+     * digest means ":latest". Tag and digest are compared as written: the same build named once by tag and once by
+     * digest counts as different, which can only block a confirm, never allow one.
+     */
+    internal static (string Repository, string Reference) SplitImage(string image)
+    {
+        var digest = string.Empty;
+        var name = image;
+        var at = name.IndexOf('@', StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            digest = name[at..];
+            name = name[..at];
+        }
+
+        var tag = string.Empty;
+        var colon = name.LastIndexOf(':');
+        if (colon > name.LastIndexOf('/'))
+        {
+            tag = name[colon..];
+            name = name[..colon];
+        }
+
+        var slash = name.IndexOf('/', StringComparison.Ordinal);
+        var first = slash < 0 ? string.Empty : name[..slash];
+        if (slash < 0 || !(first.Contains('.', StringComparison.Ordinal) || first.Contains(':', StringComparison.Ordinal) || first == "localhost"))
+        {
+            name = "docker.io/" + name;
+        }
+
+        if (name.StartsWith("index.docker.io/", StringComparison.Ordinal))
+        {
+            name = "docker.io/" + name["index.docker.io/".Length..];
+        }
+
+        if (name.StartsWith("docker.io/", StringComparison.Ordinal) && !name["docker.io/".Length..].Contains('/', StringComparison.Ordinal))
+        {
+            name = "docker.io/library/" + name["docker.io/".Length..];
+        }
+
+        return (name, tag.Length == 0 && digest.Length == 0 ? ":latest" : tag + digest);
+    }
+
+    static string OneLine(string text)
+    {
+        var line = string.Join(' ', text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return line.Length == 0 ? "empty" : line.Length > 600 ? line[..600] + "..." : line;
     }
 
     // ---------------------------------------------------------------- reporting
@@ -1431,12 +1856,15 @@ static class Guard
         WriteOutput(settings, "current-revision", Text(report.CurrentRevision));
         WriteOutput(settings, "outcome", report.Outcome);
         WriteOutput(settings, "schema-rollback", report.SchemaRollback);
+        WriteOutput(settings, "schema-confirm", report.SchemaConfirm);
         WriteOutput(settings, "failed-resources", failedResources);
         WriteOutput(settings, "downtime-started-at", report.Exclusive.DowntimeStartedAt);
         WriteOutput(settings, "downtime-ended-at", report.Exclusive.DowntimeEndedAt);
 
         var headline = report.Outcome switch
         {
+            Outcomes.Deployed when report.SchemaConfirm is SchemaConfirmOutcomes.Failed or SchemaConfirmOutcomes.TimedOut =>
+                $"Deployed revision {Text(report.CurrentRevision)}, but the SCHEMA CONFIRM FAILED - the release is serving, its contract migrations stay deferred.",
             Outcomes.Deployed => $"Deployed revision {Text(report.CurrentRevision)}.",
             Outcomes.RolledBack => $"DEPLOYMENT FAILED - rolled back to revision {Text(report.RollbackTargetRevision)}, the previous release is live.",
             Outcomes.RollbackFailed when report.HelmRollbackSucceeded && report.SchemaRollback is SchemaOutcomes.Failed or SchemaOutcomes.TimedOut =>
@@ -1479,6 +1907,36 @@ static class Guard
             summary.Append('\n');
         }
 
+        if (report.SchemaConfirmTraces.Count > 0 || report.SchemaConfirm == SchemaConfirmOutcomes.Blocked)
+        {
+            summary.Append("**Schema confirm blocked** - the release is healthy, but the confirm did not run, so its contract migrations stay deferred. ")
+                .Append(report.SchemaConfirmDetail).Append("\n\n");
+            foreach (var trace in report.SchemaConfirmTraces)
+            {
+                summary.Append("- `").Append(trace.Kind).Append('/').Append(trace.Name).Append('`');
+                if (trace.Image.Length > 0)
+                {
+                    summary.Append(" runs `").Append(trace.Image).Append('`');
+                }
+
+                summary.Append(": ").Append(trace.Reason).Append('\n');
+            }
+
+            summary.Append('\n');
+        }
+
+        if (report.SchemaConfirmOutput.Length > 0)
+        {
+            // Indented code block, like the schema rollback Job's output: the consumer's own log text.
+            summary.Append("**What the schema confirm Job reported** (last lines of its log)\n\n");
+            foreach (var line in report.SchemaConfirmOutput.Split('\n'))
+            {
+                summary.Append("    ").Append(line).Append('\n');
+            }
+
+            summary.Append('\n');
+        }
+
         var downtime = DowntimeSentence(report.Exclusive);
         if (downtime.Length > 0)
         {
@@ -1494,6 +1952,7 @@ static class Guard
         Row("Revision this deployment created", RevisionCreated(report));
         Row("Revision live now", RevisionLive(report));
         Row("Schema rollback", report.SchemaRollbackDetail.Length == 0 ? report.SchemaRollback : $"{report.SchemaRollback}: {report.SchemaRollbackDetail}");
+        Row("Schema confirm", report.SchemaConfirmDetail.Length == 0 ? report.SchemaConfirm : $"{report.SchemaConfirm}: {report.SchemaConfirmDetail}");
         if (report.Outcome == Outcomes.Deployed)
         {
             Row("Rollout verified by the guard", report.RolloutVerified ? "yes" : "no, Helm's wait only");
@@ -1543,6 +2002,18 @@ static class Guard
             ["schema_rollback_detail"] = report.SchemaRollbackDetail,
             ["schema_rollback_job"] = report.SchemaRollbackJob,
             ["schema_rollback_output"] = report.SchemaRollbackOutput,
+            ["schema_confirm"] = report.SchemaConfirm,
+            ["schema_confirm_detail"] = report.SchemaConfirmDetail,
+            ["schema_confirm_job"] = report.SchemaConfirmJob,
+            ["schema_confirm_output"] = report.SchemaConfirmOutput,
+            ["schema_confirm_traces"] = new JsonArray([.. report.SchemaConfirmTraces.Select(trace => (JsonNode?)new JsonObject
+            {
+                ["kind"] = trace.Kind,
+                ["name"] = trace.Name,
+                ["image"] = trace.Image,
+                ["reason"] = trace.Reason,
+                ["draining"] = trace.Draining,
+            })]),
             ["stuck_release_recovery"] = report.Recovery,
             ["release_name_adopted_from_deploy"] = report.Adopted,
             ["verification_failed_after_helm_success"] = report.VerificationFailedAfterHelmSuccess,
@@ -1570,7 +2041,14 @@ static class Guard
 
         // A job that already failed stays failed. This exit code is what fails it when Helm said "success" but the
         // rollout verification disagreed, and it keeps every non-deployed outcome red in its own right.
-        return report.Outcome is Outcomes.Deployed or Outcomes.NotAttempted ? 0 : 1;
+        if (report.Outcome is not (Outcomes.Deployed or Outcomes.NotAttempted))
+        {
+            return 1;
+        }
+
+        // The release is serving and stays deployed, and nothing is rolled back. Red only so that a broken confirm is
+        // noticed instead of silently deferring the consumer's contract migrations forever. A blocked confirm is green.
+        return report.SchemaConfirm is SchemaConfirmOutcomes.Failed or SchemaConfirmOutcomes.TimedOut ? 1 : 0;
     }
 
     /*
@@ -1861,6 +2339,24 @@ static class SchemaOutcomes
     public const string TimedOut = "timed-out";
 }
 
+static class SchemaConfirmOutcomes
+{
+    public const string NotRun = "not-run";
+    public const string NotConfigured = "not-configured";
+    public const string NotFound = "not-found";
+    public const string Blocked = "blocked";
+    public const string Succeeded = "succeeded";
+    public const string Failed = "failed";
+    public const string TimedOut = "timed-out";
+}
+
+/*
+ * One object that keeps the schema confirm from running: kind and name, the image reference that gave it away (empty
+ * when the reason is not an image, e.g. a paused Deployment or a check that could not run), and why it counts.
+ * Draining: a terminating pod, or a ReplicaSet at 0 whose pods are still terminating; it goes away by itself.
+ */
+sealed record ReleaseTrace(string Kind, string Name, string Image, string Reason, bool Draining = false);
+
 sealed class GuardInputException(string message) : Exception(message);
 
 sealed record ProcessResult(int ExitCode, string Stdout, string Stderr);
@@ -2085,6 +2581,19 @@ sealed class Report
     /** Closing lines of the schema rollback Job's log: what the consumer's hook said it did. Empty when it never ran. */
     public string SchemaRollbackOutput { get; set; } = string.Empty;
 
+    // not-run | not-configured | not-found | blocked | succeeded | failed | timed-out
+    public string SchemaConfirm { get; set; } = SchemaConfirmOutcomes.NotRun;
+
+    public string SchemaConfirmDetail { get; set; } = string.Empty;
+
+    public string SchemaConfirmJob { get; set; } = string.Empty;
+
+    /** Closing lines of the schema confirm Job's log. Empty when it never ran. */
+    public string SchemaConfirmOutput { get; set; } = string.Empty;
+
+    /** What blocked the confirm: objects that still carry an older release's images. Names and images only. */
+    public List<ReleaseTrace> SchemaConfirmTraces { get; } = [];
+
     public string Recovery { get; set; } = "none";
 
     public bool Adopted { get; set; }
@@ -2142,6 +2651,7 @@ sealed record Settings(
     bool RollbackOnFailure,
     bool Exclusive,
     string SchemaRollbackCronJob,
+    string SchemaConfirmCronJob,
     string ReportDirectory,
     string StatePath,
     string ShimRecordPath,
@@ -2177,6 +2687,13 @@ sealed record Settings(
             throw new GuardInputException($"schema-rollback-cronjob '{cronJob}' is not a valid CronJob name.");
         }
 
+        // Unset or empty disables the confirm, the same semantics as the rollback hook; the action defaults it.
+        var confirmCronJob = Optional("DEPLOY_GUARD_SCHEMA_CONFIRM_CRONJOB");
+        if (confirmCronJob.Length > 0 && (!Regex.IsMatch(confirmCronJob, @"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$") || confirmCronJob.Length > 52))
+        {
+            throw new GuardInputException($"schema-confirm-cronjob '{confirmCronJob}' is not a valid CronJob name.");
+        }
+
         var timeoutText = Optional("DEPLOY_GUARD_ROLLOUT_TIMEOUT");
         if (timeoutText.Length == 0)
         {
@@ -2204,6 +2721,7 @@ sealed record Settings(
             // Opt-in, unlike the rollback: only an explicit "true" accepts the downtime.
             Exclusive: string.Equals(Optional("DEPLOY_GUARD_EXCLUSIVE"), "true", StringComparison.OrdinalIgnoreCase),
             SchemaRollbackCronJob: cronJob,
+            SchemaConfirmCronJob: confirmCronJob,
             ReportDirectory: reportDirectory,
             StatePath: Path.Combine(reportDirectory, "release-state.json"),
             ShimRecordPath: Optional("DEPLOY_GUARD_SHIM_RECORD"),

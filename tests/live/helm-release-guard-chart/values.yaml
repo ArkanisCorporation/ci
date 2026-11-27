@@ -4,3 +4,4 @@ ready: true
 hookShape: true
 schemaExit: 0
 schemaCronJob: true
+schemaConfirm: true

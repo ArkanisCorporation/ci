@@ -13,7 +13,9 @@
 #   The "deploy step" is `helm upgrade --install <release> <chart> --namespace <ns> --create-namespace --wait`
 #   through the shim on PATH: the argument shape `aspire deploy` uses. The guard is driven with the same
 #   environment contract as action.yml. EXCLUSIVE=true before `run` drives the guard in exclusive mode and asserts
-#   that no pod of the release exists any more when the deploy step starts.
+#   that no pod of the release exists any more when the deploy step starts. The chart's ordinary `schema-confirm`
+#   CronJob proves the confirm runs after a verified rollout, without ARKANIS_DEPLOY_STARTED_AT, never after a
+#   rollback, and is blocked by a zero-replica Deployment running an older image tag.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -48,7 +50,7 @@ guard() {
   (cd "$dir/workspace" && DEPLOY_GUARD_PHASE="$3" DEPLOY_GUARD_NAMESPACE="$2" DEPLOY_GUARD_ASPIRE_ENVIRONMENT=Proof \
     DEPLOY_GUARD_RELEASE_NAME="" DEPLOY_GUARD_ROLLOUT_TIMEOUT="$rollout_timeout" DEPLOY_GUARD_ROLLBACK_ON_FAILURE=true \
     DEPLOY_GUARD_EXCLUSIVE="${EXCLUSIVE:-false}" \
-    DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB=schema-rollback DEPLOY_GUARD_REPORT_DIR=artifacts/deploy-report \
+    DEPLOY_GUARD_SCHEMA_ROLLBACK_CRONJOB=schema-rollback DEPLOY_GUARD_SCHEMA_CONFIRM_CRONJOB=schema-confirm DEPLOY_GUARD_REPORT_DIR=artifacts/deploy-report \
     DEPLOY_GUARD_DEPLOY_OUTCOME="${4:-}" DEPLOY_GUARD_SHIM_RECORD="$dir/runner-temp/helm-shim/upgrade-record" \
     DEPLOY_GUARD_JOB_TIMEOUT_MINUTES=60 GITHUB_WORKSPACE="$dir/workspace" RUNNER_TEMP="$dir/runner-temp" \
     GITHUB_RUN_ID="$1" GITHUB_RUN_ATTEMPT=1 GITHUB_OUTPUT="$dir/output-$3.txt" GITHUB_STEP_SUMMARY="$dir/summary.md" \
@@ -72,7 +74,7 @@ run() {
   if [[ "$expected" == zero && "$code" != 0 ]] || [[ "$expected" == nonzero && "$code" == 0 ]]; then
     fail "$scenario: guard exit $code, expected $expected: $(tail -5 "$work/$scenario/finalize.log")"
   fi
-  echo "$scenario: outcome=$(output "$scenario" outcome) previous=$(output "$scenario" previous-revision) new=$(output "$scenario" new-revision) current=$(output "$scenario" current-revision) schema-rollback=$(output "$scenario" schema-rollback)"
+  echo "$scenario: outcome=$(output "$scenario" outcome) previous=$(output "$scenario" previous-revision) new=$(output "$scenario" new-revision) current=$(output "$scenario" current-revision) schema-rollback=$(output "$scenario" schema-rollback) schema-confirm=$(output "$scenario" schema-confirm)"
 }
 expect() { [[ "$(output "$1" "$2")" == "$3" ]] || fail "$1: $2 is '$(output "$1" "$2")', expected '$3'"; }
 marker() { kubectl get deployment web --namespace "$1" --output jsonpath='{.spec.template.spec.containers[0].env[0].value}'; }
@@ -93,9 +95,14 @@ grep -q 'ready=1' <<< "ready=$(kubectl get deployment web --namespace hook --out
 [[ -f "$work/broken/workspace/artifacts/deploy-report/diagnostics/before-rollback/helm-status.txt" ]] || fail "broken: diagnostics missing"
 if grep -rq "fixture-secret-literal-not-real\|fixture-env-literal\|Zml4dHVyZS1zZWNyZXQ" "$work/broken"; then fail "broken: Secret or environment values leaked into the report or logs"; fi
 
-# 3. A rolled-back release is not wedged.
+# 3. A rolled-back release is not wedged. The broken run never confirmed; this verified one does, without the deploy start.
+expect broken schema-confirm not-run
 run recover hook zero --set marker=v3
 expect recover outcome deployed
+expect recover schema-confirm succeeded
+grep -q "schema-confirm marker=v3 started_at=unset" "$work/recover/workspace/artifacts/deploy-report/diagnostics/schema-confirm/job-logs.txt" \
+  || fail "recover: the confirm Job did not run this release's CronJob without ARKANIS_DEPLOY_STARTED_AT"
+[[ -z "$(kubectl get jobs --namespace hook --selector arkanis.dev/deploy-guard=schema-confirm --output name)" ]] || fail "recover: the completed confirm Job was not deleted"
 
 # 4. Release left pending-upgrade by a killed helm is recovered before the next deploy.
 helm upgrade --install proof "$chart" --namespace hook --wait --timeout 60s --set marker=v4 --set ready=false > /dev/null 2>&1 &
@@ -151,5 +158,16 @@ rollback_line="$(grep -n '^\$ helm rollback' "$work/exclusivebroken/finalize.log
 [[ -n "$stop_line" && -n "$rollback_line" && "$stop_line" -lt "$rollback_line" ]] || fail "exclusivebroken: the failed release was not stopped before the rollback"
 [[ -n "$(output exclusivebroken downtime-ended-at)" ]] || fail "exclusivebroken: downtime did not end"
 grep -q "This deployment was exclusive: the service was down from" "$work/exclusivebroken/summary.md" || fail "exclusivebroken: summary does not state the downtime"
+
+# 10. A stray copy at an older image tag, scaled to 0, blocks the confirm; the deploy stays green and is not rolled back.
+kubectl create deployment stray --namespace plain --image=busybox:1.36.0 --replicas=0 > /dev/null
+run strayblocked plain zero --set marker=v4 --set hookShape=false
+expect strayblocked outcome deployed
+expect strayblocked schema-confirm blocked
+grep -q "Schema confirm blocked by Deployment/stray (busybox:1.36.0)" "$work/strayblocked/finalize.log" || fail "strayblocked: the warning does not name the stray Deployment"
+if grep -q '^\$ helm rollback' "$work/strayblocked/finalize.log"; then fail "strayblocked: a blocked confirm rolled back"; fi
+kubectl delete deployment stray --namespace plain > /dev/null
+run strayremoved plain zero --set marker=v5 --set hookShape=false
+expect strayremoved schema-confirm succeeded
 
 echo "Helm release guard live proof passed ($(helm version --short), $(kubectl version --output json 2> /dev/null | grep -o '"gitVersion": *"[^"]*"' | tail -1))."

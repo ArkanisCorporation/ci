@@ -2552,7 +2552,13 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
         AddFailure($"{workflowPath}: the deploy report and failure diagnostics (artifacts/deploy-report) must be uploaded and listed in the artifact manifest.");
     }
 
-    foreach (var output in new[] { "outcome", "helm-release", "previous-revision", "new-revision", "current-revision", "schema-rollback", "failed-resources" })
+    // The schema confirm (ARK-746) only exists after a deployment, so only the finalize step receives its CronJob name.
+    if (!guardStep.Contains("          schema-confirm-cronjob: ${{ inputs.schema-confirm-cronjob }}\n", StringComparison.Ordinal))
+    {
+        AddFailure($"{workflowPath}: the finalize helm-release-guard step must receive inputs.schema-confirm-cronjob.");
+    }
+
+    foreach (var output in new[] { "outcome", "helm-release", "previous-revision", "new-revision", "current-revision", "schema-rollback", "schema-confirm", "failed-resources" })
     {
         if (!workflowText.Contains($"        value: ${{{{ jobs.deploy.outputs.{output} }}}}\n", StringComparison.Ordinal))
         {
@@ -2567,6 +2573,7 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
                  ("rollback-on-failure", "boolean:true"),
                  ("rollout-timeout", "string:15m"),
                  ("schema-rollback-cronjob", "string:schema-rollback"),
+                 ("schema-confirm-cronjob", "string:schema-confirm"),
                  ("helm-release-name", "string:"),
              })
     {
@@ -2639,9 +2646,26 @@ void ValidateAspireDeployRollbackContract(string workflowPath, string workflowTe
             AddFailure($"{guardScriptPath}: on a failed deployment the guard must collect diagnostics, render the schema rollback Job, roll back, and only then run the Job, in that order.");
         }
 
-        if (!guardText.Contains("return report.Outcome is Outcomes.Deployed or Outcomes.NotAttempted ? 0 : 1;", StringComparison.Ordinal))
+        if (!guardText.Contains("if (report.Outcome is not (Outcomes.Deployed or Outcomes.NotAttempted))\n        {\n            return 1;\n        }", StringComparison.Ordinal)
+            || !guardText.Contains("return report.SchemaConfirm is SchemaConfirmOutcomes.Failed or SchemaConfirmOutcomes.TimedOut ? 1 : 0;", StringComparison.Ordinal))
         {
-            AddFailure($"{guardScriptPath}: the guard must exit non-zero for every outcome except deployed and not-attempted, so a failed deployment cannot end green.");
+            AddFailure($"{guardScriptPath}: the guard must exit non-zero for every outcome except deployed and not-attempted, so a failed deployment cannot end green, and for a failed or timed-out schema confirm.");
+        }
+
+        // Schema confirm (ARK-746): exactly one call, inside the verified-deployment branch, before any failure handling;
+        // and its Job never receives the deploy start, which is the rollback hook's contract alone.
+        var deployedOutcome = guardText.IndexOf("report.Outcome = Outcomes.Deployed;", StringComparison.Ordinal);
+        var confirmCall = guardText.IndexOf("RunSchemaConfirm(settings, report, release, ns);", StringComparison.Ordinal);
+        var verificationFailure = guardText.IndexOf("Helm reported success but these Deployments are not rolled out", StringComparison.Ordinal);
+        var confirmMethod = guardText.IndexOf("static void RunSchemaConfirm(Settings settings, Report report, string release, string ns)", StringComparison.Ordinal);
+        var confirmMethodEnd = confirmMethod < 0 ? -1 : guardText.IndexOf("\n    static ", confirmMethod + 1, StringComparison.Ordinal);
+        if (Regex.Count(guardText, @"RunSchemaConfirm\(settings, report, release, ns\);") != 1
+            || !(finalizeStart < deployedOutcome && deployedOutcome < confirmCall && confirmCall < verificationFailure)
+            || confirmMethod < 0 || confirmMethodEnd < 0
+            || guardText[confirmMethod..confirmMethodEnd].Contains("InjectDeployStartedAt", StringComparison.Ordinal)
+            || !guardText.Contains("FindOlderReleaseTraces(release, ns, out var checkError);", StringComparison.Ordinal))
+        {
+            AddFailure($"{guardScriptPath}: the schema confirm must run once, only after a verified deployment, after the trace check, and without ARKANIS_DEPLOY_STARTED_AT.");
         }
 
         if (Regex.IsMatch(guardText, @"""(secret|secrets)""") || Regex.IsMatch(guardText, @"""helm"",\s*\[\s*""get"",\s*""(?!metadata"")") || guardText.Contains("\"--output\", \"yaml\"", StringComparison.Ordinal))

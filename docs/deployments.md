@@ -48,7 +48,8 @@ flowchart TD
   stuck -->|no| deploy[[aspire deploy, helm shim adds --timeout]]
   recover --> deploy
   deploy -->|success| verify{Deployments rolled out?}
-  verify -->|yes| deployed(("deployed"))
+  verify -->|yes| confirm[[Schema confirm hook, see below]]
+  confirm --> deployed(("deployed"))
   verify -->|no| changed
   deploy -->|failure| changed{Helm created a revision?}
   changed -->|no| unchanged(("failed-release-unchanged"))
@@ -77,6 +78,7 @@ flowchart TD
 | Roll back | deploy failed | `helm rollback <release> <revision> --wait --timeout <rollout-timeout>`. Skipped when Helm never created a revision, on a first install, or when `rollback-on-failure` is `false`. |
 | Schema hook | rollback succeeded | Runs the consumer's `schema-rollback` Job. See below. |
 | Re-verify | after rollback | `kubectl rollout status` again. |
+| Schema confirm | rollout verified | Runs the consumer's `schema-confirm` Job when nothing of an older release is left. See [Schema confirm hook](#schema-confirm-hook). |
 
 The job ends **failed** whenever the deployment failed, including when the rollback restored everything.
 The step summary, the workflow outputs, and `artifacts/deploy-report/deploy-report.json` in the deploy artifact carry:
@@ -100,6 +102,7 @@ The step summary, the workflow outputs, and `artifacts/deploy-report/deploy-repo
 | `not-attempted` | An earlier step failed, or the release could not be read before the deploy (cluster or Helm unreachable). The summary repeats Helm's error. | untouched |
 
 The `schema-rollback` output separates a failed Helm rollback from a failed schema hook: `succeeded`, `failed`, `timed-out`, `skipped`, `not-found`, `not-configured`, or `not-run`.
+The `schema-confirm` output reports the [schema confirm hook](#schema-confirm-hook). A failed or timed-out confirm is the one case where the job fails while the outcome is `deployed`.
 
 ### Consumer contract
 
@@ -184,6 +187,83 @@ A CronJob with the same uid and the same generation still belongs to the previou
 The guard finds the CronJob by name: Helm does not put `meta.helm.sh/release-name` on hook resources, only on ordinary ones.
 A failed or timed-out Job raises an error, sets `schema-rollback` to `failed` or `timed-out`, and makes the outcome `rollback-failed`: workloads are back, the database is not.
 
+### Schema confirm hook
+
+Last verified: 2026-11-26 against the Kubernetes Job reference (`Complete` and `Failed` are the only terminal conditions, `activeDeadlineSeconds` bounds the whole Job including retries, a suspended Job is not finished) and the Pod lifecycle reference (`Succeeded` and `Failed` phases).
+
+Convention: a suspended CronJob named `schema-confirm` (input `schema-confirm-cronjob`, empty disables it), an **ordinary** chart resource, whose Job records "this release's rollout was verified".
+A consumer that defers contract migrations (expand now, contract only once the previous release can no longer run) uses that record to know the previous release is gone (ARK-746).
+It must exit 0 on success, including when there is nothing to confirm, and bound itself with `activeDeadlineSeconds`.
+An ordinary resource on purpose: `helm rollback` returns it to the previous release with the Deployments, so a stray confirm can never vouch for a release that is not serving.
+
+It runs only when the outcome is `deployed`: the deploy step succeeded and the guard verified every rollout itself.
+Never after a rollback, a failure, a cancel, a deploy that did not start, or a deploy whose rollout only Helm's wait vouched for.
+
+> Diagram: the decisions between a verified rollout and the `schema-confirm` output.
+
+<details>
+<summary>Schema confirm decision flow</summary>
+
+```mermaid
+flowchart TD
+  verified(["Outcome deployed, rollout verified by the guard"]) --> configured{schema-confirm-cronjob set?}
+  configured -->|no| notConfigured(("not-configured"))
+  configured -->|yes| exists{CronJob exists?}
+  exists -->|no| notFound(("not-found"))
+  exists -->|"read failed"| blocked(("blocked: warning, job green"))
+  exists -->|yes| inspect{Namespace inspected?}
+  inspect -->|"no: RBAC, API error, no release images"| blocked
+  inspect -->|yes| traces{Trace of an older release?}
+  traces -->|"yes, one not draining"| blocked
+  traces -->|"yes, all draining"| settle[[Re-check every poll, up to min of rollout-timeout and 3m]]
+  settle -->|"clean"| job
+  settle -->|"still draining at the bound, or a non-draining trace"| blocked
+  traces -->|no| job[[Create Job from CronJob, wait up to the rest of rollout-timeout, at most 10m]]
+  job -->|Complete| succeeded(("succeeded, Job deleted"))
+  job -->|Failed| failed(("failed: error, job red, still deployed"))
+  job -->|no result in time| timedOut(("timed-out: error, job red, still deployed"))
+```
+
+</details>
+
+**The trace check.** One `kubectl get deployments,statefulsets,daemonsets,replicasets,cronjobs,jobs,pods -o json` in the namespace, parsed in memory and never written out.
+
+1. The release's images: every container, init container and ephemeral container image of every Deployment, StatefulSet, DaemonSet, CronJob and Job carrying the release's `meta.helm.sh/release-name` annotation, grouped by repository. Read from the live objects, not from `helm get manifest`, which the guard never reads; after a verified rollout the live objects are the current revision.
+2. A trace is an object in the namespace that names one of those repositories at a tag or digest the release itself does not use for that repository:
+
+| Object | Counts when |
+|---|---|
+| Deployment, StatefulSet, DaemonSet | always, whatever its replica count: a zero-scaled stray copy is one `kubectl scale` away from running old code |
+| CronJob | always, suspended or not |
+| ReplicaSet | `spec.replicas` or `status.replicas` above 0 |
+| Job | not finished (no `Complete` or `Failed` condition): running, pending, or suspended |
+| Pod | phase is neither `Succeeded` nor `Failed`; terminating pods count |
+
+3. Every **paused** Deployment of the release is a trace too, whatever its images: resuming or scaling it can bring its previous ReplicaSet back.
+
+Not traces: ReplicaSets at 0 replicas (revision history, `revisionHistoryLimit`), completed and failed pods, finished Jobs, and images from repositories the release does not use.
+
+**Settle period for draining traces.** A Deployment rollout is complete as soon as the old ReplicaSet is scaled to 0, while its pods still terminate for up to their grace period (30 seconds by default): phase `Running` with `metadata.deletionTimestamp` set, and the ReplicaSet briefly at `spec.replicas` 0 with `status.replicas` above 0.
+Those are traces, old code still runs, but deciding at once would block nearly every rolling deploy.
+When **every** trace is draining (terminating pods, and ReplicaSets at `spec.replicas` 0 with `status.replicas` above 0), the guard re-runs the check every few seconds until the namespace is clean, a non-draining trace appears, or `min(rollout-timeout, 3m)` has passed; it logs one line when the wait starts and one when it ends.
+Clean runs the Job; anything else is `blocked`, naming what was still draining. A trace that is not draining blocks immediately, without waiting.
+Three minutes is six default grace periods. Settle and Job wait share `rollout-timeout`: the Job waits for what the settle period left, at most ten minutes, with a floor of 30 seconds (or `rollout-timeout` when that is smaller). With the default `15m` that is at most 3 + 10 minutes, inside the rollout-timeout share the success path never spends on a rollback.
+Refinement: the comparison is per repository against the **set** of references the release uses, not one tag. A chart that runs the same third-party image at two tags in two workloads (say `redis:7` and `redis:6`) has no older release in it.
+Repositories are normalised the way the runtime resolves them (`redis` is `docker.io/library/redis`); a missing tag means `:latest`. Tag and digest are compared as written, so the same build named once by tag and once by digest blocks the confirm: a false block is cheap, a false confirm is not.
+
+**Blocked** (`schema-confirm: blocked`): a trace, a CronJob that could not be read, a namespace that could not be inspected (RBAC forbidden, API error, timeout), no workload carrying the release annotation, or a rollout the guard did not verify itself.
+The guard never confirms on missing evidence.
+It emits one `::warning::` with the reason and one per offending object (kind/name, image, why), lists them in the summary and in `deploy-report.json` (`schema_confirm_traces`), and the job **stays green**: the release is healthy, its contract migrations just stay deferred until a later deployment confirms. Nothing is rolled back.
+
+**The Job.** Rendered with `kubectl create job <cronjob>-<run id>-<attempt> --from=cronjob/schema-confirm --dry-run=client`, labelled `arkanis.dev/deploy-guard=schema-confirm`, given `ttlSecondsAfterFinished` as a backstop, created, and awaited for what remains of `rollout-timeout` after the settle period, at most 10 minutes.
+Ten minutes is twice a 300 second `activeDeadlineSeconds` (which covers the Job's retries too) and leaves room for an image pull; the success path never spends the `rollout-timeout` the job budget reserves for a rollback, so the wait cannot push a good deploy into `timeout-minutes`.
+Unlike the rollback Job it keeps the owner reference kubectl gives it and does **not** receive `ARKANIS_DEPLOY_STARTED_AT`.
+Its log goes into the run log and `diagnostics/schema-confirm`, and its last lines into the summary and `schema_confirm_output`. A completed Job is deleted; a failed or still-running one stays in the cluster.
+
+**Failed or timed out** (`failed`, `timed-out`): an `::error::` annotation and a red job, but the outcome stays `deployed` and nothing is rolled back: the release is serving and healthy. Red only so that a broken confirm is noticed instead of silently deferring contracts forever. Outputs, summary, report and the artifact upload are written as usual; the guard exits non-zero only after publishing them.
+
+The decision rests on the last check. A stray object created between that check and the Job, or one in another namespace, is not seen.
+
 ### Failure modes
 
 | Symptom | Likely cause | How to confirm | Fix | Prevention |
@@ -194,6 +274,9 @@ A failed or timed-out Job raises an error, sets `schema-rollback` to `failed` or
 | Deploy green but pods crash later | Probes report ready before the app works. | Pod restarts after the rollout. | Add a startup probe that reflects real readiness. | Probe contract above. |
 | Schema hook `skipped`, "not changed by this deployment" | The CronJob is an ordinary chart resource and its spec is identical to the previous release's, the upgrade failed before applying it, or the deploy ran with `--no-hooks`. | `kubectl get cronjob schema-rollback -o jsonpath='{.metadata.uid}/{.metadata.generation}'` before and after. | Ship it as a `pre-install,pre-upgrade` hook with `before-hook-creation`. | Same. |
 | `cancelled`, release left `pending-upgrade` | Job timeout or manual cancel during the Helm wait. | `helm status <release> -n <ns>`. | Rerun; the next run recovers the release before deploying. | Raise `timeout-minutes`. |
+| `schema-confirm: blocked`, "still carry an older release's images" | A stray object of an older release is left: a copied Deployment, a paused Deployment, a ReplicaSet with replicas, a running old pod or Job, an old CronJob. | The warnings and the summary name each object and image. | Delete or update the object; the next deployment confirms. | Do not run hand-made copies of release workloads in the namespace. |
+| `schema-confirm: blocked`, "could not be inspected" | The deploy identity cannot list one of the kinds the trace check reads. | The warning carries kubectl's error. | Grant `get` and `list` on those kinds ([Auth](#auth)). | Same. |
+| `schema-confirm: failed` or `timed-out`, job red, outcome `deployed` | The consumer's confirm Job failed or did not finish. | `diagnostics/schema-confirm/job-logs.txt`; the Job stays in the cluster. | Fix the hook and redeploy. Nothing needs restoring: the release is serving. | Keep the hook idempotent and its deadline under ten minutes. |
 | `failed-exclusive-stop`, "These pods still exist after ..." | A pod of the release does not terminate within `rollout-timeout`: long `terminationGracePeriodSeconds`, a finalizer, an unreachable node. | The capture log names the pods; `kubectl get pods -n <ns> -o wide`. | Fix the pod, rerun. The replica counts were restored. | Keep the grace period well below `rollout-timeout`. |
 | Migrator refuses to start, "breaking migration" | A breaking migration in a rolling deploy. | The migrator log in `diagnostics/before-rollback/logs`. | The rollback restored the previous release. Redeploy with `exclusive: true`, or split the change into expand and contract releases. | Plan schema changes as expand/contract (ARK-746). |
 | `cancelled` during an exclusive deploy, workloads at 0 replicas | The run was cancelled after Helm started the upgrade. | `kubectl get deployments -n <ns>` shows `0/0`. | Rerun: the next run recovers a pending release, and Helm re-applies the replica counts. A cancel before Helm ran is restored in the same run. | Raise `timeout-minutes`. |
@@ -293,6 +376,7 @@ DaemonSets cannot be scaled, and Jobs and CronJobs are not long-running servers.
 
 The deploy identity needs, in the target namespace: read on Deployments, StatefulSets, DaemonSets, Jobs, ReplicaSets, Pods, pod logs, Events, and CronJobs; create, get, and delete on Jobs; and whatever Helm needs to apply and roll back the chart, including its release Secrets.
 Exclusive deployments also need `get` and `patch` on `deployments/scale`.
+The schema confirm's trace check needs `get` and `list` on Deployments, StatefulSets, DaemonSets, ReplicaSets, CronJobs, Jobs, and Pods; its Job needs `create`, `get`, and `delete` on Jobs and `get` on pod logs, the same as the schema rollback Job. A missing permission blocks the confirm; it never fails the deployment.
 
 ## Concurrency
 

@@ -20,6 +20,11 @@ Release recording, rollback, diagnostics, and the schema rollback hook around a 
 - Record the deployment start first in the capture phase and inject it as `ARKANIS_DEPLOY_STARTED_AT` (constant `DeployStartedAtVariable`, RFC 3339 UTC, second precision) into every container and init container of the schema Job, replacing a chart entry of that name. Consumers rely on it to leave earlier deploys' schema changes alone; never run the Job without it.
 - Keep the rendered Job manifest under `RUNNER_TEMP`, out of the uploaded report.
 - No NuGet package references in `helm-release-guard.cs`: a rollback must not wait on a package restore.
+- The schema confirm (ARK-746) runs only in the `deployed` branch of finalize, after the guard verified the rollout itself. Never after a rollback, a failure, a cancel, or `not-attempted`.
+- Never confirm on missing evidence: a CronJob read that fails, a namespace that cannot be listed, no release images, or any trace of an older release is `blocked` (warning, green). A failed or timed-out confirm Job is red, but the outcome stays `deployed` and nothing is rolled back.
+- The trace rule compares per repository against the set of references the release's own workloads use; keep it in `FindOlderReleaseTraces` and documented in `docs/deployments.md#schema-confirm-hook`.
+- Draining traces (terminating pods, ReplicaSets at `spec.replicas` 0 with `status.replicas` above 0) get a settle period of `min(rollout-timeout, 3m)`, re-checked every poll; a non-draining trace blocks immediately. Settle plus the confirm Job wait stay within `rollout-timeout`.
+- Never inject `ARKANIS_DEPLOY_STARTED_AT` into the schema confirm Job.
 - Bound every Helm and kubectl call and every wait.
 - No destructive recovery by guesswork: a stuck first install stops the job, it is not uninstalled.
 - Every decision change needs a scenario in `tests/helm-release-guard.cs`. Its fake `helm list`, `helm history`, and kubectl JSON mirror real Helm 4.3.1 output; re-check them with `tests/live/helm-release-guard-kind.sh` (opt-in, needs kind) when Helm is bumped.

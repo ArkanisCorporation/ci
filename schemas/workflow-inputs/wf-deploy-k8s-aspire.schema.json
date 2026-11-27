@@ -100,6 +100,11 @@
       "default": "schema-rollback",
       "description": "Suspended CronJob in the chart, as a Helm pre-install,pre-upgrade hook or an ordinary resource, whose Job undoes the failed release's schema changes after a rollback. Skipped when absent; empty disables it."
     },
+    "schema-confirm-cronjob": {
+      "type": "string",
+      "default": "schema-confirm",
+      "description": "Suspended CronJob in the chart whose Job records that this release's rollout was verified, run only after a verified deployment once no object in the namespace carries an older release's images. Skipped when absent; empty disables it."
+    },
     "timeout-minutes": {
       "type": "integer",
       "default": 60,
