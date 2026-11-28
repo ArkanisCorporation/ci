@@ -51,6 +51,7 @@ ValidatePrivateNuGetCredentialContract();
 ValidatePrivateSubmoduleCheckoutContract();
 ValidateNuGetPackSymbolContract();
 ValidateCoverageReportContract();
+ValidateDotNetToolRollForwardContract();
 await ValidateDotNetTestPlatformInvocationContractAsync();
 ValidateGeneratedCodeContract();
 ValidateWorkflowLintContract();
@@ -770,6 +771,63 @@ void ValidateDotNetJetBrainsContract()
             {
                 AddFailure($"{actionScriptPath}: dotnet-jetbrains-cleanupcode script must contain {requiredToken}.");
             }
+        }
+    }
+}
+
+/// <summary>
+/// Rejects <c>--allow-roll-forward</c> in .NET tool installs anywhere in actions or workflows.
+/// </summary>
+/// <remarks>
+/// The flag rewrites the installed tool's own runtimeconfig <c>rollForward</c> policy. It broke
+/// ReportGenerator (legacy roll-forward settings) and JetBrains CleanupCode, where <c>Major</c> plus a
+/// four-part framework version started a net10.0 tool on an installed 8.0 runtime (ARK-745).
+/// Comment lines are skipped so the reason can be documented next to an install.
+/// </remarks>
+void ValidateDotNetToolRollForwardContract()
+{
+    string[] extensions = [".yml", ".yaml", ".cs", ".sh", ".ps1"];
+    foreach (var root in new[] { Path.Combine(repoRoot, ".github", "actions"), Path.Combine(repoRoot, ".github", "workflows") })
+    {
+        if (!Directory.Exists(root))
+        {
+            continue;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                     .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                     .Order(StringComparer.Ordinal))
+        {
+            var lines = File.ReadAllLines(file);
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var trimmed = lines[index].TrimStart();
+                if (trimmed.StartsWith('#') || trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith('*'))
+                {
+                    continue;
+                }
+
+                if (lines[index].Contains("--allow-roll-forward", StringComparison.Ordinal))
+                {
+                    AddFailure($"{file}:{index + 1}: do not install .NET tools with --allow-roll-forward; it rewrites the tool's rollForward policy (ARK-745). Set up a runtime the tool targets instead.");
+                }
+            }
+        }
+    }
+
+    // dotnet-setversion ships no build newer than net10.0 and sets no rollForward, so its actions
+    // must set up a 10.0 tool runtime next to the caller's SDK. Without it, a caller on a newer
+    // major gets "You must install or update .NET" on a runner with no preinstalled 10.0 (ARK-745).
+    foreach (var (relativePath, token) in new[]
+             {
+                 (".github/actions/dotnet-setversion/action.yml", "          10.0.x\n          ${{ inputs.dotnet-version }}"),
+                 (".github/actions/dotnet-pack-nuget/action.yml", "          ${{ inputs.dotnet-setversion == 'true' && '10.0.x' || '' }}\n          ${{ inputs.dotnet-version }}")
+             })
+    {
+        var actionPath = Path.Combine(repoRoot, relativePath);
+        if (File.Exists(actionPath) && !File.ReadAllText(actionPath).ReplaceLineEndings("\n").Contains(token, StringComparison.Ordinal))
+        {
+            AddFailure($"{actionPath}: setup-dotnet must list the 10.0.x dotnet-setversion tool runtime next to the caller's dotnet-version (ARK-745).");
         }
     }
 }
@@ -1576,11 +1634,6 @@ void ValidateCoverageReportContract()
             {
                 AddFailure($"{scriptPath}: dotnet-coverage-report script must contain {requiredToken}.");
             }
-        }
-
-        if (scriptText.Contains("--allow-roll-forward", StringComparison.Ordinal))
-        {
-            AddFailure($"{scriptPath}: dotnet-coverage-report must not install ReportGenerator with --allow-roll-forward because ReportGenerator runtimeconfig already uses legacy roll-forward settings.");
         }
     }
 }
